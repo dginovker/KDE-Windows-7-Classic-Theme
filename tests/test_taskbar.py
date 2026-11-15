@@ -70,9 +70,7 @@ def main():
         old.unlink()
     vmctl.start(VM)
     install()
-    user('pkill -u tester -x kate; pkill -u tester -x kdialog; pkill -u tester -x konsole; pkill -f ^counter-loop; '
-         'pkill -u tester -x dolphin; pkill -u tester firefox; rm -rf ~/Classic-demo; '
-         'mkdir -p ~/Classic-demo/{Documents,Downloads,Music,Pictures,Projects}; true')
+    user('rm -rf ~/Classic-demo; mkdir -p ~/Classic-demo/{Documents,Downloads,Music,Pictures,Projects}')
     toggle('windows')
     user('systemd-run --user --collect -q dolphin --new-window ~/Classic-demo')
     wait_for(lambda: dolphin() is not None, 'Dolphin window')

@@ -2,8 +2,8 @@
 # Runs as root inside the disposable lab VM: a fresh account gives every test stock Plasma defaults.
 set -euo pipefail
 test "$(cat /etc/win7-classic-spike-vm)" = 98acba08-0f6d-4fa8-a952-d5fd20342910
-pacman -S --needed --noconfirm kdialog >/dev/null 2>&1
-pacman -Q plasma-desktop kwin kate konsole dolphin kdialog qemu-guest-agent >/dev/null
+pacman -S --needed --noconfirm kdialog pyside6 gtk3-demos >/dev/null 2>&1
+pacman -Q plasma-desktop kwin kate konsole dolphin kdialog pyside6 gtk3-demos qemu-guest-agent >/dev/null
 if id tester >/dev/null 2>&1; then
     systemctl stop sddm
     loginctl terminate-user tester 2>/dev/null || true

@@ -109,6 +109,12 @@ def pointer(vm, x, y, button=None):
         time.sleep(0.12)
 
 
+def button(vm, name, down):
+    """Press or release a mouse button without moving, e.g. to capture a pressed state."""
+    virsh('qemu-monitor-command', vm, json.dumps({'execute': 'input-send-event', 'arguments': {'events': [{'type': 'btn', 'data': {'button': name, 'down': down}}]}}))
+    time.sleep(0.12)
+
+
 SHIFTED = dict(zip(':"_+()!@#$%^&*{}|?<>~', ['SEMICOLON', 'APOSTROPHE', 'MINUS', 'EQUAL', '9', '0', '1', '2', '3', '4', '5', '6', '7', '8', 'LEFTBRACE', 'RIGHTBRACE', 'BACKSLASH', 'SLASH', 'COMMA', 'DOT', 'GRAVE']))
 PLAIN = dict(zip(' .,/\\;\'-=[]`\n', ['SPACE', 'DOT', 'COMMA', 'SLASH', 'BACKSLASH', 'SEMICOLON', 'APOSTROPHE', 'MINUS', 'EQUAL', 'LEFTBRACE', 'RIGHTBRACE', 'GRAVE', 'ENTER']))
 

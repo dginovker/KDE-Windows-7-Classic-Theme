@@ -7,7 +7,7 @@ FILES=(plasma-org.kde.plasma.desktop-appletsrc plasmashellrc plasmarc)
 config=${XDG_CONFIG_HOME:-$HOME/.config}
 state=${XDG_STATE_HOME:-$HOME/.local/state}/win7-classic
 share=$(dirname "$(readlink -f "$0")")
-[[ -d $share/windows ]] || share=${XDG_DATA_HOME:-$HOME/.local/share}/win7-classic
+[[ -d $share/windows ]] || { echo "win7-classic: $share/windows is missing; reinstall" >&2; exit 1; }
 mkdir -p "$state/profiles"
 
 log() { printf '%s %s\n' "$(date -Is)" "$*" | tee -a "$state/switch.log" >&2; }
@@ -38,6 +38,22 @@ unknown_widgets() {
 }
 
 # Mirror, not merge: a file the source mode never had (e.g. no plasmarc) must not leak in from the other mode.
+# kdeglobals/kwinrc also hold non-appearance settings, so only the keys named in windows/keys are swapped per mode.
+save_keys() { "$share/kconfig-keys" save "$share/windows/keys" "$config" "$1/keys.json"; }
+load_keys() {
+    local file changed
+    while IFS=$'\t' read -r file changed; do
+        gdbus emit --session --object-path "/$file" --signal org.kde.kconfig.notify.ConfigChanged "$changed" >/dev/null
+    done < <("$share/kconfig-keys" load "$1" "$config")
+    # Running Qt apps (KWin included) re-read palette (0), fonts (1) and widget style (2) from kdeglobals on these
+    # signals; fonts also need refreshFonts. KWin's reconfigure must come after so its title bar picks up the new font.
+    for change in 0 1 2; do
+        dbus-send --session --type=signal /KGlobalSettings org.kde.KGlobalSettings.notifyChange int32:$change int32:0
+    done
+    dbus-send --session --type=signal /KDEPlatformTheme org.kde.KDEPlatformTheme.refreshFonts
+    qdbus6 org.kde.KWin /KWin reconfigure
+}
+
 copy_files() { for f in "${FILES[@]}"; do if [[ -e $1/$f ]]; then cp -p "$1/$f" "$2/$f"; else rm -f "$2/$f"; fi; done; }
 
 switch_to() {
@@ -48,16 +64,19 @@ switch_to() {
     stop_shell
     rm -rf "$state/profiles/$from.new" && mkdir "$state/profiles/$from.new"
     copy_files "$config" "$state/profiles/$from.new"
+    save_keys "$state/profiles/$from.new"
     rm -rf "$state/profiles/$from" && mv "$state/profiles/$from.new" "$state/profiles/$from"
-    log "saved $from: $(digest "$state/profiles/$from")"
+    log "saved $from: $(digest "$state/profiles/$from") $(cd "$state/profiles/$from" && sha256sum keys.json)"
 
     local seed=0
     if [[ -d $state/profiles/$target ]]; then
         copy_files "$state/profiles/$target" "$config"
+        load_keys "$state/profiles/$target/keys.json"
     else
         # First use of a mode: start from its shipped config files (e.g. the panel theme), then run its layout script.
         seed=1
         for f in "${FILES[@]}"; do [[ ! -e $share/$target/$f ]] || cp "$share/$target/$f" "$config/$f"; done
+        load_keys "$share/$target/keys"
     fi
     local problem=""
     if ! start_shell; then
@@ -70,6 +89,7 @@ switch_to() {
         log "rolling back to $from: $problem"
         stop_shell
         copy_files "$state/profiles/$from" "$config"
+        load_keys "$state/profiles/$from/keys.json"
         start_shell || die "rollback could not start plasmashell; run: win7-classic restore"
         die "switch to $target failed ($problem); still in $from mode"
     fi
@@ -85,7 +105,9 @@ restore() {
     # Keep whatever was live, in case it held edits worth recovering.
     rm -rf "$state/profiles/before-restore" && mkdir "$state/profiles/before-restore"
     copy_files "$config" "$state/profiles/before-restore"
+    save_keys "$state/profiles/before-restore"
     copy_files "$state/profiles/current" "$config"
+    load_keys "$state/profiles/current/keys.json"
     echo current > "$state/mode"
     start_shell || die "plasmashell did not start after restore"
     log "restored current: $(digest "$config")"

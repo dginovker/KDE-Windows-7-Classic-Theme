@@ -76,6 +76,20 @@ def differing_pixels(a, b, scene='*'):
     return sum(1 for v in diff.convert('L').get_flattened_data() if v), diff.getbbox()
 
 
+def pressed(x, y):
+    """Hold the left button on (x, y); the scene's cleanup moves away before releasing so nothing activates."""
+    vmctl.pointer(VM, x, y)
+    vmctl.button(VM, 'left', True)
+    time.sleep(1)
+
+
+def maximized():
+    fixture((640, 790))
+    vmctl.pointer(VM, 993, 132, 'left')  # the fixture's Maximize button
+    time.sleep(2)
+    vmctl.pointer(VM, 640, 600)
+
+
 SCENES = {
     # w7-explorer.png also shows Start's keyboard-focus rectangle; recaptures lack it (60 pixels).
     'explorer': lambda: (fixture((849, 419)), vmctl.pointer(VM, 849, 419, 'left')),
@@ -84,6 +98,11 @@ SCENES = {
     'menu': start_menu,
     'programs': all_programs,
     'search': search,
+    # Close button held down on the active fixture window (taskbar scene geometry).
+    'close-pressed': lambda: (fixture((849, 419)), vmctl.pointer(VM, 849, 419, 'left'), pressed(1009, 132)),
+    'maximized': maximized,
+    # Same window after clicking the desktop, so its title bar is inactive.
+    'inactive': lambda: (fixture((849, 419)), vmctl.pointer(VM, 849, 419, 'left'), vmctl.pointer(VM, 120, 420, 'left'), vmctl.pointer(VM, 640, 790)),
     'calendar': lambda: tray_popup(1229),
     'volume': lambda: tray_popup(1187, 777),
 }
@@ -100,7 +119,11 @@ def main():
     vmctl.start(VM)
     SCENES[a.scene]()
     vmctl.virsh('screenshot', VM, str(out))
+    vmctl.pointer(VM, 640, 600)
+    vmctl.button(VM, 'left', False)
     vmctl.keys(VM, 'KEY_ESC')
+    if a.scene == 'maximized':
+        vmctl.pointer(VM, 1249, 8, 'left')  # Restore, so later scenes start from the normal fixture
     print(out)
     if a.check:
         count, box = differing_pixels(reference, out, a.scene)

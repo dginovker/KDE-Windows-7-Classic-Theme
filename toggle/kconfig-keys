@@ -1,0 +1,91 @@
+#!/usr/bin/env python3
+"""Save or set the KConfig keys a mode owns, leaving every other line of the file untouched.
+
+  kconfig-keys save PATCHDIR CONFIGDIR OUT.json   # record CONFIGDIR's values for every key named in PATCHDIR's files
+  kconfig-keys load SOURCE CONFIGDIR              # SOURCE is a saved .json or a PATCHDIR; absent (null) keys are deleted
+
+load prints one "FILE<TAB>GVARIANT" line per file, the a{saay} payload KConfigWatcher expects in
+org.kde.kconfig.notify.ConfigChanged, so the caller can tell running apps which keys changed.
+
+A PATCHDIR holds files named like the config they patch (kdeglobals, kwinrc), in KConfig syntax.
+Values are copied as raw text, so KConfig escaping round-trips unchanged.
+"""
+import json
+import os
+from pathlib import Path
+import sys
+import tempfile
+
+
+def parse(path):
+    """{group: {key: value}} for a KConfig file; group is the header text, e.g. "[Colors:View]"."""
+    groups, group = {}, None
+    for line in path.read_text().splitlines():
+        if line.startswith('['):
+            group = line.strip()
+            groups.setdefault(group, {})
+        elif '=' in line and group and not line.startswith('#'):
+            key, value = line.split('=', 1)
+            groups[group][key] = value
+    return groups
+
+
+def read_patch(patchdir):
+    return {f.name: parse(f) for f in sorted(Path(patchdir).iterdir()) if f.is_file()}
+
+
+def save(patchdir, configdir, out):
+    snapshot = {}
+    for name, groups in read_patch(patchdir).items():
+        live = parse(Path(configdir) / name) if (Path(configdir) / name).exists() else {}
+        snapshot[name] = {g: {k: live.get(g, {}).get(k) for k in keys} for g, keys in groups.items()}
+    Path(out).write_text(json.dumps(snapshot, indent=1, sort_keys=True) + '\n')
+
+
+def set_keys(path, groups):
+    lines = path.read_text().splitlines() if path.exists() else []
+    for group, keys in groups.items():
+        for key, value in keys.items():
+            start = next((i for i, l in enumerate(lines) if l.strip() == group), None)
+            if start is None:
+                if value is not None:
+                    lines += ([''] if lines and lines[-1] else []) + [group, f'{key}={value}']
+                continue
+            end = next((i for i in range(start + 1, len(lines)) if lines[i].startswith('[')), len(lines))
+            at = next((i for i in range(start + 1, end) if lines[i].split('=', 1)[0] == key and '=' in lines[i]), None)
+            if value is None:
+                if at is not None:
+                    del lines[at]
+                    end -= 1
+                    # Drop a group this mode created, so restoring leaves no empty header behind.
+                    if not any('=' in l for l in lines[start + 1:end]):
+                        del lines[start:end]
+                        if start > 0 and start <= len(lines) and not lines[start - 1] and (start == len(lines) or not lines[start]):
+                            del lines[start - 1]
+            elif at is not None:
+                lines[at] = f'{key}={value}'
+            else:
+                last = max((i for i in range(start, end) if lines[i]), default=start)
+                lines.insert(last + 1, f'{key}={value}')
+    fd, tmp = tempfile.mkstemp(dir=path.parent)
+    with os.fdopen(fd, 'w') as stream:
+        stream.write('\n'.join(lines) + '\n')
+    if path.exists():
+        os.chmod(tmp, path.stat().st_mode & 0o7777)
+    os.replace(tmp, path)
+
+
+def load(source, configdir):
+    data = json.loads(Path(source).read_text()) if Path(source).is_file() else read_patch(source)
+    for name, groups in data.items():
+        set_keys(Path(configdir) / name, groups)
+        # Watchers name nested groups by their parts joined with \x1d, e.g. "[A][B]" -> "A\x1dB".
+        # Keys are spelled as byte lists: GVariant's b'...' literal would add a NUL that watchers treat as part of the name.
+        payload = ', '.join("'%s': [%s]" % (g[1:-1].replace('][', '\\x1d'), ', '.join('[byte %s]' % ', '.join(hex(c) for c in k.encode()) for k in keys))
+                            for g, keys in groups.items())
+        print(f'{name}\t{{{payload}}}')
+
+
+if __name__ == '__main__':
+    command, *args = sys.argv[1:]
+    {'save': save, 'load': load}[command](*args)

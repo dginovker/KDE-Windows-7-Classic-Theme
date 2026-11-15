@@ -4,7 +4,7 @@ Open `gallery.html`; validate links and image dimensions with `python reference/
 
 ## Capturing
 
-`python reference/capture.py <scene>` boots the Windows VM if needed, recreates the scene with real clicks/keys, and overwrites `screenshots/w7-<scene>.png`; `--check` instead fails unless the VM still renders that file pixel-for-pixel (clock and tray icons excluded). `menu`, `programs`, `search`, `calendar`, `volume` and `taskbar` reproduce exactly. `explorer` differs by 60 pixels: its reference also shows Start's keyboard-focus rectangle, a state the script doesn't recreate. Add a scene to `SCENES` and run without `--check` to create a new reference.
+`python reference/capture.py <scene>` boots the Windows VM if needed, recreates the scene with real clicks/keys, and overwrites `screenshots/w7-<scene>.png`; `--check` instead fails unless the VM still renders that file pixel-for-pixel (clock and tray icons excluded). `menu`, `programs`, `search`, `calendar`, `volume` and `taskbar` reproduce exactly; `close-pressed`, `maximized` and `inactive` are frame states added for issue #9. `explorer` differs by 60 pixels: its reference also shows Start's keyboard-focus rectangle, a state the script doesn't recreate. Add a scene to `SCENES` and run without `--check` to create a new reference.
 
 Scenes need `D:\native-bench.exe`: `reference/tools/make-tools-cd.sh` builds it (mingw-w64) and attaches it to the VM as a CD. Run its metrics collector by hand with `D:\native-bench.exe <new folder>`. `--scene` resets ClearType to contrast 1000. The references used that value, and any other contrast changes every glyph.
 

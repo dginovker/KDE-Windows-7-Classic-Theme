@@ -1,0 +1,10 @@
+{
+    "KPackageStructure": "KWin/Decoration",
+    "KPlugin": {
+        "Authors": [{ "Name": "KDE-Windows-7-Classic-Theme" }],
+        "Description": "Windows 7 Classic window frame",
+        "Id": "win7classic",
+        "License": "GPL-3.0-or-later",
+        "Name": "Windows 7 Classic"
+    }
+}

@@ -28,6 +28,13 @@ def toggle(target, expect_ok=True):
     return err
 
 
+def close_test_apps():
+    """Close every app the tests start, so one test's leftovers never show up in another's screenshots."""
+    user('pkill -u tester -x kate; pkill -u tester -x kdialog; pkill -u tester -x konsole; pkill -u tester -x dolphin; '
+         'pkill -u tester -x gtk3-demo; pkill -u tester firefox; pkill -f "^counter-loop"; '
+         'pkill -f "^/usr/bin/python3 /tmp/fixture_window.py"; rm -f /tmp/counter /tmp/kate-proof.txt; true')
+
+
 def install():
     """Run install.sh from the working tree as tester, then reset to current mode with no saved profiles."""
     buffer = io.BytesIO()
@@ -38,6 +45,7 @@ def install():
     vmctl.transfer(VM, 'put', '/tmp/win7-install.tgz', '/tmp/win7-install.tgz')
     vmctl.run(VM, 'chmod 644 /tmp/win7-install.tgz', 10)
     user('rm -rf /tmp/win7-src && mkdir /tmp/win7-src && tar -xzf /tmp/win7-install.tgz -C /tmp/win7-src && /tmp/win7-src/install.sh')
+    close_test_apps()
     if user('~/.local/bin/win7-classic status') != 'current':
         toggle('current')
     user('rm -rf ~/.local/state/win7-classic')
@@ -52,12 +60,25 @@ def kwin_script(source):
     user('id=$(qdbus6 org.kde.KWin /Scripting loadScript /tmp/kwin.js t$RANDOM) && qdbus6 org.kde.KWin /Scripting/Script$id run && sleep 0.5 && qdbus6 org.kde.KWin /Scripting/Script$id stop')
 
 
+def kwin_query(body):
+    """Run KWin script `body`, which reports with emit(...fields); returns the emitted rows.
+
+    Rows are read back from the journal, so a nonce and an end marker make sure all of them have arrived.
+    """
+    nonce = f'W7Q{time.monotonic_ns()}'
+    kwin_script(f'function emit(...fields) {{ print("{nonce}\\t" + fields.join("\\t")); }}\n{body}\nprint("{nonce}\\tEND");')
+    for _ in range(40):
+        lines = [l.split('\t')[1:] for l in user(f'journalctl --user --since -2min --no-pager -o cat | grep -a {nonce} || true').splitlines()]
+        if ['END'] in lines:
+            return [l for l in lines if l != ['END']]
+        time.sleep(0.25)
+    raise AssertionError(f'KWin query produced no end marker: {body}')
+
+
 def windows():
-    """resourceClass -> (caption, active, minimized) for every window, read from KWin."""
-    since = user('date +%H:%M:%S')
-    kwin_script('for (const w of workspace.windowList()) print("WIN\\t" + w.resourceClass + "\\t" + w.caption + "\\t" + (workspace.activeWindow == w) + "\\t" + w.minimized);')
-    lines = [l.split('WIN\t', 1)[1].split('\t') for l in user(f'journalctl --user --since {since} --no-pager -o cat').splitlines() if 'WIN\t' in l]
-    return {cls: (caption, active == 'true', minimized == 'true') for cls, caption, active, minimized in lines}
+    """resourceClass -> (caption, active, minimized) for every window."""
+    rows = kwin_query('for (const w of workspace.windowList()) emit(w.resourceClass, w.caption, workspace.activeWindow == w, w.minimized);')
+    return {cls: (caption, active == 'true', minimized == 'true') for cls, caption, active, minimized in rows}
 
 
 def activate(resource):

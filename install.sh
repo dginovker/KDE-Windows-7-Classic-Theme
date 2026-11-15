@@ -20,9 +20,12 @@ for applet in "$src"/plasma/org.win7classic.*; do
 done
 rm -rf "$data/plasma/desktoptheme/win7-classic"
 cp -r "$src/plasma/theme/win7-classic" "$data/plasma/desktoptheme/"
+mkdir -p "$data/kwin/decorations"
+rm -rf "$data/kwin/decorations/win7classic"
+cp -r "$src/plasma/decoration/win7classic" "$data/kwin/decorations/"
 
 rm -rf "$data/win7-classic"
 mkdir -p "$data/win7-classic" "$HOME/.local/bin"
-cp -r "$src/toggle/win7-classic" "$src/toggle/windows" "$data/win7-classic/"
+cp -r "$src/toggle/win7-classic" "$src/toggle/kconfig-keys" "$src/toggle/windows" "$data/win7-classic/"
 ln -sfn "$data/win7-classic/win7-classic" "$HOME/.local/bin/win7-classic"
 echo "installed; switch with: win7-classic windows"

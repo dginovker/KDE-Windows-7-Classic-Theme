@@ -12,12 +12,14 @@ No host theme, session or boot changes are authorized by these artifacts. Preser
 
 ## Install and toggle
 
-`./install.sh` installs for the current user (needs `wine` for its LGPL Tahoma font): Plasma applets, the panel theme and `~/.local/bin/win7-classic`. Nothing changes until you switch.
+`./install.sh` installs for the current user (needs `wine` for its LGPL Tahoma font): Plasma applets, the panel theme, the window decoration and `~/.local/bin/win7-classic`. Nothing changes until you switch.
 
-`win7-classic windows|current|toggle|status|restore` swaps the whole Plasma panel/desktop layout and panel theme by restarting only plasmashell; KWin and applications keep running. Each mode keeps its own saved layout under `~/.local/state/win7-classic/`, and every switch is logged there. A switch that fails (e.g. a widget plugin is missing) rolls back and stays in the old mode; `restore` brings back the current layout from a terminal even with no panel running. Windows mode is seeded from `toggle/windows/` the first time it is used.
+`win7-classic windows|current|toggle|status|restore` swaps the whole Plasma panel/desktop layout and panel theme by restarting only plasmashell; KWin and applications keep running. Each mode keeps its own saved layout under `~/.local/state/win7-classic/`, and every switch is logged there. Colors, fonts, widget style and window decoration are swapped key-by-key (only the keys listed in `toggle/windows/keys/`), so other settings in `kdeglobals`/`kwinrc` stay untouched, and running Qt apps update live. A switch that fails (e.g. a widget plugin is missing) rolls back and stays in the old mode; `restore` brings back the current layout from a terminal even with no panel running. Windows mode is seeded from `toggle/windows/` the first time it is used.
 
 ## What Windows mode has so far
 
+- Classic window frames (`plasma/decoration/`, a KWin QML decoration): active, inactive, maximized and pressed-button states match the reference pixel-for-pixel apart from the app icon and title text.
+- Classic colors (Win32 system colors from the reference VM), Tahoma 8.25pt and Qt's Windows widget style for Qt/KDE apps. GTK apps keep their own theme.
 - Classic taskbar (`plasma/`): Start button (opens KRunner until the Start menu lands), Never-combine task buttons, pinned launchers, notification-area frame around the stock system tray, two-line clock and Show Desktop. Edges match `reference/screenshots/w7-taskbar.png` pixel-for-pixel; icons and text differ.
 
 ## Tests
@@ -25,6 +27,7 @@ No host theme, session or boot changes are authorized by these artifacts. Preser
 Both run from the host against the lab VM and write screenshots to the given directory:
 
 - `python tests/test_toggle.py [outdir]`: real Kate/Konsole/file-dialog work survives 22 switches, per-mode edits persist, configs return byte-identical, failure and restore paths work.
+- `python tests/test_frames.py [outdir]`: frame pixels match the Windows references in active/inactive/maximized/pressed states; caption buttons work (releasing off a pressed button cancels it); a running app picks up Tahoma live; switching back restores `kdeglobals`/`kwinrc` exactly.
 - `python tests/test_taskbar.py [outdir]`: taskbar structure matches the Windows reference outside button faces and tray icons; task buttons minimize/restore, launchers launch, Start and Show Desktop work, and it still matches after switching away and back.
 
 ## Recovery

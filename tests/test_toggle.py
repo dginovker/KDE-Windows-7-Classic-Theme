@@ -38,10 +38,6 @@ class Recorder(threading.Thread):
             time.sleep(0.2)
 
 
-def reset_fixtures():
-    user('pkill -f ^counter-loop; pkill -u tester -x kate; pkill -u tester -x kdialog; pkill -u tester -x konsole; rm -f /tmp/counter /tmp/kate-proof.txt; true')
-
-
 def open_work():
     user('systemd-run --user --collect -q kate -n')
     time.sleep(4)
@@ -74,7 +70,6 @@ def main():
         old.unlink()
     vmctl.start(VM)
     install()
-    reset_fixtures()
     open_work()
     work = pids()
     assert all(work.values()), work

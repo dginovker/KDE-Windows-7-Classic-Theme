@@ -1,0 +1,7 @@
+[org.kde.kdecoration2]
+BorderSize=Normal
+BorderSizeAuto=false
+ButtonsOnLeft=M
+ButtonsOnRight=IA_X
+library=org.kde.kwin.aurorae
+theme=win7classic
