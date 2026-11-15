@@ -12,7 +12,7 @@ No host theme, session or boot changes are authorized by these artifacts. Preser
 
 ## Install and toggle
 
-`./install.sh` installs for the current user (needs `wine` for its LGPL Tahoma font): Plasma applets, the panel theme, the window decoration and `~/.local/bin/win7-classic`. Nothing changes until you switch.
+Arch: `cd packaging && makepkg -si` (needs `wine` at build time for its LGPL Tahoma font; tested with Plasma/KWin 6.8.2 and Qt 6.12). Before removing the package, run `win7-classic current`; removal warns about anyone still in Windows mode. For development, `./install.sh` installs the same files for the current user only. Nothing changes on screen until you switch.
 
 `win7-classic windows|current|toggle|status|restore` swaps the whole Plasma panel/desktop layout and panel theme by restarting only plasmashell; KWin and applications keep running. Each mode keeps its own saved layout under `~/.local/state/win7-classic/`, and every switch is logged there. Colors, fonts, widget style and window decoration are swapped key-by-key (only the keys listed in `toggle/windows/keys/`), so other settings in `kdeglobals`/`kwinrc` stay untouched, and running Qt apps update live. A switch that fails (e.g. a widget plugin is missing) rolls back and stays in the old mode; `restore` brings back the current layout from a terminal even with no panel running. Windows mode is seeded from `toggle/windows/` the first time it is used.
 
@@ -30,6 +30,7 @@ Both run from the host against the lab VM and write screenshots to the given dir
 
 - `python tests/test_toggle.py [outdir]`: real Kate/Konsole/file-dialog work survives 22 switches, per-mode edits persist, configs return byte-identical, failure and restore paths work.
 - `python tests/test_frames.py [outdir]`: frame pixels match the Windows references in active/inactive/maximized/pressed states; caption buttons work (releasing off a pressed button cancels it); a running app picks up Tahoma live; switching back restores `kdeglobals`/`kwinrc` exactly.
+- `python tests/test_package.py [outdir]`: builds and installs the Arch package in the VM, switches modes using only packaged files, removes it; no packaged file remains, nothing else under /usr or /etc changes, current-mode config is byte-identical.
 - `python tests/test_gtk.py [outdir]`: a running GTK 3 app turns Classic (ButtonFace background, raised button bevels, white sunken fields); the GTK theme and font are restored, and after the first switch round trips leave `~/.config/gtk-*/` byte-identical.
 - `python tests/test_text.py [outdir]`: Start menu labels against Windows: pixel difference, label widths (up to 3px long, from fractional glyph advances), ClearType-colored pixels; other fonts' rendering unchanged.
 - `python tests/test_startmenu.py [outdir]`: menu, hover, All Programs and search views match the references outside icons and labels; search + Enter, arrow keys + Enter, Documents, Esc/Start/Meta, and a cancelled Shut down all work.

@@ -1,0 +1,10 @@
+# Removing the package while a user is still in Windows mode would leave their panel pointing at deleted widgets.
+pre_remove() {
+    local mode user
+    for mode in /home/*/.local/state/win7-classic/mode; do
+        [[ -f $mode && $(<"$mode") == windows ]] || continue
+        user=$(stat -c %U "$mode")
+        echo "==> WARNING: $user is still in Windows 7 Classic mode. Before removing, have them run: win7-classic current"
+        echo "    (their saved layout stays in ~$user/.local/state/win7-classic/profiles/current)"
+    done
+}

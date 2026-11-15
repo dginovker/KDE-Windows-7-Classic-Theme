@@ -1,0 +1,20 @@
+# Builds from this checkout: `makepkg -si` inside packaging/.
+# Tested with Plasma/KWin 6.8.2 and Qt 6.12; the QML relies on Plasma 6.8 APIs.
+pkgname=win7-classic
+pkgver=0.1
+pkgrel=1
+pkgdesc='Windows 7 Classic look for KDE Plasma, switchable live with win7-classic'
+arch=(any)
+url='https://github.com/dginovker/KDE-Windows-7-Classic-Theme'
+# Wine's Tahoma (bundled font) is LGPL; everything else is GPL.
+license=('GPL-3.0-or-later' 'LGPL-2.1-or-later')
+depends=('plasma-workspace>=6.8' 'kwin>=6.8' 'python' 'dconf' 'dbus' 'glib2' 'qt6-tools')
+makedepends=('wine')
+install=win7-classic.install
+
+package() {
+    "$startdir/../install.sh" --prefix "$pkgdir"
+    install -dm755 "$pkgdir/usr/share/fontconfig/conf.default"
+    ln -s ../conf.avail/70-win7-classic-tahoma.conf "$pkgdir/usr/share/fontconfig/conf.default/"
+    install -Dm644 "$startdir/../LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}
