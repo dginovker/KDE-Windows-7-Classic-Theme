@@ -7,7 +7,7 @@ Build an independently maintained Classic UI with a live return to the user's cu
 - `reference/README.md`: measurements, VM provenance and unresolved risks.
 - Check the gallery: `python reference/verify.py` (requires Pillow).
 
-No host theme, session or boot changes are authorized by these artifacts. Preserve unsaved work; Linux authentication and reliable apply/restore remain unverified. GitHub setup and the live toggle are not implemented.
+No host theme, session or boot changes are authorized by these artifacts. Preserve unsaved work; Linux authentication and reliable apply/restore remain unverified. Work is tracked in GitHub issues; the live toggle is not implemented yet.
 
 ## Recovery
 
