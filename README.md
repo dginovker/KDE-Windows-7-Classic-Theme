@@ -16,6 +16,18 @@ Arch: `cd packaging && makepkg -si` (needs `wine` at build time for its LGPL Tah
 
 `win7-classic windows|current|toggle|status|restore` swaps the whole Plasma panel/desktop layout and panel theme by restarting only plasmashell; KWin and applications keep running. Each mode keeps its own saved layout under `~/.local/state/win7-classic/`, and every switch is logged there. Colors, fonts, widget style and window decoration are swapped key-by-key (only the keys listed in `toggle/windows/keys/`), so other settings in `kdeglobals`/`kwinrc` stay untouched, and running Qt apps update live. A switch that fails (e.g. a widget plugin is missing) rolls back and stays in the old mode; `restore` brings back the current layout from a terminal even with no panel running. The first switch builds Windows mode from your current panel (`toggle/windows/seed`): the launcher, task manager, clock, show-desktop and spacers become the Classic ones; every other widget (pager, monitors, your own widgets, the tray and its items) keeps its settings and sits before the notification area. `win7-classic rebuild` discards the Windows layout and builds it again from the current one.
 
+## Lock and login screens
+
+Windows mode locks with a Windows 7 logon-style screen (`plasma/lockscreen/`, `plasma/logon/`); current mode keeps Plasma's. Plasma reads the lock screen from its shell package, so Windows mode adds `~/.local/share/plasma/shells/org.kde.plasma.desktop/` (marked by `.win7-classic`): links to the system shell, plus real copies of `lockscreen/` (ours) and `logout/`. If the Windows lock screen fails to load, a plain password field replaces it. If you can't unlock, run `loginctl unlock-sessions` from a TTY.
+
+The package also installs the SDDM theme `win7-classic`. SDDM is system-wide, so it is not toggled; to select it:
+
+```
+printf '[Theme]\nCurrent=win7-classic\n' | sudo tee /etc/sddm.conf.d/win7-classic.conf
+```
+
+Delete that file to return to your previous login screen. If the theme fails to load, SDDM shows its built-in one.
+
 ## What Windows mode has so far
 
 - Classic window frames (`plasma/decoration/`, a KWin QML decoration): active, inactive, maximized and pressed-button states match the reference pixel-for-pixel apart from the app icon and title text.
@@ -26,7 +38,7 @@ Arch: `cd packaging && makepkg -si` (needs `wine` at build time for its LGPL Tah
 
 ## Tests
 
-Both run from the host against the lab VM and write screenshots to the given directory:
+All run from the host against the lab VM and write screenshots to the given directory:
 
 - `python tests/test_toggle.py [outdir]`: real Kate/Konsole/file-dialog work survives 22 switches, per-mode edits persist, configs return byte-identical, failure and restore paths work.
 - `python tests/test_frames.py [outdir]`: frame pixels match the Windows references in active/inactive/maximized/pressed states; caption buttons work (releasing off a pressed button cancels it); a running app picks up Tahoma live; switching back restores `kdeglobals`/`kwinrc` exactly.
@@ -36,6 +48,7 @@ Both run from the host against the lab VM and write screenshots to the given dir
 - `python tests/test_gtk.py [outdir]`: a running GTK 3 app turns Classic (ButtonFace background, raised button bevels, white sunken fields); the GTK theme and font are restored, and after the first switch round trips leave `~/.config/gtk-*/` byte-identical.
 - `python tests/test_text.py [outdir]`: Start menu labels against Windows: pixel difference, label widths (up to 3px long, from fractional glyph advances), ClearType-colored pixels; other fonts' rendering unchanged.
 - `python tests/test_startmenu.py [outdir]`: menu, hover, All Programs and search views match the references outside icons and labels; search + Enter, arrow keys + Enter, Documents, Esc/Start/Meta, and a cancelled Shut down all work.
+- `python tests/test_lock.py [outdir]` and `tests/test_login.py`: Windows lock screen and SDDM theme with the tester's real password. Field placement matches `w7-lock.png`/`w7-login.png`; a wrong password shows the error and stays locked; the right one unlocks or logs in; current mode keeps Plasma's lock screen; a broken theme still unlocks.
 - `python tests/test_taskbar.py [outdir]`: taskbar structure matches the Windows reference outside button faces and tray icons; task buttons minimize/restore, launchers launch, Start and Show Desktop work, and it still matches after switching away and back.
 
 ## Recovery

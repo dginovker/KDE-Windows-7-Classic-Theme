@@ -66,10 +66,38 @@ set_gtk_theme() { if [[ -n $1 ]]; then dconf write "$GTK_KEY" "$1"; else dconf r
 load_appearance() {
     local mode=$1 dir=$2
     echo "$mode" > "$state/appearance"
+    if [[ $mode == windows ]]; then add_lock_overlay; else remove_lock_overlay; fi
     if [[ -f $dir/keys.json ]]; then load_keys "$dir/keys.json"
     elif [[ -d $share/$mode/keys ]]; then load_keys "$share/$mode/keys"; fi
     if [[ -f $dir/gtk-theme ]]; then set_gtk_theme "$(cat "$dir/gtk-theme")"
     elif [[ -f $share/$mode/gtk-theme ]]; then set_gtk_theme "$(cat "$share/$mode/gtk-theme")"; fi
+}
+
+# Windows mode's lock screen: kscreenlocker_greet reads the lock screen from the Plasma shell package, so a per-user
+# overlay of that package is created with its own lockscreen/; everything else links to the system shell.
+SHELL_ID=org.kde.plasma.desktop
+overlay=${XDG_DATA_HOME:-$HOME/.local/share}/plasma/shells/$SHELL_ID
+add_lock_overlay() {
+    local system=/usr/share/plasma/shells/$SHELL_ID
+    remove_lock_overlay
+    # A shell package the user made themselves is never replaced; Windows mode then keeps their lock screen.
+    [[ ! -e $overlay ]] || { log "WARNING: $overlay is not ours; Windows mode keeps the existing lock screen"; return 0; }
+    [[ -d $system ]] || { log "WARNING: no $system; Windows mode keeps the stock lock screen"; return 0; }
+    mkdir -p "$overlay/contents"
+    touch "$overlay/.win7-classic"
+    ln -s "$system/metadata.json" "$overlay/metadata.json"
+    local entry
+    # Only plasmashell accepts files that resolve outside the package; the lock and logout greeters refuse them, so
+    # those two folders are real copies. logout/ is refreshed from the system on every switch to Windows mode.
+    for entry in "$system"/contents/*; do
+        # updates/ is left out so plasmashell doesn't re-run its migration scripts under the overlay's path.
+        case ${entry##*/} in lockscreen|updates) ;; logout) cp -r "$entry" "$overlay/contents/" ;; *) ln -s "$entry" "$overlay/contents/" ;; esac
+    done
+    cp -r "$share/lockscreen" "$overlay/contents/lockscreen"
+}
+remove_lock_overlay() {
+    [[ -f $overlay/.win7-classic ]] && rm -rf "$overlay"
+    return 0
 }
 
 copy_files() { for f in "${FILES[@]}"; do if [[ -e $1/$f ]]; then cp -p "$1/$f" "$2/$f"; else rm -f "$2/$f"; fi; done; }

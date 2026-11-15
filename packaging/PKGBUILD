@@ -1,7 +1,7 @@
 # Builds from this checkout: `makepkg -si` inside packaging/.
 # Tested with Plasma/KWin 6.8.2 and Qt 6.12; the QML relies on Plasma 6.8 APIs.
 pkgname=win7-classic
-pkgver=0.2
+pkgver=0.3
 pkgrel=1
 pkgdesc='Windows 7 Classic look for KDE Plasma, switchable live with win7-classic'
 arch=(any)

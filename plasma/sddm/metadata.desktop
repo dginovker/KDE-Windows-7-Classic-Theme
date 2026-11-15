@@ -1,0 +1,12 @@
+[SddmGreeterTheme]
+Name=Windows 7 Classic
+Description=Windows 7 logon screen, from KDE-Windows-7-Classic-Theme
+Author=KDE-Windows-7-Classic-Theme
+License=GPL-3.0-or-later
+Type=sddm-theme
+Version=0.2
+Website=https://github.com/dginovker/KDE-Windows-7-Classic-Theme
+MainScript=Main.qml
+Theme-Id=win7-classic
+Theme-API=2.0
+QtVersion=6

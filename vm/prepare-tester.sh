@@ -13,6 +13,8 @@ if id tester >/dev/null 2>&1; then
     userdel -r tester
 fi
 useradd -m -s /bin/bash tester
+# Lock/login tests type this password; the VM is offline and disposable.
+echo 'tester:win7-test-pass' | chpasswd
 # Idle locking and screen blanking would swallow scripted input during long tests.
 install -d -o tester -g tester /home/tester/.config
 printf '[Daemon]\nAutolock=false\nLockOnResume=false\nTimeout=0\n' > /home/tester/.config/kscreenlockerrc

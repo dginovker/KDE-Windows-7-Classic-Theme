@@ -35,8 +35,15 @@ rm -rf "$data/plasma/desktoptheme/win7-classic" "$data/kwin/decorations/win7clas
 cp -r "$src/plasma/theme/win7-classic" "$data/plasma/desktoptheme/"
 cp -r "$src/plasma/decoration/win7classic" "$data/kwin/decorations/"
 cp -r "$src/plasma/gtk/Win7-Classic" "$data/themes/"
-mkdir -p "$data/win7-classic"
+mkdir -p "$data/win7-classic/lockscreen"
 cp -r "$src/toggle/win7-classic" "$src/toggle/kconfig-keys" "$src/toggle/windows" "$data/win7-classic/"
+cp "$src/plasma/lockscreen/LockScreen.qml" "$src/plasma/logon/LogonUi.qml" "$data/win7-classic/lockscreen/"
+if [[ ${1:-} == --prefix ]]; then
+    # The login screen is system-wide: installed here, selected by the administrator (see README).
+    rm -rf "$data/sddm/themes/win7-classic"
+    mkdir -p "$data/sddm/themes/win7-classic"
+    cp "$src/plasma/sddm/Main.qml" "$src/plasma/sddm/metadata.desktop" "$src/plasma/logon/LogonUi.qml" "$data/sddm/themes/win7-classic/"
+fi
 ln -sfn "$(realpath -m --relative-to="$bin" "$data/win7-classic/win7-classic")" "$bin/win7-classic"
 
 [[ ${1:-} == --prefix ]] || fc-cache "$fonts"

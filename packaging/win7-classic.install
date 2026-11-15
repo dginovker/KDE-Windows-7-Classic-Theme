@@ -8,3 +8,8 @@ pre_remove() {
         echo "    (their saved layout stays in ~$user/.local/state/win7-classic/profiles/current)"
     done
 }
+
+post_install() {
+    echo "==> Switch with: win7-classic windows"
+    echo "    Windows 7 login screen (system-wide, optional): printf '[Theme]\\nCurrent=win7-classic\\n' > /etc/sddm.conf.d/win7-classic.conf"
+}

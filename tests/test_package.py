@@ -35,6 +35,21 @@ def remove_user_install():
          '~/.local/state/win7-classic; fc-cache ~/.local/share/fonts 2>/dev/null; true')
 
 
+def build_package():
+    """Builds the Arch package from this checkout inside the VM; returns its path there."""
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode='w:gz') as tar:
+        for name in ('install.sh', 'LICENSE', 'fonts', 'packaging', 'plasma', 'toggle'):
+            tar.add(ROOT / name, arcname=name, filter=lambda t: None if '__pycache__' in t.name or t.name.endswith('.pkg.tar.zst') else t)
+    Path('/tmp/win7-src.tgz').write_bytes(buffer.getvalue())
+    vmctl.transfer(VM, 'put', '/tmp/win7-src.tgz', '/tmp/win7-src.tgz')
+    root('chmod 644 /tmp/win7-src.tgz')
+    user('rm -rf /tmp/win7-build && mkdir /tmp/win7-build && tar -xzf /tmp/win7-src.tgz -C /tmp/win7-build && cd /tmp/win7-build/packaging && makepkg -f --nodeps >/tmp/makepkg.log 2>&1 || { cat /tmp/makepkg.log; exit 1; }')
+    package = user('ls /tmp/win7-build/packaging/*.pkg.tar.zst')
+    print('built', package.rsplit('/', 1)[-1])
+    return package
+
+
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     vmctl.start(VM)
@@ -46,16 +61,7 @@ def main():
     user('systemctl --user reset-failed plasma-plasmashell; systemctl --user restart plasma-plasmashell')
     time.sleep(4)
 
-    buffer = io.BytesIO()
-    with tarfile.open(fileobj=buffer, mode='w:gz') as tar:
-        for name in ('install.sh', 'LICENSE', 'fonts', 'packaging', 'plasma', 'toggle'):
-            tar.add(ROOT / name, arcname=name, filter=lambda t: None if '__pycache__' in t.name or t.name.endswith('.pkg.tar.zst') else t)
-    Path('/tmp/win7-src.tgz').write_bytes(buffer.getvalue())
-    vmctl.transfer(VM, 'put', '/tmp/win7-src.tgz', '/tmp/win7-src.tgz')
-    root('chmod 644 /tmp/win7-src.tgz')
-    user('rm -rf /tmp/win7-build && mkdir /tmp/win7-build && tar -xzf /tmp/win7-src.tgz -C /tmp/win7-build && cd /tmp/win7-build/packaging && makepkg -f --nodeps >/tmp/makepkg.log 2>&1 || { cat /tmp/makepkg.log; exit 1; }')
-    package = user('ls /tmp/win7-build/packaging/*.pkg.tar.zst')
-    print('built', package.rsplit('/', 1)[-1])
+    package = build_package()
 
     before_user = user(USER_STATE)
     root('touch /tmp/win7-pkg-marker; sleep 1')
