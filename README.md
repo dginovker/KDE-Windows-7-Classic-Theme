@@ -10,11 +10,22 @@ Build an independently maintained Classic UI with a live return to the user's cu
 
 No host theme, session or boot changes are authorized by these artifacts. Preserve unsaved work; Linux authentication and reliable apply/restore remain unverified. Work is tracked in GitHub issues.
 
-## Live toggle
+## Install and toggle
 
-`toggle/win7-classic windows|current|toggle|status|restore` swaps the whole Plasma panel/desktop layout by restarting only plasmashell; KWin and applications keep running. Each mode keeps its own saved layout under `~/.local/state/win7-classic/`, and every switch is logged there. A switch that fails (e.g. a widget plugin is missing) rolls back and stays in the old mode; `restore` brings back the current layout from a terminal even with no panel running. `windows-layout.js` seeds Windows mode the first time it is used.
+`./install.sh` installs for the current user (needs `wine` for its LGPL Tahoma font): Plasma applets, the panel theme and `~/.local/bin/win7-classic`. Nothing changes until you switch.
 
-`python toggle/test_toggle.py [outdir]` proves this in the lab VM: real Kate/Konsole/file-dialog work survives 22 switches, per-mode edits persist, configs return byte-identical, and failure/restore paths work. It writes screenshots and a recording to `outdir`.
+`win7-classic windows|current|toggle|status|restore` swaps the whole Plasma panel/desktop layout and panel theme by restarting only plasmashell; KWin and applications keep running. Each mode keeps its own saved layout under `~/.local/state/win7-classic/`, and every switch is logged there. A switch that fails (e.g. a widget plugin is missing) rolls back and stays in the old mode; `restore` brings back the current layout from a terminal even with no panel running. Windows mode is seeded from `toggle/windows/` the first time it is used.
+
+## What Windows mode has so far
+
+- Classic taskbar (`plasma/`): Start button (opens KRunner until the Start menu lands), Never-combine task buttons, pinned launchers, notification-area frame around the stock system tray, two-line clock and Show Desktop. Edges match `reference/screenshots/w7-taskbar.png` pixel-for-pixel; icons and text differ.
+
+## Tests
+
+Both run from the host against the lab VM and write screenshots to the given directory:
+
+- `python tests/test_toggle.py [outdir]`: real Kate/Konsole/file-dialog work survives 22 switches, per-mode edits persist, configs return byte-identical, failure and restore paths work.
+- `python tests/test_taskbar.py [outdir]`: taskbar structure matches the Windows reference outside button faces and tray icons; task buttons minimize/restore, launchers launch, Start and Show Desktop work, and it still matches after switching away and back.
 
 ## Recovery
 

@@ -1,0 +1,14 @@
+{
+    "KPackageStructure": "Plasma/Applet",
+    "KPlugin": {
+        "Authors": [{ "Name": "KDE-Windows-7-Classic-Theme" }],
+        "Category": "Windows and Tasks",
+        "Description": "Two-line clock and Show Desktop button",
+        "Icon": "preferences-system-time",
+        "Id": "org.win7classic.clock",
+        "License": "GPL-3.0-or-later",
+        "Name": "Windows 7 Classic clock",
+        "Version": "0.1"
+    },
+    "X-Plasma-API-Minimum-Version": "6.0"
+}

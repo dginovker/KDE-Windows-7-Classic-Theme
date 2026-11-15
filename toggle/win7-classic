@@ -3,11 +3,11 @@
 # Only plasmashell restarts; KWin and every application keep running.
 set -euo pipefail
 
-FILES=(plasma-org.kde.plasma.desktop-appletsrc plasmashellrc)
+FILES=(plasma-org.kde.plasma.desktop-appletsrc plasmashellrc plasmarc)
 config=${XDG_CONFIG_HOME:-$HOME/.config}
 state=${XDG_STATE_HOME:-$HOME/.local/state}/win7-classic
 share=$(dirname "$(readlink -f "$0")")
-[[ -f $share/windows-layout.js ]] || share=${XDG_DATA_HOME:-$HOME/.local/share}/win7-classic
+[[ -d $share/windows ]] || share=${XDG_DATA_HOME:-$HOME/.local/share}/win7-classic
 mkdir -p "$state/profiles"
 
 log() { printf '%s %s\n' "$(date -Is)" "$*" | tee -a "$state/switch.log" >&2; }
@@ -37,7 +37,8 @@ unknown_widgets() {
     shell 'var bad = []; for (const p of panels()) for (const w of p.widgets()) if (knownWidgetTypes.indexOf(w.type) < 0) bad.push(w.type); print(bad.join(" "))'
 }
 
-copy_files() { for f in "${FILES[@]}"; do [[ ! -e $1/$f ]] || cp -p "$1/$f" "$2/$f"; done; }
+# Mirror, not merge: a file the source mode never had (e.g. no plasmarc) must not leak in from the other mode.
+copy_files() { for f in "${FILES[@]}"; do if [[ -e $1/$f ]]; then cp -p "$1/$f" "$2/$f"; else rm -f "$2/$f"; fi; done; }
 
 switch_to() {
     local target=$1 from
@@ -54,13 +55,15 @@ switch_to() {
     if [[ -d $state/profiles/$target ]]; then
         copy_files "$state/profiles/$target" "$config"
     else
+        # First use of a mode: start from its shipped config files (e.g. the panel theme), then run its layout script.
         seed=1
+        for f in "${FILES[@]}"; do [[ ! -e $share/$target/$f ]] || cp "$share/$target/$f" "$config/$f"; done
     fi
     local problem=""
     if ! start_shell; then
         problem="plasmashell did not start"
     else
-        [[ $seed == 0 ]] || shell "$(cat "$share/$target-layout.js")" >/dev/null || problem="layout script failed"
+        [[ $seed == 0 ]] || shell "$(cat "$share/$target/layout.js")" >/dev/null || problem="layout script failed"
         [[ -n $problem ]] || { local bad; bad=$(unknown_widgets); [[ -z $bad ]] || problem="unknown widgets: $bad"; }
     fi
     if [[ -n $problem ]]; then

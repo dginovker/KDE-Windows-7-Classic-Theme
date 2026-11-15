@@ -1,0 +1,14 @@
+{
+    "KPackageStructure": "Plasma/Applet",
+    "KPlugin": {
+        "Authors": [{ "Name": "KDE-Windows-7-Classic-Theme" }],
+        "Category": "Windows and Tasks",
+        "Description": "Start button and Never-combine task buttons",
+        "Icon": "preferences-system-windows",
+        "Id": "org.win7classic.taskbar",
+        "License": "GPL-3.0-or-later",
+        "Name": "Windows 7 Classic taskbar",
+        "Version": "0.1"
+    },
+    "X-Plasma-API-Minimum-Version": "6.0"
+}

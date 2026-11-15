@@ -6,32 +6,10 @@ import sys
 import threading
 import time
 
-ROOT = Path(__file__).resolve().parent
-sys.path.insert(0, str(ROOT.parent / 'vm'))
-import vmctl  # noqa: E402
+from lab import VM, vmctl, user, toggle, digest, kwin_script, windows, activate, install
 
-VM = vmctl.VMS['lab']
 OUT = Path(sys.argv[1] if len(sys.argv) > 1 else '/tmp/win7-toggle-test')
 TEXT = 'unsaved line typed before any switch\n'
-FILES = 'plasma-org.kde.plasma.desktop-appletsrc plasmashellrc'
-
-
-def user(script, timeout=180, check=True):
-    code, out, err = vmctl.run(VM, f'{vmctl.USER_ENV}\nexec runuser -u tester -- bash -c {vmctl.shlex.quote(script)}', timeout)
-    if check and code:
-        raise AssertionError(f'guest command failed ({code}): {script}\n{out}{err}')
-    return out.strip()
-
-
-def toggle(target, expect_ok=True):
-    code, out, err = vmctl.run(VM, f'{vmctl.USER_ENV}\nexec runuser -u tester -- ~tester/.local/bin/win7-classic {target}', 180)
-    if (code == 0) != expect_ok:
-        raise AssertionError(f'win7-classic {target} exit {code}:\n{err}')
-    return err
-
-
-def digest():
-    return user(f'cd ~/.config && sha256sum {FILES}')
 
 
 def pids():
@@ -42,24 +20,6 @@ def pids():
 
 def counter():
     return int(user('cat /tmp/counter'))
-
-
-def kwin_script(source):
-    vmctl.run(VM, f'cat > /tmp/kwin.js <<"JS"\n{source}\nJS\nchmod 644 /tmp/kwin.js', 30)
-    user('id=$(qdbus6 org.kde.KWin /Scripting loadScript /tmp/kwin.js t$RANDOM) && qdbus6 org.kde.KWin /Scripting/Script$id run && sleep 0.5 && qdbus6 org.kde.KWin /Scripting/Script$id stop')
-
-
-def windows():
-    """resourceClass -> caption for every window, read from KWin."""
-    since = user('date +%H:%M:%S')
-    kwin_script('for (const w of workspace.windowList()) print("WIN\t" + w.resourceClass + "\t" + w.caption + "\t" + (workspace.activeWindow == w));')
-    lines = [l.split('WIN\t', 1)[1].split('\t') for l in user(f'journalctl --user --since {since} --no-pager -o cat').splitlines() if 'WIN\t' in l]
-    return {cls: (caption, active == 'true') for cls, caption, active in lines}
-
-
-def activate(resource):
-    kwin_script(f'for (const w of workspace.windowList()) if (w.resourceClass == "{resource}") workspace.activeWindow = w;')
-    assert windows()[resource][1], f'could not focus {resource}'
 
 
 def shot(name):
@@ -78,18 +38,8 @@ class Recorder(threading.Thread):
             time.sleep(0.2)
 
 
-def install():
-    for name in ('win7-classic', 'windows-layout.js'):
-        vmctl.transfer(VM, 'put', str(ROOT / name), f'/tmp/{name}')
-    vmctl.run(VM, '''set -e
-d=/home/tester/.local/share/win7-classic
-install -D -o tester -g tester -m755 /tmp/win7-classic $d/win7-classic
-install -D -o tester -g tester -m644 /tmp/windows-layout.js $d/windows-layout.js
-install -d -o tester -g tester /home/tester/.local/bin
-ln -sfn ../share/win7-classic/win7-classic /home/tester/.local/bin/win7-classic''', 30)
-    # Start every run from current mode with no saved profiles, so Windows mode is seeded fresh.
-    toggle('current')
-    user('rm -rf ~/.local/state/win7-classic; pkill -f ^counter-loop; pkill -u tester -x kate; pkill -u tester -x kdialog; pkill -u tester -x konsole; rm -f /tmp/counter /tmp/kate-proof.txt ~/oof.txt; true')
+def reset_fixtures():
+    user('pkill -f ^counter-loop; pkill -u tester -x kate; pkill -u tester -x kdialog; pkill -u tester -x konsole; rm -f /tmp/counter /tmp/kate-proof.txt; true')
 
 
 def open_work():
@@ -124,6 +74,7 @@ def main():
         old.unlink()
     vmctl.start(VM)
     install()
+    reset_fixtures()
     open_work()
     work = pids()
     assert all(work.values()), work
@@ -163,7 +114,7 @@ def main():
     activate('org.kde.kate')
     vmctl.keys(VM, 'KEY_LEFTCTRL', 'KEY_S')
     for _ in range(20):
-        if any(c.startswith('Save') for c, _ in windows().values()):
+        if any(c.startswith('Save') for c, *_ in windows().values()):
             break
         time.sleep(0.5)
     else:
@@ -179,7 +130,7 @@ def main():
 
     # Issue #5: a broken Windows profile must be refused, leaving current mode and work untouched.
     healthy = digest()
-    user("sed -i 's/plugin=org.kde.plasma.taskmanager/plugin=org.example.missing/' ~/.local/state/win7-classic/profiles/windows/plasma-org.kde.plasma.desktop-appletsrc")
+    user("sed -i 's/plugin=org.win7classic.taskbar/plugin=org.example.missing/' ~/.local/state/win7-classic/profiles/windows/plasma-org.kde.plasma.desktop-appletsrc")
     log = toggle('windows', expect_ok=False)
     assert 'unknown widgets: org.example.missing' in log, log
     assert user('~/.local/bin/win7-classic status') == 'current'
@@ -188,7 +139,7 @@ def main():
     shot('4-after-failed-switch')
 
     # Issue #5: with no panel running at all, one command brings current mode back.
-    user("sed -i 's/plugin=org.example.missing/plugin=org.kde.plasma.taskmanager/' ~/.local/state/win7-classic/profiles/windows/plasma-org.kde.plasma.desktop-appletsrc")
+    user("sed -i 's/plugin=org.example.missing/plugin=org.win7classic.taskbar/' ~/.local/state/win7-classic/profiles/windows/plasma-org.kde.plasma.desktop-appletsrc")
     toggle('windows')
     user('systemctl --user stop plasma-plasmashell.service')
     toggle('restore')

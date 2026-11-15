@@ -1,0 +1,14 @@
+{
+    "KPackageStructure": "Plasma/Applet",
+    "KPlugin": {
+        "Authors": [{ "Name": "KDE-Windows-7-Classic-Theme" }],
+        "Category": "Windows and Tasks",
+        "Description": "Sunken frame drawn from here to the right end of the panel",
+        "Icon": "preferences-desktop-notification",
+        "Id": "org.win7classic.trayframe",
+        "License": "GPL-3.0-or-later",
+        "Name": "Windows 7 Classic notification area frame",
+        "Version": "0.1"
+    },
+    "X-Plasma-API-Minimum-Version": "6.0"
+}
