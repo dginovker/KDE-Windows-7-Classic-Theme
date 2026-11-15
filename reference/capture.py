@@ -106,6 +106,10 @@ SCENES = {
     'maximized': maximized,
     # Same window after clicking the desktop, so its title bar is inactive.
     'inactive': lambda: (fixture((849, 419)), vmctl.pointer(VM, 849, 419, 'left'), vmctl.pointer(VM, 120, 420, 'left'), vmctl.pointer(VM, 640, 790)),
+    # Explorer's Details view (picked from the view menu) and its Organize menu: file manager targets, issue #19.
+    'explorer-details': lambda: (fixture((849, 419)), vmctl.pointer(VM, 849, 419, 'left'), vmctl.pointer(VM, 941, 194, 'left'),
+                                 time.sleep(1), vmctl.pointer(VM, 1004, 325, 'left'), vmctl.pointer(VM, 849, 600), time.sleep(1)),
+    'explorer-organize': lambda: (fixture((849, 419)), vmctl.pointer(VM, 849, 419, 'left'), vmctl.pointer(VM, 300, 193, 'left'), time.sleep(1)),
     'calendar': lambda: tray_popup(1229),
     'volume': lambda: tray_popup(1187, 777),
 }
@@ -127,6 +131,11 @@ def main():
     vmctl.keys(VM, 'KEY_ESC')
     if a.scene == 'maximized':
         vmctl.pointer(VM, 1249, 8, 'left')  # Restore, so later scenes start from the normal fixture
+    if a.scene == 'explorer-details':
+        # Explorer remembers the view per folder; back to Large Icons for the other scenes.
+        vmctl.pointer(VM, 941, 194, 'left')
+        time.sleep(1)
+        vmctl.pointer(VM, 1014, 62, 'left')  # the menu opens aligned to the current (Details) entry
     print(out)
     if a.check:
         count, box = differing_pixels(reference, out, a.scene)

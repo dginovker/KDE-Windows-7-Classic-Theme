@@ -11,7 +11,7 @@ import time
 
 from PIL import Image
 
-from lab import ROOT, VM, vmctl, user, toggle, kwin_script, windows, wait_for, install, shot
+from lab import kwin_query, ROOT, VM, vmctl, user, toggle, kwin_script, windows, wait_for, install, shot
 
 OUT = Path(sys.argv[1] if len(sys.argv) > 1 else '/tmp/win7-startmenu-test')
 REF = ROOT / 'reference/screenshots'
@@ -56,6 +56,10 @@ def menu_open():
     return image.getpixel((404, 400)) == (64, 64, 64) and image.getpixel((253, 400)) == (128, 128, 128)
 
 
+def explorer_captions():
+    return [r[0] for r in kwin_query('for (const w of workspace.windowList()) if (w.resourceClass == "org.win7classic.explorer") emit(w.caption);')]
+
+
 def open_menu():
     vmctl.pointer(VM, 25, 777, 'left')
     wait_for(menu_open, 'Start menu open')
@@ -75,9 +79,9 @@ def main():
     install()
     user('rm -rf ~/Classic-demo; mkdir -p ~/Classic-demo/{Documents,Downloads,Music,Pictures,Projects}')
     toggle('windows')
-    user('systemd-run --user --collect -q dolphin --new-window ~/Classic-demo')
-    wait_for(lambda: 'org.kde.dolphin' in windows(), 'Dolphin window')
-    kwin_script('for (const w of workspace.windowList()) if (w.resourceClass == "org.kde.dolphin") '
+    user('systemd-run --user --collect -q ~/.local/bin/win7-explorer ~/Classic-demo')
+    wait_for(lambda: 'org.win7classic.explorer' in windows(), 'Explorer window')
+    kwin_script('for (const w of workspace.windowList()) if (w.resourceClass == "org.win7classic.explorer") '
                 '{ w.frameGeometry = {x: 256, y: 120, width: 768, height: 560}; workspace.activeWindow = w; }')
     time.sleep(1)
 
@@ -133,13 +137,13 @@ def main():
     time.sleep(0.5)
     shot(OUT / '7-keyboard.png')
     vmctl.keys(VM, 'KEY_ENTER')
-    wait_for(lambda: 'org.kde.dolphin' in [c for c, v in windows().items() if v[1]], 'Down Down Enter launches the second favorite (Dolphin)', 30)
+    wait_for(lambda: 'tester' in explorer_captions(), 'Down Down Enter launches the second favorite (Explorer, at home)', 30)
     print('keyboard navigation launches the selected favorite')
 
     open_menu()
     vmctl.pointer(VM, 300, 423, 'left')  # Documents
-    wait_for(lambda: any(v[0].startswith('Documents') for v in windows().values()), 'Documents opens in the file manager', 30)
-    print('right column opens Documents')
+    wait_for(lambda: 'Documents' in explorer_captions(), 'Documents opens in Explorer', 30)
+    print('right column opens Documents in Explorer')
 
     open_menu()
     close_menu()

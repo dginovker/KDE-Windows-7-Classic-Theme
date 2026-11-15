@@ -31,7 +31,7 @@ def toggle(target, expect_ok=True):
 
 def close_test_apps():
     """Close every app the tests start, so one test's leftovers never show up in another's screenshots."""
-    user('pkill -u tester -x kate; pkill -u tester -x kdialog; pkill -u tester -x konsole; pkill -u tester -x dolphin; '
+    user('pkill -u tester -x kate; pkill -u tester -x kdialog; pkill -u tester -x konsole; pkill -u tester -x dolphin; pkill -u tester -x win7-explorer; '
          'pkill -u tester -x gtk3-demo; pkill -u tester firefox; pkill -f "^counter-loop"; '
          'pkill -f "^/usr/bin/python3 /tmp/fixture_window.py"; pkill -f "^/usr/bin/python3 /tmp/fixture_gtk.py"; rm -f /tmp/counter /tmp/kate-proof.txt; true')
 
@@ -47,7 +47,7 @@ def install(commit=None, reset=True):
     else:
         buffer = io.BytesIO()
         with tarfile.open(fileobj=buffer, mode='w:gz') as tar:
-            for name in ('install.sh', 'fonts', 'plasma', 'toggle'):
+            for name in ('install.sh', 'explorer', 'fonts', 'plasma', 'toggle'):
                 tar.add(ROOT / name, arcname=name, filter=lambda t: None if '__pycache__' in t.name else t)
         archive = buffer.getvalue()
     Path('/tmp/win7-install.tgz').write_bytes(archive)

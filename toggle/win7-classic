@@ -43,14 +43,20 @@ save_keys() { "$share/kconfig-keys" save "$share/windows/keys" "$config" "$1/key
 load_keys() {
     local file changed
     while IFS=$'\t' read -r file changed; do
-        gdbus emit --session --object-path "/$file" --signal org.kde.kconfig.notify.ConfigChanged "$changed" >/dev/null
+        # D-Bus object paths allow only [A-Za-z0-9_]; KConfigWatcher maps the rest of a config name to _ too.
+        gdbus emit --session --object-path "/${file//[^A-Za-z0-9]/_}" --signal org.kde.kconfig.notify.ConfigChanged "$changed" >/dev/null
     done < <("$share/kconfig-keys" load "$1" "$config")
+    # KDE apps resolve the folder handler (mimeapps.list) from the sycoca cache, which doesn't notice the change.
+    # Built in the session's environment (XDG_CURRENT_DESKTOP=KDE selects kde-mimeapps.list), even from a TTY.
+    systemd-run --user --wait --collect -q kbuildsycoca6 || die "kbuildsycoca6 failed (journalctl --user); folders may open in the wrong app"
+
     # Running Qt apps (KWin included) re-read palette (0), fonts (1) and widget style (2) from kdeglobals on these
     # signals; fonts also need refreshFonts. KWin's reconfigure must come after so its title bar picks up the new font.
     for change in 0 1 2; do
         dbus-send --session --type=signal /KGlobalSettings org.kde.KGlobalSettings.notifyChange int32:$change int32:0
     done
     dbus-send --session --type=signal /KDEPlatformTheme org.kde.KDEPlatformTheme.refreshFonts
+    dbus-send --session --type=signal /KIconLoader org.kde.KIconLoader.iconChanged int32:0
     qdbus6 org.kde.KWin /KWin reconfigure
 }
 

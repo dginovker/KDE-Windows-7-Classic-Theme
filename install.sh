@@ -31,10 +31,12 @@ for applet in "$src"/plasma/org.win7classic.*; do
     rm -rf "${data:?}/plasma/plasmoids/$(basename "$applet")"
     cp -r "$applet" "$data/plasma/plasmoids/"
 done
-rm -rf "$data/plasma/desktoptheme/win7-classic" "$data/kwin/decorations/win7classic" "$data/themes/Win7-Classic" "$data/win7-classic"
+rm -rf "$data/plasma/desktoptheme/win7-classic" "$data/kwin/decorations/win7classic" "$data/themes/Win7-Classic" "$data/icons/Win7-Classic" "$data/win7-classic"
 cp -r "$src/plasma/theme/win7-classic" "$data/plasma/desktoptheme/"
 cp -r "$src/plasma/decoration/win7classic" "$data/kwin/decorations/"
 cp -r "$src/plasma/gtk/Win7-Classic" "$data/themes/"
+mkdir -p "$data/icons"
+cp -r "$src/plasma/icons/Win7-Classic" "$data/icons/"
 mkdir -p "$data/win7-classic/lockscreen"
 cp -r "$src/toggle/win7-classic" "$src/toggle/kconfig-keys" "$src/toggle/windows" "$data/win7-classic/"
 cp "$src/plasma/lockscreen/LockScreen.qml" "$src/plasma/logon/LogonUi.qml" "$data/win7-classic/lockscreen/"
@@ -45,6 +47,13 @@ if [[ ${1:-} == --prefix ]]; then
     cp "$src/plasma/sddm/Main.qml" "$src/plasma/sddm/metadata.desktop" "$src/plasma/logon/LogonUi.qml" "$data/sddm/themes/win7-classic/"
 fi
 ln -sfn "$(realpath -m --relative-to="$bin" "$data/win7-classic/win7-classic")" "$bin/win7-classic"
+
+build=$(mktemp -d)
+trap 'rm -rf "$build"' EXIT
+if [[ ${1:-} == --prefix ]]; then prefix=/usr; else prefix=$(dirname "$data"); fi
+cmake -S "$src/explorer" -B "$build" -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$prefix" >/dev/null
+cmake --build "$build" >/dev/null
+DESTDIR=${root:-} cmake --install "$build" >/dev/null
 
 [[ ${1:-} == --prefix ]] || fc-cache "$fonts"
 echo "installed; switch with: win7-classic windows"

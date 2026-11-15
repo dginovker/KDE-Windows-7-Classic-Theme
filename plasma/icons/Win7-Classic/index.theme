@@ -1,0 +1,12 @@
+[Icon Theme]
+Name=Windows 7 Classic
+Comment=Manila folders drawn for this project; everything else comes from Breeze
+Inherits=breeze,hicolor
+Directories=scalable/places
+
+[scalable/places]
+Size=48
+MinSize=8
+MaxSize=512
+Type=Scalable
+Context=Places

@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Explorer
+GenericName=File Manager
+Comment=Windows 7 Classic file manager
+Exec=@CMAKE_INSTALL_FULL_BINDIR@/win7-explorer %U
+Icon=org.win7classic.explorer
+# No MimeType: declaring inode/directory would let Explorer win over Dolphin in current mode when the user
+# has no explicit default. Windows mode selects it through mimeapps.list instead (toggle/windows/keys).
+Categories=Qt;KDE;System;FileTools;FileManager;

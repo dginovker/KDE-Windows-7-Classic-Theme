@@ -60,8 +60,8 @@ def click(x, y):
     vmctl.pointer(VM, 640, 600)  # hover changes launcher buttons, so park the pointer on the desktop
 
 
-def dolphin():
-    return windows().get('org.kde.dolphin')
+def explorer():
+    return windows().get('org.win7classic.explorer')
 
 
 def main():
@@ -72,14 +72,15 @@ def main():
     install()
     user('rm -rf ~/Classic-demo; mkdir -p ~/Classic-demo/{Documents,Downloads,Music,Pictures,Projects}')
     # Windows mode inherits the current task manager's pinned apps; pin three, like the reference's three icons.
+    # The Dolphin pin becomes Explorer, which then runs as the middle button, as in the reference.
     user('qdbus6 org.kde.plasmashell /PlasmaShell evaluateScript "for (const w of panels()[0].widgets()) '
          'if (w.type == \\"org.kde.plasma.icontasks\\") { w.currentConfigGroup = [\\"General\\"]; '
          'w.writeConfig(\\"launchers\\", [\\"applications:firefox.desktop\\", \\"applications:org.kde.dolphin.desktop\\", '
          '\\"applications:org.kde.konsole.desktop\\"]); }"')
     toggle('windows')
-    user('systemd-run --user --collect -q dolphin --new-window ~/Classic-demo')
-    wait_for(lambda: dolphin() is not None, 'Dolphin window')
-    kwin_script('for (const w of workspace.windowList()) if (w.resourceClass == "org.kde.dolphin") '
+    user('systemd-run --user --collect -q ~/.local/bin/win7-explorer ~/Classic-demo')
+    wait_for(lambda: explorer() is not None, 'Explorer window')
+    kwin_script('for (const w of workspace.windowList()) if (w.resourceClass == "org.win7classic.explorer") '
                 '{ w.frameGeometry = {x: 256, y: 120, width: 768, height: 560}; workspace.activeWindow = w; }')
     vmctl.pointer(VM, 640, 600)
     time.sleep(2)
@@ -88,11 +89,11 @@ def main():
     print('taskbar structure matches the Windows 7 reference')
 
     click(190, 778)
-    wait_for(lambda: dolphin()[2], 'Dolphin minimized by its task button')
+    wait_for(lambda: explorer()[2], 'Explorer minimized by its task button')
     time.sleep(1)
     shot(OUT / '2-minimized.png')
     click(190, 778)
-    wait_for(lambda: dolphin()[1] and not dolphin()[2], 'Dolphin restored and active')
+    wait_for(lambda: explorer()[1] and not explorer()[2], 'Explorer restored and active')
     print('task button minimizes and restores its window')
 
     click(86, 778)
@@ -121,7 +122,7 @@ def main():
     time.sleep(1)
     shot(OUT / '5-current.png')
     toggle('windows')
-    kwin_script('for (const w of workspace.windowList()) if (w.resourceClass == "org.kde.dolphin") workspace.activeWindow = w;')
+    kwin_script('for (const w of workspace.windowList()) if (w.resourceClass == "org.win7classic.explorer") workspace.activeWindow = w;')
     vmctl.pointer(VM, 640, 600)
     time.sleep(2)
     shot(OUT / '6-windows-again.png')

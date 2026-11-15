@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48">
+  <!-- A Windows 7 style manila folder, drawn for this project: back panel with tab, front panel opening rightwards. -->
+  <defs>
+    <linearGradient id="back" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#e9c96f"/><stop offset="1" stop-color="#c8a040"/></linearGradient>
+    <linearGradient id="front" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#fcebb0"/><stop offset="1" stop-color="#e8c466"/></linearGradient>
+  </defs>
+  <path d="M5 7h13l3 4h18v31H5z" fill="url(#back)" stroke="#a37e28"/>
+  <path d="M5 42l4-26h34l-4 26z" fill="url(#front)" stroke="#a37e28"/>
+  <path d="M10 18h31" stroke="#fff7d8" stroke-width="1.5"/>
+</svg>

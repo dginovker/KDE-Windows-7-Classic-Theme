@@ -115,3 +115,7 @@ activeFont=Tahoma,8.25,-1,5,700,0,0,0,0,0,0,0,0,0,0,1
 inactiveBackground=128,128,128
 inactiveBlend=192,192,192
 inactiveForeground=212,208,200
+
+# Manila folders (plasma/icons/Win7-Classic) instead of Breeze's, which take the Classic navy selection color.
+[Icons]
+Theme=Win7-Classic

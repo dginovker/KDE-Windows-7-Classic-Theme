@@ -17,7 +17,7 @@ OUT = Path(sys.argv[1] if len(sys.argv) > 1 else '/tmp/win7-package-test')
 USER_STATE = ('cd ~/.config && sha256sum plasma-org.kde.plasma.desktop-appletsrc plasmashellrc kdeglobals kwinrc '
               'gtk-3.0/settings.ini gtk-4.0/settings.ini 2>&1; dconf read /org/gnome/desktop/interface/gtk-theme; true')
 # Caches pacman hooks refresh after any transaction (ldconfig, icon/mime/schema caches) are not ours.
-SYSTEM_FILES = "find /usr /etc -xdev \\( -type f -o -type l \\) -newer /tmp/win7-pkg-marker 2>/dev/null | grep -v -e 'icon-theme.cache' -e '/usr/share/mime/' -e 'gschemas.compiled' -e '\\.cache-' -e '^/etc/ld.so.cache$' | sort; true"
+SYSTEM_FILES = "find /usr /etc -xdev \\( -type f -o -type l \\) -newer /tmp/win7-pkg-marker 2>/dev/null | grep -v -e 'icon-theme.cache' -e '/usr/share/mime/' -e 'gschemas.compiled' -e 'mimeinfo.cache' -e '\\.cache-' -e '^/etc/ld.so.cache$' | sort; true"
 
 
 def root(script, timeout=600):
@@ -39,7 +39,7 @@ def build_package():
     """Builds the Arch package from this checkout inside the VM; returns its path there."""
     buffer = io.BytesIO()
     with tarfile.open(fileobj=buffer, mode='w:gz') as tar:
-        for name in ('install.sh', 'LICENSE', 'fonts', 'packaging', 'plasma', 'toggle'):
+        for name in ('install.sh', 'LICENSE', 'explorer', 'fonts', 'packaging', 'plasma', 'toggle'):
             tar.add(ROOT / name, arcname=name, filter=lambda t: None if '__pycache__' in t.name or t.name.endswith('.pkg.tar.zst') else t)
     Path('/tmp/win7-src.tgz').write_bytes(buffer.getvalue())
     vmctl.transfer(VM, 'put', '/tmp/win7-src.tgz', '/tmp/win7-src.tgz')

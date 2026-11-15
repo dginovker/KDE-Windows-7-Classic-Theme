@@ -3,10 +3,10 @@
   <kcfgfile name=""/>
   <group name="General">
     <entry name="launchers" type="StringList">
-      <default>applications:firefox.desktop,applications:org.kde.dolphin.desktop</default>
+      <default>applications:firefox.desktop,applications:org.win7classic.explorer.desktop</default>
     </entry>
     <entry name="favorites" type="StringList">
-      <default>org.kde.konsole.desktop,org.kde.dolphin.desktop,firefox.desktop,org.kde.kate.desktop,systemsettings.desktop</default>
+      <default>org.kde.konsole.desktop,org.win7classic.explorer.desktop,firefox.desktop,org.kde.kate.desktop,systemsettings.desktop</default>
     </entry>
   </group>
 </kcfg>
