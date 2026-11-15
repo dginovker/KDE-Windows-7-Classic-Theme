@@ -99,10 +99,11 @@ def main():
     print('pinned button launches its app')
 
     click(27, 778)
-    wait_for(lambda: windows().get('krunner', ('', False))[1], 'Start opens KRunner')
+    time.sleep(1.5)
     shot(OUT / '4-start.png')
+    assert Image.open(OUT / '4-start.png').convert('RGB').getpixel((404, 400)) == (64, 64, 64), 'Start did not open the Start menu'
     vmctl.keys(VM, 'KEY_ESC')
-    print('Start button opens KRunner')
+    print('Start button opens the Start menu (tested in detail by test_startmenu.py)')
 
     showing = lambda: user('qdbus6 org.kde.KWin /KWin org.kde.KWin.showingDesktop')
     click(1269, 778)

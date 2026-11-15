@@ -97,6 +97,9 @@ SCENES = {
     'taskbar': lambda: (fixture((849, 419)), vmctl.pointer(VM, 849, 419, 'left'), vmctl.pointer(VM, 640, 600)),
     'menu': start_menu,
     'programs': all_programs,
+    # Hover states: pointer parked at the right end of the item so it covers as little as possible.
+    'menu-hover-left': lambda: (start_menu(), vmctl.pointer(VM, 230, 395)),
+    'menu-hover-right': lambda: (start_menu(), vmctl.pointer(VM, 390, 423)),
     'search': search,
     # Close button held down on the active fixture window (taskbar scene geometry).
     'close-pressed': lambda: (fixture((849, 419)), vmctl.pointer(VM, 849, 419, 'left'), pressed(1009, 132)),

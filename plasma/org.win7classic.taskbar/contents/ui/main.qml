@@ -5,7 +5,6 @@ import org.kde.plasma.plasmoid
 import org.kde.plasma.core as PlasmaCore
 import org.kde.kirigami as Kirigami
 import org.kde.taskmanager as TaskManager
-import org.kde.plasma.workspace.dbus as DBus
 
 // Geometry is in panel-window pixels measured from reference/screenshots/w7-taskbar.png (panel top = screen y 756).
 // Plasma's panel insets applets by at least 4px, so content is placed in window coordinates and may extend past the applet.
@@ -26,6 +25,30 @@ PlasmoidItem {
     Component.onCompleted: {
         if (Qt.fontFamilies().indexOf("Tahoma") < 0)
             console.error("win7-classic: font family 'Tahoma' is not installed; run install.sh. Text will use a substitute font.");
+    }
+
+    // Dots of a 30x32 dotted rectangle at button (19,3), on pixels where x+y is odd in screen coordinates.
+    readonly property var focusDots: {
+        const dots = [];
+        for (let x = 19; x <= 48; x++)
+            for (let y = 3; y <= 34; y++)
+                if ((x === 19 || x === 48 || y === 3 || y === 34) && (x + 2 + y + 760) % 2 === 1)
+                    dots.push([x, y]);
+        return dots;
+    }
+    property double menuClosedAt: 0
+    function toggleMenu() {
+        // Clicking Start while the menu is open first deactivates (and hides) the menu; don't reopen it.
+        if (startMenu.visible || Date.now() - menuClosedAt < 300)
+            startMenu.close();
+        else
+            startMenu.open();
+    }
+    Plasmoid.onActivated: toggleMenu()
+    StartMenu {
+        id: startMenu
+        applet: root
+        onVisibleChanged: if (!visible) root.menuClosedAt = Date.now()
     }
 
     TaskManager.VirtualDesktopInfo { id: virtualDesktopInfo }
@@ -67,7 +90,7 @@ PlasmoidItem {
         Bevel {
             id: start
             x: 2 - area.origin.x; y: root.buttonY - area.origin.y; width: 52; height: root.buttonHeight
-            sunken: startMouse.pressed
+            sunken: startMouse.pressed || startMenu.visible
             Image {
                 x: 2 + (start.sunken ? 1 : 0); y: 11 + (start.sunken ? 1 : 0)
                 width: 18; height: 14
@@ -83,11 +106,15 @@ PlasmoidItem {
                 color: "black"
                 renderType: Text.NativeRendering
             }
+            // Keyboard focus rectangle Windows draws around the label while the menu is open (DrawFocusRect pattern).
+            Repeater {
+                model: startMenu.visible && !startMenu.hotTracking ? focusDots : []
+                delegate: Rectangle { required property var modelData; x: modelData[0]; y: modelData[1]; width: 1; height: 1; color: "black" }
+            }
             MouseArea {
                 id: startMouse
                 anchors.fill: parent
-                // The Classic Start menu is issue #8; until then Start opens KRunner so it still launches apps.
-                onClicked: DBus.SessionBus.asyncCall({ service: "org.kde.krunner", path: "/App", iface: "org.kde.krunner.App", member: "display", arguments: [], signature: "()" })
+                onClicked: root.toggleMenu()
             }
         }
 
