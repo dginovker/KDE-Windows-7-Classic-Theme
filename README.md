@@ -8,7 +8,13 @@ Build an independently maintained Classic UI with a live return to the user's cu
 - Check the gallery: `python reference/verify.py` (requires Pillow).
 - `vm/`: test VMs. `vm/vmctl.py lab start`, then `sh`/`user` (stdin script as root / as the `tester` desktop user), `put`/`get`, `click x y`, `type`, `key`, `shot`. Input never touches the host desktop. `vm/prepare-tester.sh` (run via `vm/vmctl.py lab sh`) recreates `tester` for a pristine stock Plasma 6.8.2 session.
 
-No host theme, session or boot changes are authorized by these artifacts. Preserve unsaved work; Linux authentication and reliable apply/restore remain unverified. Work is tracked in GitHub issues; the live toggle is not implemented yet.
+No host theme, session or boot changes are authorized by these artifacts. Preserve unsaved work; Linux authentication and reliable apply/restore remain unverified. Work is tracked in GitHub issues.
+
+## Live toggle
+
+`toggle/win7-classic windows|current|toggle|status|restore` swaps the whole Plasma panel/desktop layout by restarting only plasmashell; KWin and applications keep running. Each mode keeps its own saved layout under `~/.local/state/win7-classic/`, and every switch is logged there. A switch that fails (e.g. a widget plugin is missing) rolls back and stays in the old mode; `restore` brings back the current layout from a terminal even with no panel running. `windows-layout.js` seeds Windows mode the first time it is used.
+
+`python toggle/test_toggle.py [outdir]` proves this in the lab VM: real Kate/Konsole/file-dialog work survives 22 switches, per-mode edits persist, configs return byte-identical, and failure/restore paths work. It writes screenshots and a recording to `outdir`.
 
 ## Recovery
 
