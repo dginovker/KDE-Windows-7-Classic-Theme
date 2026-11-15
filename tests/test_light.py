@@ -64,8 +64,29 @@ def main():
     toggle('current')
     assert user(COLORS) == dark_colors, 'Breeze Dark colors not restored exactly'
     wait_for(lambda: user(PORTAL) == '(<uint32 1>,)', 'the portal prefers dark again')
-    user('plasma-apply-colorscheme BreezeLight >/dev/null')  # back to the lab's default for other tests
     print('current mode: Breeze Dark restored exactly, portal dark again')
+
+    # Upgrading in Windows mode: the Windows profile was saved by a version without these keys, and the live
+    # session still has Breeze Dark's inactive header and scheme name, as that version left them.
+    user("""python3 - <<'PY'
+import json, pathlib
+p = pathlib.Path.home() / '.local/state/win7-classic/profiles/windows/keys.json'
+data = json.loads(p.read_text())
+del data['kdeglobals']['[Colors:Header][Inactive]']
+del data['kdeglobals']['[General]']['ColorScheme']
+p.write_text(json.dumps(data))
+PY""")
+    toggle('windows')
+    assert user(DARK_BACKGROUNDS) == '[]', 'a Windows profile from an older version brought dark colors back'
+    user("kwriteconfig6 --group Colors:Header --group Inactive --key BackgroundNormal 32,35,38; kwriteconfig6 --group General --key ColorScheme BreezeDark")
+    toggle('current')
+    toggle('windows')
+    assert user(DARK_BACKGROUNDS) == '[]', 'switching out and back after upgrading in Windows mode kept dark colors'
+    assert user("grep '^ColorScheme=' ~/.config/kdeglobals") == 'ColorScheme=Win7Classic'
+    toggle('current')
+    assert user(COLORS) == dark_colors, 'Breeze Dark colors not restored after the upgrade round trip'
+    user('plasma-apply-colorscheme BreezeLight >/dev/null')  # back to the lab's default for other tests
+    print('upgrading with an older Windows profile, in or out of Windows mode, still ends light')
     print('ALL LIGHT CHECKS PASSED; artifacts in', OUT)
 
 

@@ -39,13 +39,13 @@ unknown_widgets() {
 
 # Mirror, not merge: a file the source mode never had (e.g. no plasmarc) must not leak in from the other mode.
 # kdeglobals/kwinrc also hold non-appearance settings, so only the keys named in windows/keys are swapped per mode.
-save_keys() { "$share/kconfig-keys" save "$share/windows/keys" "$config" "$1/keys.json"; }
+save_keys() { "$share/kconfig-keys" save "$share/windows/keys" "$config" "$1/keys.json" ${2:+"$2"}; }
 load_keys() {
     local file changed
     while IFS=$'\t' read -r file changed; do
         # D-Bus object paths allow only [A-Za-z0-9_]; KConfigWatcher maps the rest of a config name to _ too.
         gdbus emit --session --object-path "/${file//[^A-Za-z0-9]/_}" --signal org.kde.kconfig.notify.ConfigChanged "$changed" >/dev/null
-    done < <("$share/kconfig-keys" load "$1" "$config")
+    done < <("$share/kconfig-keys" load "$1" "$config" ${2:+"$2"})
     # KDE apps resolve the folder handler (mimeapps.list) from the sycoca cache, which doesn't notice the change.
     # Built in the session's environment (XDG_CURRENT_DESKTOP=KDE selects kde-mimeapps.list), even from a TTY.
     systemd-run --user --wait --collect -q kbuildsycoca6 || die "kbuildsycoca6 failed (journalctl --user); folders may open in the wrong app"
@@ -73,7 +73,8 @@ load_appearance() {
     local mode=$1 dir=$2
     echo "$mode" > "$state/appearance"
     if [[ $mode == windows ]]; then add_lock_overlay; else remove_lock_overlay; fi
-    if [[ -f $dir/keys.json ]]; then load_keys "$dir/keys.json"
+    if [[ -f $dir/keys.json && $mode == windows ]]; then load_keys "$dir/keys.json" "$share/windows/keys"
+    elif [[ -f $dir/keys.json ]]; then load_keys "$dir/keys.json"
     elif [[ -d $share/$mode/keys ]]; then load_keys "$share/$mode/keys"; fi
     if [[ -f $dir/gtk-theme ]]; then set_gtk_theme "$(cat "$dir/gtk-theme")"
     elif [[ -f $share/$mode/gtk-theme ]]; then set_gtk_theme "$(cat "$share/$mode/gtk-theme")"; fi
@@ -119,7 +120,12 @@ switch_to() {
     # Only save appearance that belongs to the mode we're leaving. Versions before 0.2 never applied any, so after
     # upgrading in Windows mode the live colors are still current mode's and must not become Windows mode's.
     if [[ $(cat "$state/appearance" 2>/dev/null || echo current) == "$from" ]]; then
-        save_keys "$state/profiles/$from.new"
+        # Windows mode only owns the keys it applied; ones added since its profile was saved still hold current mode's.
+        if [[ $from == windows && -f $state/profiles/windows/keys.json ]]; then
+            save_keys "$state/profiles/$from.new" "$state/profiles/windows/keys.json"
+        else
+            save_keys "$state/profiles/$from.new"
+        fi
         gtk_theme > "$state/profiles/$from.new/gtk-theme"
     fi
     rm -rf "$state/profiles/$from" && mv "$state/profiles/$from.new" "$state/profiles/$from"
