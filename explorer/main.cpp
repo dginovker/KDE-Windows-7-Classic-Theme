@@ -1,16 +1,21 @@
-// Windows 7 Classic Explorer: Explorer's layout around KDE's KIO file widgets, which do the actual file management.
+// Windows 7 Classic Explorer: Explorer's chrome, laid out to the pixel geometry of reference/screenshots/w7-explorer*.png
+// and drawn with Windows' own art (explorer/assets, see reference/tools/extract-assets.py), around KDE's KIO file
+// widgets, which do the actual file management.
 #include <KDirModel>
 #include <KDirOperator>
 #include <KFileItemActions>
 #include <KFileItemListProperties>
 #include <KIO/FileUndoManager>
+#include <KIO/Global>
 #include <KIO/JobUiDelegateFactory>
 #include <KIO/OpenUrlJob>
 #include <KIO/Paste>
 #include <KIO/PasteJob>
+#include <KIO/SimpleJob>
+#include <KIO/CopyJob>
+#include <KPropertiesDialog>
 #include <KUrlMimeData>
-#include <KUrlNavigator>
-#include <KFilePlacesModel>
+#include <KUser>
 
 #include <QAbstractItemView>
 #include <QActionGroup>
@@ -18,20 +23,79 @@
 #include <QClipboard>
 #include <QCommandLineParser>
 #include <QDir>
-#include <QHBoxLayout>
 #include <QHeaderView>
-#include <QTreeView>
 #include <QLabel>
 #include <QLineEdit>
+#include <QListView>
 #include <QMainWindow>
 #include <QMenu>
 #include <QMimeData>
+#include <QMouseEvent>
+#include <QPainter>
 #include <QSortFilterProxyModel>
+#include <QScrollBar>
 #include <QSplitter>
 #include <QStandardPaths>
-#include <QToolButton>
-#include <QTreeWidget>
+#include <QTimer>
+#include <QTreeView>
 #include <QVBoxLayout>
+
+// Windows Classic system colors (Win32 GetSysColor in the reference VM). Explorer only runs in Windows mode.
+namespace classic
+{
+const QColor face(212, 208, 200), shadow(128, 128, 128), darkShadow(64, 64, 64), light(255, 255, 255);
+const QColor highlight(10, 36, 106), text(0, 0, 0);
+}
+
+static QPixmap asset(const QString &name)
+{
+    QPixmap pixmap(QStringLiteral(":/explorer/%1.png").arg(name));
+    if (pixmap.isNull())
+        qFatal("missing Explorer asset %s", qPrintable(name));
+    return pixmap;
+}
+
+// Every size Windows ships, so scaled screens get real pixels instead of an upscaled 16px icon.
+static QIcon assetIcon(const QString &name)
+{
+    QIcon icon;
+    for (int size : {16, 20, 22, 24, 32, 48, 64, 96, 128, 256}) {
+        const QString file = QStringLiteral(":/explorer/%1-%2.png").arg(name).arg(size);
+        if (QFile::exists(file))
+            icon.addFile(file);
+    }
+    if (icon.isNull())
+        qFatal("missing Explorer icon %s", qPrintable(name));
+    return icon;
+}
+
+// Solid downward triangle, `width` pixels wide at the top, as Explorer draws its menu arrows.
+static void arrow(QPainter &p, int x, int y, int width, const QColor &color = classic::text)
+{
+    for (int row = 0; width - 2 * row > 0; ++row)
+        p.fillRect(x + row, y + row, width - 2 * row, 1, color);
+}
+
+// DrawEdge's etched and sunken edges, as Classic Explorer frames its bands and fields.
+static void etched(QPainter &p, const QRect &r)
+{
+    p.fillRect(r.left(), r.top(), r.width() - 1, 1, classic::shadow);
+    p.fillRect(r.left(), r.top(), 1, r.height() - 1, classic::shadow);
+    p.fillRect(r.left() + 1, r.top() + 1, r.width() - 3, 1, classic::light);
+    p.fillRect(r.left() + 1, r.top() + 1, 1, r.height() - 3, classic::light);
+    p.fillRect(r.left() + 1, r.bottom() - 1, r.width() - 2, 1, classic::shadow);
+    p.fillRect(r.right() - 1, r.top() + 1, 1, r.height() - 2, classic::shadow);
+    p.fillRect(r.left(), r.bottom(), r.width(), 1, classic::light);
+    p.fillRect(r.right(), r.top(), 1, r.height(), classic::light);
+}
+
+static void edge(QPainter &p, const QRect &r, const QColor &topLeft, const QColor &bottomRight)
+{
+    p.fillRect(r.left(), r.top(), r.width(), 1, topLeft);
+    p.fillRect(r.left(), r.top(), 1, r.height(), topLeft);
+    p.fillRect(r.left(), r.bottom(), r.width(), 1, bottomRight);
+    p.fillRect(r.right(), r.top(), 1, r.height(), bottomRight);
+}
 
 // KDirOperator's own right-click menu is a file-dialog menu (sorting, hidden files, …); Explorer's is per item.
 class Files : public KDirOperator
@@ -42,6 +106,442 @@ public:
 
 protected:
     void activatedMenu(const KFileItem &item, const QPoint &pos) override { onMenu(item, pos); }
+};
+
+// A row of clickable parts painted by the widget itself; parts report hover and press so they can be drawn per state.
+class Painted : public QWidget
+{
+public:
+    struct Part {
+        QRect rect;
+        std::function<void()> click;
+        bool enabled = true;
+    };
+
+    Painted()
+    {
+        setMouseTracking(true);
+        setAttribute(Qt::WA_OpaquePaintEvent);
+    }
+
+protected:
+    QList<Part> parts;
+    int hovered = -1, pressed = -1;
+
+    int partAt(const QPoint &pos) const
+    {
+        for (int i = 0; i < parts.size(); ++i)
+            if (parts[i].enabled && parts[i].rect.contains(pos))
+                return i;
+        return -1;
+    }
+    void mouseMoveEvent(QMouseEvent *e) override
+    {
+        if (int part = partAt(e->position().toPoint()); part != hovered) {
+            hovered = part;
+            update();
+        }
+    }
+    void leaveEvent(QEvent *) override
+    {
+        hovered = -1;
+        update();
+    }
+    void mousePressEvent(QMouseEvent *e) override
+    {
+        pressed = e->button() == Qt::LeftButton ? partAt(e->position().toPoint()) : -1;
+        update();
+        // Menus open on press, as Windows' do.
+        if (pressed >= 0 && pressOpens(pressed)) {
+            const int part = std::exchange(pressed, -1);
+            parts[part].click();
+            update();
+        }
+    }
+    void mouseReleaseEvent(QMouseEvent *e) override
+    {
+        const int part = std::exchange(pressed, -1);
+        update();
+        if (part >= 0 && part == partAt(e->position().toPoint()))
+            parts[part].click();
+    }
+    virtual bool pressOpens(int) const { return false; }
+};
+
+// Back/Forward, the breadcrumb address bar with Refresh, and the search box: rows 1-36 of the reference client area.
+class NavigationBand : public Painted
+{
+public:
+    std::function<void(const QUrl &)> go;
+    std::function<void()> back, forward, refresh;
+    std::function<QList<QUrl>()> history;
+    std::function<QList<std::pair<QString, QUrl>>()> places;
+    QLineEdit *search = new QLineEdit(this);
+
+    NavigationBand()
+    {
+        setFixedHeight(36);
+        search->setFrame(false);
+        search->setTextMargins(5, 0, 0, 0);
+        // Windows draws the cue text in the window text color, not greyed.
+        QPalette palette = search->palette();
+        palette.setColor(QPalette::PlaceholderText, classic::text);
+        search->setPalette(palette);
+        address->setFrame(false);
+        address->hide();
+        connect(address, &QLineEdit::returnPressed, this, [this] {
+            go(QUrl::fromUserInput(address->text(), QDir::currentPath(), QUrl::AssumeLocalFile));
+            address->hide();
+        });
+        connect(address, &QLineEdit::editingFinished, address, &QWidget::hide);
+    }
+
+    void setState(const QUrl &url, bool canBack, bool canForward)
+    {
+        location = url;
+        backEnabled = canBack;
+        forwardEnabled = canForward;
+        address->hide();
+        layoutParts();
+    }
+
+    void editAddress()
+    {
+        address->setText(location.isLocalFile() ? location.toLocalFile() : location.toDisplayString());
+        address->setGeometry(addressBox().adjusted(2, 2, -23, -1));
+        address->show();
+        address->selectAll();
+        address->setFocus();
+    }
+
+protected:
+    void resizeEvent(QResizeEvent *) override
+    {
+        search->setGeometry(width() - 244, 9, 219, 18);
+        layoutParts();
+    }
+
+    void paintEvent(QPaintEvent *) override
+    {
+        QPainter p(this);
+        p.fillRect(rect(), classic::face);
+        etched(p, QRect(0, 0, width(), 36));
+        const bool hasHistory = backEnabled || forwardEnabled;
+        p.drawPixmap(2, 2, asset(state(BackPart, backEnabled, QStringLiteral("back"))));
+        p.drawPixmap(32, 2, asset(forwardEnabled ? state(ForwardPart, true, QStringLiteral("forward"))
+                                                 : hasHistory ? QStringLiteral("forward-disabled-history") : QStringLiteral("forward-disabled")));
+
+        const QRect box = addressBox();
+        edge(p, box, classic::shadow, classic::light);
+        p.drawPixmap(box.left() + 2, 9, QIcon::fromTheme(QStringLiteral("folder")).pixmap(16));
+        for (int i = 0; i < crumbs.size(); ++i) {
+            arrow(p, crumbs[i].arrow.left(), 16, 5);
+            if (i)
+                p.drawText(QPoint(crumbs[i].text.left(), 21), crumbs[i].label);
+        }
+        arrow(p, box.right() - 39, 16, 7);  // recent locations
+        p.drawPixmap(box.right() - 21, 8, asset(QStringLiteral("refresh")));
+
+        const QRect field(width() - 246, 7, 223, 22);
+        edge(p, field, classic::shadow, classic::light);
+        edge(p, field.adjusted(1, 1, -1, -1), classic::darkShadow, classic::face);
+        p.drawPixmap(width() - 23, 7, asset(hovered == SearchPart ? QStringLiteral("search-hot") : QStringLiteral("search-normal")));
+    }
+
+    bool pressOpens(int part) const override { return part >= HistoryPart; }
+
+private:
+    enum { BackPart, ForwardPart, SearchPart, RefreshPart, EditPart, HistoryPart };  // crumb parts follow HistoryPart
+    struct Crumb {
+        QString label;
+        QUrl url;
+        QRect text, arrow;
+    };
+    QUrl location;
+    bool backEnabled = false, forwardEnabled = false;
+    QList<Crumb> crumbs;
+    QLineEdit *address = new QLineEdit(this);
+
+    QRect addressBox() const { return QRect(74, 7, width() - 324, 22); }
+
+    QString state(int part, bool enabled, const QString &name) const
+    {
+        if (!enabled)
+            return name + QStringLiteral("-disabled");
+        return name + (pressed == part ? QStringLiteral("-pressed") : hovered == part ? QStringLiteral("-hot") : QStringLiteral("-normal"));
+    }
+
+    // Windows names the home folder after the user and everything else from "Computer" down.
+    QList<Crumb> crumbsFor(const QUrl &url) const
+    {
+        QList<Crumb> list;
+        if (!url.isLocalFile()) {
+            list.append({url.toDisplayString(), url, {}, {}});
+            return list;
+        }
+        const QString path = QDir::cleanPath(url.toLocalFile());
+        QString base = QDir::homePath();
+        if (path == base || path.startsWith(base + QLatin1Char('/'))) {
+            const KUser user;
+            const QString name = user.property(KUser::FullName).toString();
+            list.append({name.isEmpty() ? user.loginName() : name, QUrl::fromLocalFile(base), {}, {}});
+        } else {
+            base = QStringLiteral("/");
+            list.append({QStringLiteral("Computer"), QUrl::fromLocalFile(base), {}, {}});
+        }
+        QString built = base;
+        for (const QString &part : QStringView(path).mid(base.size()).toString().split(QLatin1Char('/'), Qt::SkipEmptyParts)) {
+            built = QDir(built).filePath(part);
+            list.append({part, QUrl::fromLocalFile(built), {}, {}});
+        }
+        return list;
+    }
+
+    void layoutParts()
+    {
+        const QRect box = addressBox();
+        const QFontMetrics metrics(font());
+        crumbs.clear();
+        crumbs.append({QString(), QUrl(), {}, QRect(box.left() + 25, 13, 9, 11)});  // the places menu after the icon
+        int x = box.left() + 36;
+        for (Crumb crumb : crumbsFor(location)) {
+            crumb.text = QRect(x, 10, metrics.horizontalAdvance(crumb.label), 15);
+            crumb.arrow = QRect(crumb.text.right() + 8, 13, 9, 11);
+            x = crumb.arrow.left() + 11;
+            crumbs.append(crumb);
+        }
+        parts = {
+            {QRect(2, 2, 30, 32), [this] { back(); }, backEnabled},
+            {QRect(32, 2, 28, 32), [this] { forward(); }, forwardEnabled},
+            {QRect(width() - 23, 7, 21, 21), [this] { search->setFocus(); }},
+            {QRect(box.right() - 21, 8, 21, 20), [this] { refresh(); }},
+            {box.adjusted(0, 0, -41, 0), [this] { editAddress(); }},
+            {QRect(box.right() - 41, 8, 19, 20), [this, box] { menuOf(history(), QRect(box.left(), box.bottom(), 0, 0)); }, backEnabled || forwardEnabled},
+        };
+        for (int i = 0; i < crumbs.size(); ++i) {
+            const Crumb crumb = crumbs[i];
+            if (i)
+                parts.insert(HistoryPart + 1, {crumb.text.adjusted(-3, -2, 3, 2), [this, crumb] { go(crumb.url); }});
+            parts.insert(HistoryPart + 1, {crumb.arrow, [this, i, crumb] {
+                                               if (!i) {
+                                                   QMenu menu;
+                                                   for (const auto &[name, url] : places())
+                                                       menu.addAction(name, this, [this, url] { go(url); });
+                                                   menu.exec(mapToGlobal(QPoint(crumb.arrow.left(), 28)));
+                                                   return;
+                                               }
+                                               subfolderMenu(crumb.url, QPoint(crumb.arrow.left(), 28));
+                                           }});
+        }
+        update();
+    }
+
+    void menuOf(const QList<QUrl> &urls, const QRect &at)
+    {
+        QMenu menu;
+        for (const QUrl &url : urls)
+            menu.addAction(url.isLocalFile() ? url.toLocalFile() : url.toDisplayString(), this, [this, url] { go(url); });
+        menu.exec(mapToGlobal(at.topLeft()));
+    }
+
+    void subfolderMenu(const QUrl &url, const QPoint &at)
+    {
+        QMenu menu;
+        if (!url.isLocalFile()) {
+            menu.addAction(QStringLiteral("(not a local folder)"))->setEnabled(false);
+        } else {
+            for (const QFileInfo &dir : QDir(url.toLocalFile()).entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name | QDir::IgnoreCase))
+                menu.addAction(dir.fileName(), this, [this, dir] { go(QUrl::fromLocalFile(dir.filePath())); });
+        }
+        menu.exec(mapToGlobal(at));
+    }
+};
+
+// Organize, Include in library, Share with, New folder; view, preview pane and help on the right: rows 37-67.
+class CommandBar : public Painted
+{
+public:
+    struct Command {
+        QString text;
+        QIcon icon;
+        QMenu *menu = nullptr;
+        std::function<void()> act;
+    };
+    QList<Command> left, right;
+
+    CommandBar() { setFixedHeight(31); }
+    void relayout()
+    {
+        parts.clear();
+        int x = 2;
+        const QFontMetrics metrics(font());
+        for (const Command &command : left) {
+            const int width = 11 + metrics.horizontalAdvance(command.text) + (command.menu ? 15 : 0) + 10;
+            parts.append({QRect(x, 2, width, 27), [this, command, x] { trigger(command, x); }});
+            x += width;
+        }
+        // Right-aligned like the reference: view split button, preview pane, help.
+        const int offsets[] = {115, 64, 36};
+        for (int i = 0; i < right.size(); ++i) {
+            const int x = width() - offsets[i];
+            parts.append({QRect(x, 2, right[i].menu ? 47 : 26, 27), [this, i, x] { trigger(right[i], x); }});
+        }
+        update();
+    }
+
+protected:
+    void resizeEvent(QResizeEvent *) override { relayout(); }
+    bool pressOpens(int part) const override { return command(part).menu && !command(part).act; }
+
+    void paintEvent(QPaintEvent *) override
+    {
+        QPainter p(this);
+        p.fillRect(rect(), classic::face);
+        for (int i = 0; i < parts.size(); ++i) {
+            const Command &c = command(i);
+            const QRect r = parts[i].rect;
+            if (i == pressed)
+                edge(p, r, classic::shadow, classic::light);
+            else if (i == hovered)
+                edge(p, r, classic::light, classic::shadow);
+            if (c.icon.isNull()) {
+                p.drawText(QPoint(r.left() + 11, 19), c.text);
+                if (c.menu)
+                    arrow(p, r.right() - 16, 13, 7);
+            } else {
+                p.drawPixmap(r.left() + 5, 7, c.icon.pixmap(16));
+                if (c.menu)
+                    arrow(p, r.left() + 34, 13, 7);
+            }
+        }
+    }
+
+private:
+    const Command &command(int part) const { return part < left.size() ? left[part] : right[part - left.size()]; }
+    void trigger(const Command &command, int x)
+    {
+        // A split button (icon and arrow): the icon acts, the arrow opens the menu.
+        const QPoint cursor = mapFromGlobal(QCursor::pos());
+        if (command.menu && (!command.act || cursor.x() >= x + 26))
+            command.menu->exec(mapToGlobal(QPoint(x, 29)));
+        else
+            command.act();
+    }
+};
+
+// Favorites, Libraries, Computer and Network with Windows' icons, rows and indents.
+class NavigationPane : public Painted
+{
+public:
+    struct Row {
+        QString text, icon;
+        QUrl url;
+        bool child = false;
+    };
+    std::function<void(const QUrl &)> go;
+
+    NavigationPane()
+    {
+        auto path = [](QStandardPaths::StandardLocation l) { return QUrl::fromLocalFile(QStandardPaths::writableLocation(l)); };
+        rows = {
+            {QStringLiteral("Favorites"), QStringLiteral("favorites"), QUrl()},
+            {QStringLiteral("Desktop"), QStringLiteral("desktop"), path(QStandardPaths::DesktopLocation), true},
+            {QStringLiteral("Downloads"), QStringLiteral("downloads"), path(QStandardPaths::DownloadLocation), true},
+            {QStringLiteral("Recent Places"), QStringLiteral("recent-places"), QUrl(QStringLiteral("recentlyused:/locations")), true},
+            {},
+            {QStringLiteral("Libraries"), QStringLiteral("libraries"), path(QStandardPaths::HomeLocation)},
+            {QStringLiteral("Documents"), QStringLiteral("library-documents"), path(QStandardPaths::DocumentsLocation), true},
+            {QStringLiteral("Music"), QStringLiteral("library-music"), path(QStandardPaths::MusicLocation), true},
+            {QStringLiteral("Pictures"), QStringLiteral("library-pictures"), path(QStandardPaths::PicturesLocation), true},
+            {QStringLiteral("Videos"), QStringLiteral("library-videos"), path(QStandardPaths::MoviesLocation), true},
+            {},
+            {QStringLiteral("Computer"), QStringLiteral("computer"), QUrl::fromLocalFile(QStringLiteral("/"))},
+            {},
+            {QStringLiteral("Network"), QStringLiteral("network"), QUrl(QStringLiteral("remote:/"))},
+        };
+        setFocusPolicy(Qt::ClickFocus);
+    }
+
+    QList<std::pair<QString, QUrl>> places() const
+    {
+        QList<std::pair<QString, QUrl>> list;
+        for (const Row &row : rows)
+            if (row.url.isValid())
+                list.append({row.text, row.url});
+        return list;
+    }
+
+    // Windows keeps the matching place selected and otherwise Favorites, as in the reference.
+    void setLocation(const QUrl &url)
+    {
+        selected = 0;
+        for (int i = 0; i < rows.size(); ++i)
+            if (rows[i].url.isValid() && rows[i].url.adjusted(QUrl::StripTrailingSlash) == url.adjusted(QUrl::StripTrailingSlash))
+                selected = i;
+        layoutRows();
+    }
+
+protected:
+    void resizeEvent(QResizeEvent *) override { layoutRows(); }
+    void focusInEvent(QFocusEvent *) override { update(); }
+    void focusOutEvent(QFocusEvent *) override { update(); }
+
+    void paintEvent(QPaintEvent *) override
+    {
+        QPainter p(this);
+        p.fillRect(rect(), classic::light);
+        for (int i = 0; i < rows.size(); ++i) {
+            const Row &row = rows[i];
+            if (row.text.isEmpty())
+                continue;
+            const int y = 9 + 19 * i;
+            const bool active = i == selected && hasFocus();
+            if (i == selected)
+                p.fillRect(0, y, width(), 19, active ? classic::highlight : classic::face);
+            const int indent = row.child ? 30 : 20;
+            p.drawPixmap(indent, y + 1, assetIcon(row.icon).pixmap(16));
+            p.setPen(active ? classic::light : classic::text);
+            p.drawText(QPoint(indent + 20, y + 14), row.text);
+        }
+    }
+
+private:
+    QList<Row> rows;
+    int selected = 0;
+
+    void layoutRows()
+    {
+        parts.clear();
+        for (int i = 0; i < rows.size(); ++i) {
+            const Row row = rows[i];
+            parts.append({QRect(0, 9 + 19 * i, width(), 19), [this, row, i] {
+                              if (!row.url.isValid())
+                                  return;
+                              selected = i;
+                              go(row.url);
+                          },
+                          !row.text.isEmpty()});
+        }
+        update();
+    }
+};
+
+// The item count under the file view, with the folder's own icon: rows 486-533 of the reference client area.
+class DetailsPane : public QWidget
+{
+public:
+    QString text;
+    QIcon icon;
+    DetailsPane() { setFixedHeight(48); }
+
+protected:
+    void paintEvent(QPaintEvent *) override
+    {
+        QPainter p(this);
+        p.fillRect(rect(), classic::light);
+        p.drawPixmap(17, -2, icon.pixmap(48));  // Windows lets the top two rows run under the bar above
+        p.drawText(QPoint(79, 16), text);
+    }
 };
 
 class Explorer : public QMainWindow
@@ -57,98 +557,116 @@ public:
 
         files = new Files(start, this);
         files->onMenu = [this](const KFileItem &item, const QPoint &pos) { contextMenu(item, pos); };
+        files->setFollowNewDirectories(false);
+        files->setInlinePreviewShown(true);  // thumbnails, as Explorer shows by default
+        // KDirOperator remembers its preview panel from file dialogs; Explorer starts without one.
+        if (files->action(KDirOperator::ShowPreviewPanel)->isChecked())
+            files->action(KDirOperator::ShowPreviewPanel)->trigger();
 
-        // Navigation row: back/forward, breadcrumb address bar, refresh, search.
-        auto *navRow = new QHBoxLayout;
-        navRow->setContentsMargins(4, 3, 4, 3);
-        navRow->addWidget(toolButton(files->action(KDirOperator::Back)));
-        navRow->addWidget(toolButton(files->action(KDirOperator::Forward)));
-        address = new KUrlNavigator(new KFilePlacesModel(this), start, this);
-        address->setPlacesSelectorVisible(false);
-        navRow->addWidget(address, 1);
-        navRow->addWidget(toolButton(files->action(KDirOperator::Reload)));
-        search = new QLineEdit;
-        search->setFixedWidth(222);
-        search->addAction(QIcon::fromTheme(QStringLiteral("edit-find")), QLineEdit::TrailingPosition);
-        navRow->addWidget(search);
-        column->addLayout(navRow);
+        nav->go = [this](const QUrl &url) { files->setUrl(url, true); };
+        nav->back = [this] { step(-1); };
+        nav->forward = [this] { step(1); };
+        nav->refresh = [this] { files->action(KDirOperator::Reload)->trigger(); };
+        nav->history = [this] { return QList<QUrl>(history.rbegin(), history.rend()); };
+        nav->places = [this] { return pane->places(); };
+        column->addWidget(nav);
+        commands();
+        column->addWidget(bar);
 
-        // Command bar.
-        auto *commands = new QHBoxLayout;
-        commands->setContentsMargins(4, 0, 4, 2);
-        organize = textButton(QStringLiteral("Organize  ▾"));
-        organize->setMenu(organizeMenu());
-        commands->addWidget(organize);
-        auto *newFolder = textButton(QStringLiteral("New folder"));
-        connect(newFolder, &QToolButton::clicked, files, &KDirOperator::mkdir);
-        commands->addWidget(newFolder);
-        commands->addStretch();
-        commands->addWidget(viewButton());
-        files->action(KDirOperator::ShowPreviewPanel)->setIcon(QIcon::fromTheme(QStringLiteral("view-split-left-right")));
-        commands->addWidget(toolButton(files->action(KDirOperator::ShowPreviewPanel)));
-        column->addLayout(commands);
-
-        splitter = new QSplitter;
-        splitter->addWidget(navigationPane());
+        pane->go = [this](const QUrl &url) { files->setUrl(url, true); };
+        auto *splitter = new QSplitter;
+        splitter->setHandleWidth(3);
+        splitter->setStyleSheet(QStringLiteral("QSplitter::handle { background: rgb(212, 208, 200); }"));
+        splitter->addWidget(pane);
         splitter->addWidget(files);
         splitter->setStretchFactor(1, 1);
         splitter->setSizes({157, 600});
         column->addWidget(splitter, 1);
+        auto *gap = new QWidget;  // the 5px ButtonFace bar above the details pane
+        gap->setFixedHeight(5);
+        gap->setAutoFillBackground(true);
+        QPalette palette = gap->palette();
+        palette.setColor(QPalette::Window, classic::face);
+        gap->setPalette(palette);
+        column->addWidget(gap);
+        column->addWidget(details);
 
-        // Details pane: folder icon and item count.
-        detailsPane = new QWidget;
-        detailsPane->setAutoFillBackground(true);
-        detailsPane->setBackgroundRole(QPalette::Base);
-        detailsPane->setFixedHeight(50);
-        auto *details = new QHBoxLayout(detailsPane);
-        details->setContentsMargins(20, 2, 8, 2);
-        details->addWidget(detailsIcon = new QLabel);
-        details->addWidget(detailsText = new QLabel, 1, Qt::AlignTop);
-        details->setSpacing(22);
-        column->addWidget(detailsPane);
+        empty = new QLabel(QStringLiteral("This folder is empty."), files);
+        empty->hide();
 
         connect(files, &KDirOperator::urlEntered, this, &Explorer::entered);
-        connect(address, &KUrlNavigator::urlChanged, this, [this](const QUrl &url) { files->setUrl(url, true); });
         connect(files, &KDirOperator::fileSelected, this, &Explorer::open);
         connect(files, &KDirOperator::finishedLoading, this, &Explorer::updateDetails);
+        connect(files, &KDirOperator::finishedLoading, this, &Explorer::hideFocus);
         connect(files, &KDirOperator::viewChanged, this, [this](QAbstractItemView *view) {
             view->setFrameShape(QFrame::NoFrame);
+            // With the scroll bar "as needed", QListView always reserves its width, which costs Windows' fifth column.
+            // Windows reflows only once the bar appears, so the bar is switched off until there is something to scroll.
+            view->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+            connect(view->verticalScrollBar(), &QScrollBar::rangeChanged, view, [view](int, int max) {
+                view->setVerticalScrollBarPolicy(max > 0 ? Qt::ScrollBarAlwaysOn : Qt::ScrollBarAlwaysOff);
+            });
+            view->installEventFilter(this);
             if (auto *tree = qobject_cast<QTreeView *>(view))
                 explorerColumns(tree);
             connect(view->selectionModel(), &QItemSelectionModel::selectionChanged, this, &Explorer::updateDetails);
         });
-        // KDirOperator remembers its preview panel from file dialogs; Explorer starts without one.
-        if (files->action(KDirOperator::ShowPreviewPanel)->isChecked())
-            files->action(KDirOperator::ShowPreviewPanel)->trigger();
         // Filtering the view's model rather than KDirLister's name filter, which always shows folders.
-        connect(search, &QLineEdit::textChanged, this, [this](const QString &text) {
+        connect(nav->search, &QLineEdit::textChanged, this, [this](const QString &text) {
             proxy()->setFilterCaseSensitivity(Qt::CaseInsensitive);
             proxy()->setFilterFixedString(text);
             updateDetails();
         });
-        files->setFollowNewDirectories(false);
-        files->setInlinePreviewShown(true);  // thumbnails, as Explorer shows by default
         // Explorer's Delete moves to the Recycle Bin; Shift+Delete deletes.
         files->action(KDirOperator::Trash)->setShortcut(QKeySequence::Delete);
         files->action(KDirOperator::Delete)->setShortcut(Qt::SHIFT | Qt::Key_Delete);
+        files->action(KDirOperator::Reload)->setShortcut(Qt::Key_F5);
+        auto *close = action(QStringLiteral("&Close"), QKeySequence(Qt::CTRL | Qt::Key_W), QString(), [this] { QWidget::close(); });
+        auto *address = action(QStringLiteral("Address"), QKeySequence(Qt::ALT | Qt::Key_D), QString(), [this] { nav->editAddress(); });
+        auto *find = action(QStringLiteral("Search"), QKeySequence(Qt::CTRL | Qt::Key_E), QString(), [this] { nav->search->setFocus(); });
+        // KDirOperator's Back/Forward report enabled with no history, so Explorer keeps its own (as Windows' recent pages).
+        files->action(KDirOperator::Back)->setShortcut({});
+        files->action(KDirOperator::Forward)->setShortcut({});
+        auto *back = action(QStringLiteral("Back"), QKeySequence(Qt::ALT | Qt::Key_Left), QString(), [this] { step(-1); });
+        auto *forward = action(QStringLiteral("Forward"), QKeySequence(Qt::ALT | Qt::Key_Right), QString(), [this] { step(1); });
         addActions({files->action(KDirOperator::Trash), files->action(KDirOperator::Delete), files->action(KDirOperator::Rename),
-                    files->action(KDirOperator::Properties), cut, copy, paste, undo, selectAll});
+                    files->action(KDirOperator::Properties), files->action(KDirOperator::Up), files->action(KDirOperator::Reload),
+                    back, forward, cut, copy, paste, undo, selectAll, close, address, find});
 
         setView(1);
         entered(start);
-        resize(757, 530);
+        resize(760, 534);
+        files->view()->setFocus();  // Windows starts with the keyboard in the file list
+    }
+
+protected:
+    // KDirOperator's icon view sizes its grid from the font after every resize; Explorer's grid is reapplied after it.
+    bool eventFilter(QObject *watched, QEvent *event) override
+    {
+        if (watched != files->view())
+            return false;
+        if (event->type() == QEvent::Resize)
+            QTimer::singleShot(0, this, &Explorer::applyGrid);
+        else if (event->type() == QEvent::FocusIn)
+            hideFocus();
+        else if (event->type() == QEvent::KeyPress)
+            keyboardUsed = true;
+        return false;
     }
 
 private:
     Files *files;
-    KUrlNavigator *address;
-    QLineEdit *search;
-    QToolButton *organize;
-    QSplitter *splitter;
-    QTreeWidget *pane;
-    QWidget *detailsPane;
-    QLabel *detailsIcon, *detailsText;
-    QActionGroup *views;
+    NavigationBand *nav = new NavigationBand;
+    CommandBar *bar = new CommandBar;
+    NavigationPane *pane = new NavigationPane;
+    DetailsPane *details = new DetailsPane;
+    QLabel *empty;
+    QActionGroup *views = new QActionGroup(this);
+    int iconSize = 96;
+    bool keyboardUsed = false;
+    QList<QUrl> history;
+    qsizetype position = -1;
+    bool stepping = false;
     KFileItemActions openWith;
     QAction *cut = action(QStringLiteral("Cu&t"), QKeySequence::Cut, QStringLiteral("edit-cut"), [this] { toClipboard(true); });
     QAction *copy = action(QStringLiteral("&Copy"), QKeySequence::Copy, QStringLiteral("edit-copy"), [this] { toClipboard(false); });
@@ -164,139 +682,92 @@ private:
         return a;
     }
 
-    QToolButton *toolButton(QAction *a)
+    void commands()
     {
-        auto *b = new QToolButton;
-        b->setDefaultAction(a);
-        b->setAutoRaise(true);
-        return b;
-    }
-
-    QToolButton *textButton(const QString &text)
-    {
-        auto *b = new QToolButton;
-        b->setText(text);
-        b->setAutoRaise(true);
-        b->setPopupMode(QToolButton::InstantPopup);
-        // Explorer puts the arrow after the text; the Windows style would draw it underneath.
-        b->setStyleSheet(QStringLiteral("QToolButton::menu-indicator { image: none; }"));
-        b->setMinimumHeight(26);
-        return b;
-    }
-
-    QMenu *organizeMenu()
-    {
-        auto *menu = new QMenu(this);
-        menu->addActions({cut, copy, paste, undo});
-        menu->addSeparator();
-        menu->addAction(selectAll);
-        menu->addSeparator();
-        auto *layout = menu->addMenu(QStringLiteral("&Layout"));
-        auto toggle = [this, layout](const QString &text, auto show) {
+        auto *organize = new QMenu(this);
+        organize->addActions({cut, copy, paste, undo});
+        organize->addSeparator();
+        organize->addAction(selectAll);
+        organize->addSeparator();
+        auto *layout = organize->addMenu(QStringLiteral("&Layout"));
+        auto toggle = [layout](const QString &text, QWidget *target) {
             auto *a = layout->addAction(text);
             a->setCheckable(true);
             a->setChecked(true);
-            connect(a, &QAction::toggled, this, show);
-            return a;
+            QObject::connect(a, &QAction::toggled, target, &QWidget::setVisible);
         };
-        toggle(QStringLiteral("&Details pane"), [this](bool on) { detailsPane->setVisible(on); });
+        toggle(QStringLiteral("&Details pane"), details);
         layout->addAction(files->action(KDirOperator::ShowPreviewPanel));
-        toggle(QStringLiteral("&Navigation pane"), [this](bool on) { pane->setVisible(on); });
-        menu->addSeparator();
-        menu->addActions({files->action(KDirOperator::Trash), files->action(KDirOperator::Rename), files->action(KDirOperator::Properties)});
+        toggle(QStringLiteral("&Navigation pane"), pane);
+        organize->addSeparator();
+        organize->addActions({files->action(KDirOperator::Trash), files->action(KDirOperator::Rename), files->action(KDirOperator::Properties)});
         files->action(KDirOperator::Trash)->setText(QStringLiteral("&Delete"));
-        menu->addSeparator();
-        menu->addAction(QStringLiteral("&Close"), this, &QWidget::close);
-        connect(menu, &QMenu::aboutToShow, this, &Explorer::updateActions);
-        return menu;
-    }
+        organize->addSeparator();
+        organize->addAction(QStringLiteral("&Close"), this, &QWidget::close);
+        connect(organize, &QMenu::aboutToShow, this, &Explorer::updateActions);
 
-    // Explorer's view menu, minus Tiles and Content, which KDE's views have no equivalent for.
-    QToolButton *viewButton()
-    {
-        auto *button = new QToolButton;
-        button->setAutoRaise(true);
-        button->setPopupMode(QToolButton::MenuButtonPopup);
-        button->setIcon(QIcon::fromTheme(QStringLiteral("view-list-icons")));
-        auto *menu = new QMenu(button);
-        views = new QActionGroup(this);
-        const QStringList names = {QStringLiteral("Extra Large Icons"), QStringLiteral("Large Icons"), QStringLiteral("Medium Icons"),
-                                   QStringLiteral("Small Icons"), QStringLiteral("List"), QStringLiteral("Details")};
+        // Windows libraries collect folders; here a library is the XDG folder, and including adds a link to it.
+        auto *library = new QMenu(this);
+        for (auto [name, icon, location] : {std::tuple{"Documents", "library-documents", QStandardPaths::DocumentsLocation},
+                                            {"Music", "library-music", QStandardPaths::MusicLocation},
+                                            {"Pictures", "library-pictures", QStandardPaths::PicturesLocation},
+                                            {"Videos", "library-videos", QStandardPaths::MoviesLocation}})
+            library->addAction(assetIcon(QString::fromLatin1(icon)), QString::fromLatin1(name), this, [this, location] {
+                const KFileItemList selection = files->selectedItems();
+                auto *job = KIO::link(selection.isEmpty() ? QList<QUrl>{files->url()} : selection.urlList(),
+                                      QUrl::fromLocalFile(QStandardPaths::writableLocation(location)));
+                job->setUiDelegate(KIO::createDefaultJobUiDelegate(KJobUiDelegate::AutoHandlingEnabled, this));
+            });
+        auto *share = new QMenu(this);
+        share->addAction(QStringLiteral("Specific people..."), this, [this] {
+            const KFileItemList selection = files->selectedItems();
+            KPropertiesDialog::showDialog(selection.isEmpty() ? files->url() : selection.first().url(), this);
+        });
+
+        auto *viewMenu = new QMenu(this);
+        const QList<std::pair<QString, QString>> names = {{QStringLiteral("Extra Large Icons"), QStringLiteral("view-extra-large")},
+                                                          {QStringLiteral("Large Icons"), QStringLiteral("view-large")},
+                                                          {QStringLiteral("Medium Icons"), QStringLiteral("view-medium")},
+                                                          {QStringLiteral("Small Icons"), QStringLiteral("view-small")},
+                                                          {QStringLiteral("List"), QStringLiteral("view-list")},
+                                                          {QStringLiteral("Details"), QStringLiteral("view-details")}};
         for (int i = 0; i < names.size(); ++i) {
-            auto *a = menu->addAction(names[i], this, [this, i] { setView(i); });
+            auto *a = viewMenu->addAction(assetIcon(names[i].second), names[i].first, this, [this, i] { setView(i); });
             a->setCheckable(true);
             views->addAction(a);
         }
-        button->setMenu(menu);
-        // Clicking the button itself steps to the next view, as in Explorer.
-        connect(button, &QToolButton::clicked, this, [this] { setView((views->actions().indexOf(views->checkedAction()) + 1) % views->actions().size()); });
-        return button;
+        bar->left = {{QStringLiteral("Organize"), {}, organize, {}},
+                     {QStringLiteral("Include in library"), {}, library, {}},
+                     {QStringLiteral("Share with"), {}, share, {}},
+                     {QStringLiteral("New folder"), {}, nullptr, [this] { files->mkdir(); }}};
+        bar->right = {{QStringLiteral("View"), assetIcon(QStringLiteral("view-large")), viewMenu,
+                       [this] { setView((views->actions().indexOf(views->checkedAction()) + 1) % views->actions().size()); }},
+                      {QStringLiteral("Preview pane"), assetIcon(QStringLiteral("preview-pane")), nullptr,
+                       [this] { files->action(KDirOperator::ShowPreviewPanel)->trigger(); }},
+                      {QStringLiteral("Help"), assetIcon(QStringLiteral("help")), nullptr, [this] { openUrl(QUrl(QStringLiteral("help:/"))); }}};
     }
 
     void setView(int index)
     {
         static const int sizes[] = {256, 96, 48, 16, 16, 16};
+        static const char *icons[] = {"view-extra-large", "view-large", "view-medium", "view-small", "view-list", "view-details"};
         const auto mode = index < 3 ? KDirOperator::ViewIconsView : index < 5 ? KDirOperator::ViewCompactView : KDirOperator::ViewDetailsView;
         files->action(mode)->trigger();
         files->setIconSize(sizes[index]);
+        iconSize = index < 3 ? sizes[index] : 0;
         views->actions()[index]->setChecked(true);
+        bar->right[0].icon = assetIcon(QString::fromLatin1(icons[index]));
+        bar->relayout();
+        applyGrid();
     }
 
-    QTreeWidget *navigationPane()
+    // Explorer's icon cells: 117px for Large Icons, starting 7px in from the top-left, as in Windows.
+    void applyGrid()
     {
-        pane = new QTreeWidget;
-        pane->setHeaderHidden(true);
-        pane->setRootIsDecorated(false);
-        pane->setIndentation(10);
-        pane->setFrameShape(QFrame::NoFrame);
-        // Explorer's navigation pane indents without the Windows style's dotted tree lines.
-        pane->setStyleSheet(QStringLiteral("QTreeView::branch { background: palette(base); }"));
-        auto place = [this](QTreeWidgetItem *parent, const QString &name, const QString &icon, const QUrl &url) {
-            if (!parent && pane->topLevelItemCount()) // Explorer leaves a blank line between groups.
-                (new QTreeWidgetItem(pane))->setFlags(Qt::NoItemFlags);
-            auto *item = parent ? new QTreeWidgetItem(parent, {name}) : new QTreeWidgetItem(pane, {name});
-            item->setIcon(0, QIcon::fromTheme(icon));
-            item->setData(0, Qt::UserRole, url);
-            return item;
-        };
-        auto path = [](QStandardPaths::StandardLocation l) { return QUrl::fromLocalFile(QStandardPaths::writableLocation(l)); };
-        auto *favorites = place(nullptr, QStringLiteral("Favorites"), QStringLiteral("starred-symbolic"), {});
-        place(favorites, QStringLiteral("Desktop"), QStringLiteral("user-desktop"), path(QStandardPaths::DesktopLocation));
-        place(favorites, QStringLiteral("Downloads"), QStringLiteral("folder-downloads"), path(QStandardPaths::DownloadLocation));
-        place(favorites, QStringLiteral("Recent Places"), QStringLiteral("document-open-recent"), QUrl(QStringLiteral("recentlyused:/locations")));
-        auto *libraries = place(nullptr, QStringLiteral("Libraries"), QStringLiteral("folder-library"), path(QStandardPaths::HomeLocation));
-        place(libraries, QStringLiteral("Documents"), QStringLiteral("folder-documents"), path(QStandardPaths::DocumentsLocation));
-        place(libraries, QStringLiteral("Music"), QStringLiteral("folder-music"), path(QStandardPaths::MusicLocation));
-        place(libraries, QStringLiteral("Pictures"), QStringLiteral("folder-pictures"), path(QStandardPaths::PicturesLocation));
-        place(libraries, QStringLiteral("Videos"), QStringLiteral("folder-videos"), path(QStandardPaths::MoviesLocation));
-        place(nullptr, QStringLiteral("Computer"), QStringLiteral("computer"), QUrl::fromLocalFile(QStringLiteral("/")));
-        place(nullptr, QStringLiteral("Network"), QStringLiteral("network-workgroup"), QUrl(QStringLiteral("remote:/")));
-        pane->expandAll();
-        connect(pane, &QTreeWidget::itemClicked, this, [this](QTreeWidgetItem *item) {
-            const QUrl url = item->data(0, Qt::UserRole).toUrl();
-            if (url.isValid())
-                files->setUrl(url, true);
-        });
-        return pane;
-    }
-
-    void entered(const QUrl &url)
-    {
-        address->setLocationUrl(url);
-        const QString file = url.adjusted(QUrl::StripTrailingSlash).fileName();
-        const QString name = url.path() == QLatin1String("/") && url.isLocalFile() ? QStringLiteral("Computer") : file.isEmpty() ? url.toDisplayString() : file;
-        setWindowTitle(name);
-        search->clear();
-        search->setPlaceholderText(QStringLiteral("Search ") + name);
-        detailsIcon->setPixmap(QIcon::fromTheme(KFileItem(url).iconName()).pixmap(48));
-    }
-
-    void updateDetails()
-    {
-        const int selected = files->selectedItems().size();
-        const int total = proxy()->rowCount();
-        detailsText->setText(selected ? QStringLiteral("%1 item%2 selected").arg(selected).arg(selected == 1 ? "" : "s")
-                                      : QStringLiteral("%1 item%2").arg(total).arg(total == 1 ? "" : "s"));
+        if (auto *list = qobject_cast<QListView *>(files->view()); list && iconSize) {
+            list->setStyleSheet(QStringLiteral("QListView { padding: 7px 0 0 7px; background: white; }"));
+            list->setGridSize(QSize(iconSize + 21, iconSize + 40));
+        }
     }
 
     // Explorer's Details columns: Name, Date modified, Type, Size.
@@ -315,7 +786,59 @@ private:
         }
     }
 
+    void entered(const QUrl &url)
+    {
+        const QString file = url.adjusted(QUrl::StripTrailingSlash).fileName();
+        const QString name = url.path() == QLatin1String("/") && url.isLocalFile() ? QStringLiteral("Computer") : file.isEmpty() ? url.toDisplayString() : file;
+        setWindowTitle(name);
+        const QIcon icon = QIcon::fromTheme(KIO::iconNameForUrl(url));
+        setWindowIcon(icon);
+        details->icon = icon;
+        if (!std::exchange(stepping, false)) {
+            history.resize(position + 1);
+            history.append(url);
+            position = history.size() - 1;
+        }
+        nav->search->clear();
+        nav->search->setPlaceholderText(QStringLiteral("Search ") + name);
+        nav->setState(url, position > 0, position < history.size() - 1);
+        pane->setLocation(url);
+    }
+
+    void step(int by)
+    {
+        if (position + by < 0 || position + by >= history.size())
+            return;
+        position += by;
+        stepping = true;
+        files->setUrl(history[position], true);
+    }
+
+    // Windows draws no focus rectangle until the keyboard is used, but loading and focusing the view make the first
+    // item current in Qt, so that is undone afterwards. Arrow keys still start at the first item.
+    void hideFocus()
+    {
+        if (!keyboardUsed)
+            QTimer::singleShot(0, this, [this] { files->view()->selectionModel()->clearCurrentIndex(); });
+    }
+
     QSortFilterProxyModel *proxy() const { return static_cast<QSortFilterProxyModel *>(files->view()->model()); }
+
+    void updateDetails()
+    {
+        const int selected = files->selectedItems().size();
+        const int total = proxy()->rowCount();
+        details->text = selected ? QStringLiteral("%1 item%2 selected").arg(selected).arg(selected == 1 ? "" : "s")
+                                 : QStringLiteral("%1 item%2").arg(total).arg(total == 1 ? "" : "s");
+        details->update();
+        empty->setVisible(total == 0);
+        if (total == 0) {
+            const int top = qobject_cast<QTreeView *>(files->view()) ? static_cast<QTreeView *>(files->view())->header()->height() : 0;
+            empty->adjustSize();
+            empty->move((files->width() - empty->width()) / 2, top + 16);
+            empty->raise();
+        }
+    }
 
     void updateActions()
     {
@@ -326,13 +849,15 @@ private:
         undo->setEnabled(KIO::FileUndoManager::self()->isUndoAvailable());
     }
 
-    void open(const KFileItem &item)
+    void openUrl(const QUrl &url, const QString &mimeType = QString())
     {
-        auto *job = new KIO::OpenUrlJob(item.targetUrl(), item.mimetype());
+        auto *job = new KIO::OpenUrlJob(url, mimeType);
         job->setUiDelegate(KIO::createDefaultJobUiDelegate(KJobUiDelegate::AutoHandlingEnabled, this));
         job->setRunExecutables(false);
         job->start();
     }
+
+    void open(const KFileItem &item) { openUrl(item.targetUrl(), item.mimetype()); }
 
     void toClipboard(bool cutting)
     {
@@ -360,7 +885,7 @@ private:
             menu.addAction(paste);
             menu.addAction(undo);
             menu.addSeparator();
-            menu.addMenu(QStringLiteral("Ne&w"))->addAction(QIcon::fromTheme(QStringLiteral("folder-new")), QStringLiteral("&Folder"), files, &KDirOperator::mkdir);
+            menu.addMenu(QStringLiteral("Ne&w"))->addAction(assetIcon(QStringLiteral("folder")), QStringLiteral("&Folder"), files, &KDirOperator::mkdir);
             menu.addSeparator();
             menu.addAction(QStringLiteral("P&roperties"), this, [this] {
                 files->view()->clearSelection();
@@ -395,9 +920,8 @@ int main(int argc, char **argv)
     app.setApplicationName(QStringLiteral("win7-explorer"));
     // Matches the .desktop file, so the taskbar groups windows under it and shows its icon.
     app.setDesktopFileName(QStringLiteral("org.win7classic.explorer"));
-    app.setWindowIcon(QIcon::fromTheme(QStringLiteral("org.win7classic.explorer")));
     QCommandLineParser args;
-    args.addPositionalArgument(QStringLiteral("url"), QStringLiteral("Folder to open (default: Libraries, i.e. home)"));
+    args.addPositionalArgument(QStringLiteral("url"), QStringLiteral("Folder to open (default: home)"));
     args.process(app);
     const QStringList urls = args.positionalArguments();
     for (const QString &u : urls.isEmpty() ? QStringList{QDir::homePath()} : urls)

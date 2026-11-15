@@ -16,9 +16,9 @@ from lab import ROOT, VM, vmctl, user, toggle, install, shot, wait_for, kwin_que
 OUT = Path(sys.argv[1] if len(sys.argv) > 1 else '/tmp/win7-explorer-test')
 EXPLORER = 'org.win7classic.explorer'
 # The window is placed where reference/screenshots/w7-explorer.png has Explorer.
-GEOMETRY = '{x: 257, y: 121, width: 765, height: 557}'
-SUB, FILE, THIRD = (492, 250), (636, 250), (780, 250)  # icon cells, folders sorted first
-SEARCH, NEW_FOLDER, VIEW_MENU = (900, 158), (367, 185), (985, 185)
+GEOMETRY = '{x: 256, y: 120, width: 768, height: 560}'
+SUB, FILE, THIRD = (477, 270), (594, 270), (711, 270)  # icon cells, folders sorted first
+SEARCH, NEW_FOLDER, VIEW_MENU = (880, 160), (583, 194), (942, 194)
 
 
 def captions(cls=EXPLORER):
@@ -159,6 +159,11 @@ def main():
     shot(OUT / '7-properties.png')
     key('KEY_ESC')
     print('Details view, Properties')
+
+    click((640, 450))
+    key('KEY_LEFTCTRL', 'KEY_W')
+    wait_for(lambda: not captions(), 'Ctrl+W closes the window')
+    print('Ctrl+W closes Explorer')
 
     user('pkill -f "^/home/tester/.local/bin/win7-explorer"; true')
     toggle('current')

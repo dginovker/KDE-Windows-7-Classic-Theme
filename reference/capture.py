@@ -83,6 +83,31 @@ def pressed(x, y):
     time.sleep(1)
 
 
+def double_click(x, y):
+    vmctl.pointer(VM, x, y)
+    for down in (True, False, True, False):
+        vmctl.button(VM, 'left', down)
+
+
+def explorer_in_documents(pointer=(849, 419)):
+    """Explorer after opening Documents from the fixture folder, so Back is enabled."""
+    fixture((849, 419))
+    vmctl.pointer(VM, 849, 419, 'left')
+    double_click(485, 265)
+    time.sleep(2)
+    vmctl.pointer(VM, *pointer)
+    time.sleep(1)
+
+
+def explorer_with_forward(pointer):
+    """Back to the fixture folder after opening Documents, so Forward is enabled."""
+    explorer_in_documents((277, 159))
+    vmctl.pointer(VM, 277, 159, 'left')
+    time.sleep(2)
+    vmctl.pointer(VM, *pointer)
+    time.sleep(1)
+
+
 def maximized():
     fixture((640, 790))
     vmctl.pointer(VM, 993, 132, 'left')  # the fixture's Maximize button
@@ -110,6 +135,19 @@ SCENES = {
     'explorer-details': lambda: (fixture((849, 419)), vmctl.pointer(VM, 849, 419, 'left'), vmctl.pointer(VM, 941, 194, 'left'),
                                  time.sleep(1), vmctl.pointer(VM, 1004, 325, 'left'), vmctl.pointer(VM, 849, 600), time.sleep(1)),
     'explorer-organize': lambda: (fixture((849, 419)), vmctl.pointer(VM, 849, 419, 'left'), vmctl.pointer(VM, 300, 193, 'left'), time.sleep(1)),
+    # Back/Forward button states, which Explorer's Classic look renders differently from its raw bitmaps.
+    'explorer-back': explorer_in_documents,
+    # The pointer sits on each button's lower-right rim so it hides as little of the button as possible.
+    'explorer-back-hot': lambda: explorer_in_documents((285, 167)),
+    'explorer-back-pressed': lambda: (explorer_in_documents(), pressed(285, 167)),
+    'explorer-forward': lambda: explorer_with_forward((849, 419)),
+    'explorer-forward-hot': lambda: explorer_with_forward((313, 167)),
+    'explorer-forward-pressed': lambda: (explorer_with_forward((849, 419)), pressed(313, 167)),
+    # Same states with the pointer on the upper-left rim: together the two captures show every button pixel.
+    'explorer-back-hot-ul': lambda: explorer_in_documents((268, 151)),
+    'explorer-back-pressed-ul': lambda: (explorer_in_documents(), pressed(268, 151)),
+    'explorer-forward-hot-ul': lambda: explorer_with_forward((296, 151)),
+    'explorer-forward-pressed-ul': lambda: (explorer_with_forward((849, 419)), pressed(296, 151)),
     'calendar': lambda: tray_popup(1229),
     'volume': lambda: tray_popup(1187, 777),
 }
@@ -131,6 +169,8 @@ def main():
     vmctl.keys(VM, 'KEY_ESC')
     if a.scene == 'maximized':
         vmctl.pointer(VM, 1249, 8, 'left')  # Restore, so later scenes start from the normal fixture
+    if a.scene.startswith(('explorer-back', 'explorer-forward')):
+        vmctl.keys(VM, 'KEY_LEFTALT', 'KEY_F4')  # the navigated window; the next fixture opens a fresh one
     if a.scene == 'explorer-details':
         # Explorer remembers the view per folder; back to Large Icons for the other scenes.
         vmctl.pointer(VM, 941, 194, 'left')
