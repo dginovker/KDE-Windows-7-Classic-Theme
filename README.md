@@ -6,6 +6,7 @@ Build an independently maintained Classic UI with a live return to the user's cu
 - `reference/gallery.html`: genuine Windows 7 beside the earlier A/B experiments; click images for original pixels.
 - `reference/README.md`: measurements, VM provenance and unresolved risks.
 - Check the gallery: `python reference/verify.py` (requires Pillow).
+- `vm/`: test VMs. `vm/vmctl.py lab start`, then `sh`/`user` (stdin script as root / as the `tester` desktop user), `put`/`get`, `click x y`, `type`, `key`, `shot`. Input never touches the host desktop. `vm/prepare-tester.sh` (run via `vm/vmctl.py lab sh`) recreates `tester` for a pristine stock Plasma 6.8.2 session.
 
 No host theme, session or boot changes are authorized by these artifacts. Preserve unsaved work; Linux authentication and reliable apply/restore remain unverified. Work is tracked in GitHub issues; the live toggle is not implemented yet.
 
