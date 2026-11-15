@@ -22,6 +22,9 @@ for applet in "$src"/plasma/org.win7classic.*; do
 done
 rm -rf "$data/plasma/desktoptheme/win7-classic"
 cp -r "$src/plasma/theme/win7-classic" "$data/plasma/desktoptheme/"
+mkdir -p "$data/themes"
+rm -rf "$data/themes/Win7-Classic"
+cp -r "$src/plasma/gtk/Win7-Classic" "$data/themes/"
 mkdir -p "$data/kwin/decorations"
 rm -rf "$data/kwin/decorations/win7classic"
 cp -r "$src/plasma/decoration/win7classic" "$data/kwin/decorations/"

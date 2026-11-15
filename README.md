@@ -19,7 +19,8 @@ No host theme, session or boot changes are authorized by these artifacts. Preser
 ## What Windows mode has so far
 
 - Classic window frames (`plasma/decoration/`, a KWin QML decoration): active, inactive, maximized and pressed-button states match the reference pixel-for-pixel apart from the app icon and title text.
-- Classic colors (Win32 system colors from the reference VM), Tahoma 8.25pt with ClearType-like RGB subpixel text (`fonts/`, limited to the installed Tahoma files), and Qt's Windows widget style for Qt/KDE apps. GTK apps keep their own theme.
+- Classic colors (Win32 system colors from the reference VM), Tahoma 8.25pt with ClearType-like RGB subpixel text (`fonts/`, limited to the installed Tahoma files), and Qt's Windows widget style for Qt/KDE apps.
+- GTK 3 apps: a Classic CSS theme (`plasma/gtk/`) on top of GTK's built-in Adwaita, switched through the `gtk-theme` GSetting so running apps restyle live. GTK 4/libadwaita apps can't be themed this way and keep their own look.
 - Classic Start menu (part of the taskbar applet): favorites, All Programs (KDE's categories as folders), search over apps and System Settings, user folders and shortcuts on the right, Shut down (asks for confirmation through KDE's dialog). Opens with Start or the Meta key. Edges, separators and highlights match `reference/screenshots/w7-menu*.png`, `w7-programs.png` and `w7-search.png` pixel-for-pixel.
 - Classic taskbar (`plasma/`): Start button, Never-combine task buttons, pinned launchers, notification-area frame around the stock system tray, two-line clock and Show Desktop. Edges match `reference/screenshots/w7-taskbar.png` pixel-for-pixel; icons and text differ.
 
@@ -29,6 +30,7 @@ Both run from the host against the lab VM and write screenshots to the given dir
 
 - `python tests/test_toggle.py [outdir]`: real Kate/Konsole/file-dialog work survives 22 switches, per-mode edits persist, configs return byte-identical, failure and restore paths work.
 - `python tests/test_frames.py [outdir]`: frame pixels match the Windows references in active/inactive/maximized/pressed states; caption buttons work (releasing off a pressed button cancels it); a running app picks up Tahoma live; switching back restores `kdeglobals`/`kwinrc` exactly.
+- `python tests/test_gtk.py [outdir]`: a running GTK 3 app turns Classic (ButtonFace background, raised button bevels, white sunken fields); the GTK theme and font are restored, and after the first switch round trips leave `~/.config/gtk-*/` byte-identical.
 - `python tests/test_text.py [outdir]`: Start menu labels against Windows: pixel difference, label widths (up to 3px long, from fractional glyph advances), ClearType-colored pixels; other fonts' rendering unchanged.
 - `python tests/test_startmenu.py [outdir]`: menu, hover, All Programs and search views match the references outside icons and labels; search + Enter, arrow keys + Enter, Documents, Esc/Start/Meta, and a cancelled Shut down all work.
 - `python tests/test_taskbar.py [outdir]`: taskbar structure matches the Windows reference outside button faces and tray icons; task buttons minimize/restore, launchers launch, Start and Show Desktop work, and it still matches after switching away and back.

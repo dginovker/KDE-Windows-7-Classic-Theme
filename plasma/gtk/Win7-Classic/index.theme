@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=X-GNOME-Metatheme
+Name=Win7-Classic
+Comment=Windows 7 Classic for GTK 3 (installed by KDE-Windows-7-Classic-Theme)
+
+[X-GNOME-Metatheme]
+GtkTheme=Win7-Classic

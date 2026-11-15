@@ -32,7 +32,7 @@ def close_test_apps():
     """Close every app the tests start, so one test's leftovers never show up in another's screenshots."""
     user('pkill -u tester -x kate; pkill -u tester -x kdialog; pkill -u tester -x konsole; pkill -u tester -x dolphin; '
          'pkill -u tester -x gtk3-demo; pkill -u tester firefox; pkill -f "^counter-loop"; '
-         'pkill -f "^/usr/bin/python3 /tmp/fixture_window.py"; rm -f /tmp/counter /tmp/kate-proof.txt; true')
+         'pkill -f "^/usr/bin/python3 /tmp/fixture_window.py"; pkill -f "^/usr/bin/python3 /tmp/fixture_gtk.py"; rm -f /tmp/counter /tmp/kate-proof.txt; true')
 
 
 def install():

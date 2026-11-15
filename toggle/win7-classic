@@ -54,6 +54,13 @@ load_keys() {
     qdbus6 org.kde.KWin /KWin reconfigure
 }
 
+# Running GTK apps follow the gtk-theme GSetting live. Only that dconf key is swapped: KDE's own setGtkTheme
+# would also regenerate the user's ~/.config/gtk-*/ files, which then don't come back byte-for-byte.
+# An empty saved value means the key was unset (GTK's default), so it is reset rather than written.
+GTK_KEY=/org/gnome/desktop/interface/gtk-theme
+gtk_theme() { dconf read "$GTK_KEY"; }
+set_gtk_theme() { if [[ -n $1 ]]; then dconf write "$GTK_KEY" "$1"; else dconf reset "$GTK_KEY"; fi; }
+
 copy_files() { for f in "${FILES[@]}"; do if [[ -e $1/$f ]]; then cp -p "$1/$f" "$2/$f"; else rm -f "$2/$f"; fi; done; }
 
 switch_to() {
@@ -65,6 +72,7 @@ switch_to() {
     rm -rf "$state/profiles/$from.new" && mkdir "$state/profiles/$from.new"
     copy_files "$config" "$state/profiles/$from.new"
     save_keys "$state/profiles/$from.new"
+    gtk_theme > "$state/profiles/$from.new/gtk-theme"
     rm -rf "$state/profiles/$from" && mv "$state/profiles/$from.new" "$state/profiles/$from"
     log "saved $from: $(digest "$state/profiles/$from") $(cd "$state/profiles/$from" && sha256sum keys.json)"
 
@@ -72,11 +80,13 @@ switch_to() {
     if [[ -d $state/profiles/$target ]]; then
         copy_files "$state/profiles/$target" "$config"
         load_keys "$state/profiles/$target/keys.json"
+        set_gtk_theme "$(cat "$state/profiles/$target/gtk-theme")"
     else
         # First use of a mode: start from its shipped config files (e.g. the panel theme), then run its layout script.
         seed=1
         for f in "${FILES[@]}"; do [[ ! -e $share/$target/$f ]] || cp "$share/$target/$f" "$config/$f"; done
         load_keys "$share/$target/keys"
+        set_gtk_theme "$(cat "$share/$target/gtk-theme")"
     fi
     local problem=""
     if ! start_shell; then
@@ -90,6 +100,7 @@ switch_to() {
         stop_shell
         copy_files "$state/profiles/$from" "$config"
         load_keys "$state/profiles/$from/keys.json"
+        set_gtk_theme "$(cat "$state/profiles/$from/gtk-theme")"
         start_shell || die "rollback could not start plasmashell; run: win7-classic restore"
         die "switch to $target failed ($problem); still in $from mode"
     fi
@@ -106,8 +117,10 @@ restore() {
     rm -rf "$state/profiles/before-restore" && mkdir "$state/profiles/before-restore"
     copy_files "$config" "$state/profiles/before-restore"
     save_keys "$state/profiles/before-restore"
+    gtk_theme > "$state/profiles/before-restore/gtk-theme"
     copy_files "$state/profiles/current" "$config"
     load_keys "$state/profiles/current/keys.json"
+    set_gtk_theme "$(cat "$state/profiles/current/gtk-theme")"
     echo current > "$state/mode"
     start_shell || die "plasmashell did not start after restore"
     log "restored current: $(digest "$config")"
