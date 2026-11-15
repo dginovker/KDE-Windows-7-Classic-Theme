@@ -792,7 +792,12 @@ private:
         const QString name = url.path() == QLatin1String("/") && url.isLocalFile() ? QStringLiteral("Computer") : file.isEmpty() ? url.toDisplayString() : file;
         setWindowTitle(name);
         const QIcon icon = QIcon::fromTheme(KIO::iconNameForUrl(url));
-        setWindowIcon(icon);
+        // As pixels: given a theme icon, Qt sends KWin only its name, and KWin looks it up in its own icon theme,
+        // which doesn't follow the live switch to Windows mode's icons.
+        QIcon pixels;
+        for (int size : {16, 22, 32, 48})
+            pixels.addPixmap(icon.pixmap(size));
+        setWindowIcon(pixels);
         details->icon = icon;
         if (!std::exchange(stepping, false)) {
             history.resize(position + 1);
