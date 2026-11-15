@@ -63,16 +63,29 @@ def start(vm, timeout=300):
     if virsh('domstate', vm).strip() != 'running':
         virsh('start', vm)
     deadline = time.monotonic() + timeout
-    probe = 'pgrep -x plasmashell' if vm == VMS['lab'] else None
     while time.monotonic() < deadline:
-        try:
-            agent(vm, 'guest-ping', {})
-            if probe is None or run(vm, probe, 10)[0] == 0:
+        if vm == VMS['w7']:
+            # The Windows VM is deliberately agent-free; its autologon desktop is ready once the taskbar is drawn.
+            if desktop_drawn(vm):
                 return
-        except (subprocess.CalledProcessError, RuntimeError):
-            pass
+        else:
+            try:
+                agent(vm, 'guest-ping', {})
+                if run(vm, 'pgrep -x plasmashell', 10)[0] == 0:
+                    return
+            except (subprocess.CalledProcessError, RuntimeError):
+                pass
         time.sleep(2)
     raise TimeoutError(f'{vm} did not reach a running desktop within {timeout}s')
+
+
+def desktop_drawn(vm):
+    from PIL import Image
+    with tempfile.NamedTemporaryFile(suffix='.png') as shot:
+        virsh('screenshot', vm, shot.name)
+        with Image.open(shot.name) as image:
+            # Classic taskbar ButtonFace along the bottom row of a 1280x800 desktop.
+            return image.size == (1280, 800) and image.convert('RGB').getpixel((900, 790)) == (212, 208, 200)
 
 
 def screen_size(vm):
@@ -87,7 +100,8 @@ def pointer(vm, x, y, button=None):
     width, height = screen_size(vm)
     if not (0 <= x < width and 0 <= y < height):
         raise ValueError(f'({x},{y}) outside {width}x{height} screen')
-    batches = [[{'type': 'abs', 'data': {'axis': a, 'value': round(v / m * 32767)}} for a, v, m in (('x', x, width), ('y', y, height))]]
+    # Aim at the pixel centre: guests map the 0-32767 tablet range by truncation, so edges land a pixel off.
+    batches = [[{'type': 'abs', 'data': {'axis': a, 'value': min(32767, round((v + 0.5) * 32768 / m))}} for a, v, m in (('x', x, width), ('y', y, height))]]
     if button:
         batches += [[{'type': 'btn', 'data': {'button': button, 'down': d}}] for d in (True, False)]
     for events in batches:
