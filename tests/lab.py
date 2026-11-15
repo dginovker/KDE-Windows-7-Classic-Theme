@@ -2,6 +2,7 @@
 import io
 from pathlib import Path
 import shlex
+import subprocess
 import sys
 import tarfile
 import time
@@ -35,16 +36,26 @@ def close_test_apps():
          'pkill -f "^/usr/bin/python3 /tmp/fixture_window.py"; pkill -f "^/usr/bin/python3 /tmp/fixture_gtk.py"; rm -f /tmp/counter /tmp/kate-proof.txt; true')
 
 
-def install():
-    """Run install.sh from the working tree as tester, then reset to current mode with no saved profiles."""
-    buffer = io.BytesIO()
-    with tarfile.open(fileobj=buffer, mode='w:gz') as tar:
-        for name in ('install.sh', 'fonts', 'plasma', 'toggle'):
-            tar.add(ROOT / name, arcname=name, filter=lambda t: None if '__pycache__' in t.name else t)
-    Path('/tmp/win7-install.tgz').write_bytes(buffer.getvalue())
+def install(commit=None, reset=True):
+    """Run install.sh as tester from the working tree (or from `commit`, to test upgrades).
+
+    With reset, switch back to current mode and forget saved profiles so the test starts from scratch.
+    """
+    if commit:
+        archive = subprocess.run(['git', '-C', str(ROOT), 'archive', '--format=tar.gz', commit, 'install.sh', 'plasma', 'toggle'],
+                                 check=True, capture_output=True).stdout
+    else:
+        buffer = io.BytesIO()
+        with tarfile.open(fileobj=buffer, mode='w:gz') as tar:
+            for name in ('install.sh', 'fonts', 'plasma', 'toggle'):
+                tar.add(ROOT / name, arcname=name, filter=lambda t: None if '__pycache__' in t.name else t)
+        archive = buffer.getvalue()
+    Path('/tmp/win7-install.tgz').write_bytes(archive)
     vmctl.transfer(VM, 'put', '/tmp/win7-install.tgz', '/tmp/win7-install.tgz')
     vmctl.run(VM, 'chmod 644 /tmp/win7-install.tgz', 10)
     user('rm -rf /tmp/win7-src && mkdir /tmp/win7-src && tar -xzf /tmp/win7-install.tgz -C /tmp/win7-src && /tmp/win7-src/install.sh')
+    if not reset:
+        return
     close_test_apps()
     if user('~/.local/bin/win7-classic status') != 'current':
         toggle('current')

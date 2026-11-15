@@ -30,6 +30,7 @@ Both run from the host against the lab VM and write screenshots to the given dir
 
 - `python tests/test_toggle.py [outdir]`: real Kate/Konsole/file-dialog work survives 22 switches, per-mode edits persist, configs return byte-identical, failure and restore paths work.
 - `python tests/test_frames.py [outdir]`: frame pixels match the Windows references in active/inactive/maximized/pressed states; caption buttons work (releasing off a pressed button cancels it); a running app picks up Tahoma live; switching back restores `kdeglobals`/`kwinrc` exactly.
+- `python tests/test_upgrade.py [outdir]`: upgrading from the taskbar-only release while in Windows mode, then switching both ways; Start menu anchored above Start at 100% and 150% scaling.
 - `python tests/test_package.py [outdir]`: builds and installs the Arch package in the VM, switches modes using only packaged files, removes it; no packaged file remains, nothing else under /usr or /etc changes, current-mode config is byte-identical.
 - `python tests/test_gtk.py [outdir]`: a running GTK 3 app turns Classic (ButtonFace background, raised button bevels, white sunken fields); the GTK theme and font are restored, and after the first switch round trips leave `~/.config/gtk-*/` byte-identical.
 - `python tests/test_text.py [outdir]`: Start menu labels against Windows: pixel difference, label widths (up to 3px long, from fractional glyph advances), ClearType-colored pixels; other fonts' rendering unchanged.

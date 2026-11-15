@@ -61,6 +61,17 @@ GTK_KEY=/org/gnome/desktop/interface/gtk-theme
 gtk_theme() { dconf read "$GTK_KEY"; }
 set_gtk_theme() { if [[ -n $1 ]]; then dconf write "$GTK_KEY" "$1"; else dconf reset "$GTK_KEY"; fi; }
 
+# Apply a saved mode's appearance keys and GTK theme. Profiles saved by versions before 0.2 have neither file:
+# those versions never changed these settings in current mode, and Windows mode falls back to what it ships.
+load_appearance() {
+    local mode=$1 dir=$2
+    echo "$mode" > "$state/appearance"
+    if [[ -f $dir/keys.json ]]; then load_keys "$dir/keys.json"
+    elif [[ -d $share/$mode/keys ]]; then load_keys "$share/$mode/keys"; fi
+    if [[ -f $dir/gtk-theme ]]; then set_gtk_theme "$(cat "$dir/gtk-theme")"
+    elif [[ -f $share/$mode/gtk-theme ]]; then set_gtk_theme "$(cat "$share/$mode/gtk-theme")"; fi
+}
+
 copy_files() { for f in "${FILES[@]}"; do if [[ -e $1/$f ]]; then cp -p "$1/$f" "$2/$f"; else rm -f "$2/$f"; fi; done; }
 
 switch_to() {
@@ -71,22 +82,24 @@ switch_to() {
     stop_shell
     rm -rf "$state/profiles/$from.new" && mkdir "$state/profiles/$from.new"
     copy_files "$config" "$state/profiles/$from.new"
-    save_keys "$state/profiles/$from.new"
-    gtk_theme > "$state/profiles/$from.new/gtk-theme"
+    # Only save appearance that belongs to the mode we're leaving. Versions before 0.2 never applied any, so after
+    # upgrading in Windows mode the live colors are still current mode's and must not become Windows mode's.
+    if [[ $(cat "$state/appearance" 2>/dev/null || echo current) == "$from" ]]; then
+        save_keys "$state/profiles/$from.new"
+        gtk_theme > "$state/profiles/$from.new/gtk-theme"
+    fi
     rm -rf "$state/profiles/$from" && mv "$state/profiles/$from.new" "$state/profiles/$from"
-    log "saved $from: $(digest "$state/profiles/$from") $(cd "$state/profiles/$from" && sha256sum keys.json)"
+    log "saved $from: $(digest "$state/profiles/$from") $(cd "$state/profiles/$from" && sha256sum keys.json 2>/dev/null)"
 
     local seed=0
     if [[ -d $state/profiles/$target ]]; then
         copy_files "$state/profiles/$target" "$config"
-        load_keys "$state/profiles/$target/keys.json"
-        set_gtk_theme "$(cat "$state/profiles/$target/gtk-theme")"
+        load_appearance $target "$state/profiles/$target"
     else
         # First use of a mode: start from its shipped config files (e.g. the panel theme), then run its layout script.
         seed=1
         for f in "${FILES[@]}"; do [[ ! -e $share/$target/$f ]] || cp "$share/$target/$f" "$config/$f"; done
-        load_keys "$share/$target/keys"
-        set_gtk_theme "$(cat "$share/$target/gtk-theme")"
+        load_appearance "$target" "$share/$target"
     fi
     local problem=""
     if ! start_shell; then
@@ -99,8 +112,7 @@ switch_to() {
         log "rolling back to $from: $problem"
         stop_shell
         copy_files "$state/profiles/$from" "$config"
-        load_keys "$state/profiles/$from/keys.json"
-        set_gtk_theme "$(cat "$state/profiles/$from/gtk-theme")"
+        load_appearance $from "$state/profiles/$from"
         start_shell || die "rollback could not start plasmashell; run: win7-classic restore"
         die "switch to $target failed ($problem); still in $from mode"
     fi
@@ -119,8 +131,7 @@ restore() {
     save_keys "$state/profiles/before-restore"
     gtk_theme > "$state/profiles/before-restore/gtk-theme"
     copy_files "$state/profiles/current" "$config"
-    load_keys "$state/profiles/current/keys.json"
-    set_gtk_theme "$(cat "$state/profiles/current/gtk-theme")"
+    load_appearance current "$state/profiles/current"
     echo current > "$state/mode"
     start_shell || die "plasmashell did not start after restore"
     log "restored current: $(digest "$config")"
