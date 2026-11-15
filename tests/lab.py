@@ -39,7 +39,7 @@ def install():
     """Run install.sh from the working tree as tester, then reset to current mode with no saved profiles."""
     buffer = io.BytesIO()
     with tarfile.open(fileobj=buffer, mode='w:gz') as tar:
-        for name in ('install.sh', 'plasma', 'toggle'):
+        for name in ('install.sh', 'fonts', 'plasma', 'toggle'):
             tar.add(ROOT / name, arcname=name, filter=lambda t: None if '__pycache__' in t.name else t)
     Path('/tmp/win7-install.tgz').write_bytes(buffer.getvalue())
     vmctl.transfer(VM, 'put', '/tmp/win7-install.tgz', '/tmp/win7-install.tgz')

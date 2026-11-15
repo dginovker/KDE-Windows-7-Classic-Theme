@@ -11,6 +11,8 @@ for f in tahoma.ttf tahomabd.ttf; do
     [[ -f /usr/share/wine/fonts/$f ]] || { echo "missing /usr/share/wine/fonts/$f: install wine" >&2; exit 1; }
     cp /usr/share/wine/fonts/$f "$fonts/"
 done
+mkdir -p "${XDG_CONFIG_HOME:-$HOME/.config}/fontconfig/conf.d"
+cp "$src/fonts/70-win7-classic-tahoma.conf" "${XDG_CONFIG_HOME:-$HOME/.config}/fontconfig/conf.d/"
 fc-cache "$fonts"
 
 mkdir -p "$data/plasma/plasmoids" "$data/plasma/desktoptheme"
