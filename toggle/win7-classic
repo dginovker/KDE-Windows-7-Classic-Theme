@@ -91,22 +91,23 @@ switch_to() {
     rm -rf "$state/profiles/$from" && mv "$state/profiles/$from.new" "$state/profiles/$from"
     log "saved $from: $(digest "$state/profiles/$from") $(cd "$state/profiles/$from" && sha256sum keys.json 2>/dev/null)"
 
-    local seed=0
+    local problem=""
     if [[ -d $state/profiles/$target ]]; then
         copy_files "$state/profiles/$target" "$config"
         load_appearance $target "$state/profiles/$target"
     else
-        # First use of a mode: start from its shipped config files (e.g. the panel theme), then run its layout script.
-        seed=1
+        # First use of a mode: build it from the layout being left, plus the mode's shipped files (e.g. panel theme).
         for f in "${FILES[@]}"; do [[ ! -e $share/$target/$f ]] || cp "$share/$target/$f" "$config/$f"; done
+        local out
+        if out=$("$share/$target/seed" "$config" 2>&1); then log "seeded $target: $(tr '\n' ' ' <<< "$out")"
+        else problem="seeding $target failed: $out"; fi
         load_appearance "$target" "$share/$target"
     fi
-    local problem=""
-    if ! start_shell; then
+    if [[ -n $problem ]]; then :
+    elif ! start_shell; then
         problem="plasmashell did not start"
     else
-        [[ $seed == 0 ]] || shell "$(cat "$share/$target/layout.js")" >/dev/null || problem="layout script failed"
-        [[ -n $problem ]] || { local bad; bad=$(unknown_widgets); [[ -z $bad ]] || problem="unknown widgets: $bad"; }
+        local bad; bad=$(unknown_widgets); [[ -z $bad ]] || problem="unknown widgets: $bad"
     fi
     if [[ -n $problem ]]; then
         log "rolling back to $from: $problem"
@@ -137,10 +138,19 @@ restore() {
     log "restored current: $(digest "$config")"
 }
 
+# Throw away the saved Windows layout and build a fresh one from the current layout.
+rebuild() {
+    [[ $(mode) == current ]] || switch_to current
+    rm -rf "$state/profiles/windows"
+    log "rebuild: Windows layout discarded; rebuilding from current layout"
+    switch_to windows
+}
+
 case ${1:-} in
     windows|current) switch_to "$1" ;;
     toggle) [[ $(mode) == current ]] && switch_to windows || switch_to current ;;
     restore) restore ;;
+    rebuild) rebuild ;;
     status) mode ;;
-    *) echo "usage: win7-classic windows|current|toggle|status|restore" >&2; exit 2 ;;
+    *) echo "usage: win7-classic windows|current|toggle|status|restore|rebuild" >&2; exit 2 ;;
 esac

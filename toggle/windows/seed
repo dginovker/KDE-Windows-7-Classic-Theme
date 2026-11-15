@@ -1,0 +1,133 @@
+#!/usr/bin/env python3
+"""Seed Windows mode from the user's current Plasma layout, editing the config files while plasmashell is stopped.
+
+  seed CONFIGDIR
+
+Every panel with a task manager becomes the Classic taskbar in place: launchers, task manager, clock,
+show-desktop and spacers are replaced; every other widget (pager, monitors, custom widgets, the tray with its
+items) keeps its config groups untouched. With no such panel, a new bottom panel is added.
+"""
+from pathlib import Path
+import re
+import sys
+
+REPLACED = {'org.kde.plasma.kickoff', 'org.kde.plasma.kicker', 'org.kde.plasma.kickerdash', 'org.kde.plasma.taskmanager',
+            'org.kde.plasma.icontasks', 'org.kde.plasma.digitalclock', 'org.kde.plasma.showdesktop',
+            'org.kde.plasma.minimizeall', 'org.kde.plasma.panelspacer', 'org.kde.plasma.marginsseparator'}
+TASKS = {'org.kde.plasma.taskmanager', 'org.kde.plasma.icontasks'}
+DEFAULT_LAUNCHERS = 'applications:firefox.desktop,applications:org.kde.dolphin.desktop,applications:org.kde.konsole.desktop'
+
+
+class Config:
+    """A KConfig file as an ordered list of (group path, lines), so untouched groups are written back verbatim."""
+
+    def __init__(self, path):
+        self.path = path
+        self.groups = []
+        current = None
+        for line in path.read_text().splitlines() if path.exists() else []:
+            if line.startswith('['):
+                current = (tuple(re.findall(r'\[([^\]]*)\]', line)), [])
+                self.groups.append(current)
+            elif current is not None and line.strip():
+                current[1].append(line)
+
+    def get(self, group, key):
+        for g, lines in self.groups:
+            if g == group:
+                for line in lines:
+                    if line.split('=', 1)[0] == key:
+                        return line.split('=', 1)[1]
+        return None
+
+    def set(self, group, key, value):
+        for g, lines in self.groups:
+            if g == group:
+                for i, line in enumerate(lines):
+                    if line.split('=', 1)[0] == key:
+                        lines[i] = f'{key}={value}'
+                        return
+                lines.append(f'{key}={value}')
+                return
+        self.groups.append((group, [f'{key}={value}']))
+
+    def remove_tree(self, prefix):
+        self.groups = [(g, l) for g, l in self.groups if g[:len(prefix)] != prefix]
+
+    def write(self):
+        text = '\n\n'.join(''.join(f'[{p}]' for p in g) + '\n' + '\n'.join(l) for g, l in self.groups)
+        self.path.write_text(text + '\n')
+
+
+def main(configdir):
+    applets = Config(Path(configdir) / 'plasma-org.kde.plasma.desktop-appletsrc')
+    shellrc = Config(Path(configdir) / 'plasmashellrc')
+    ids = [int(g[1]) for g, _ in applets.groups if len(g) >= 2 and g[0] == 'Containments'] + \
+          [int(g[3]) for g, _ in applets.groups if len(g) >= 4 and g[2] == 'Applets']
+    next_id = max(ids, default=0) + 1
+
+    def new_id():
+        nonlocal next_id
+        next_id += 1
+        return str(next_id - 1)
+
+    containments = [g[1] for g, _ in applets.groups if len(g) == 2 and g[0] == 'Containments']
+    panels = []
+    for c in containments:
+        if applets.get(('Containments', c), 'plugin') != 'org.kde.panel':
+            continue
+        children = [g[3] for g, _ in applets.groups if len(g) == 4 and g[:3] == ('Containments', c, 'Applets')]
+        if any(applets.get(('Containments', c, 'Applets', a), 'plugin') in TASKS for a in children):
+            panels.append((c, children))
+    if not panels:
+        c = new_id()
+        for key, value in [('activityId', ''), ('formfactor', '2'), ('immutability', '1'), ('lastScreen', '0'),
+                           ('location', '4'), ('plugin', 'org.kde.panel'), ('wallpaperplugin', 'org.kde.image')]:
+            applets.set(('Containments', c), key, value)
+        panels.append((c, []))
+
+    for c, children in panels:
+        order = applets.get(('Containments', c, 'General'), 'AppletOrder')
+        children = sorted(children, key=lambda a: (order.split(';').index(a) if order and a in order.split(';') else len(children)))
+        plugin = {a: applets.get(('Containments', c, 'Applets', a), 'plugin') for a in children}
+        launchers = []
+        for a in children:
+            if plugin[a] in TASKS:
+                value = applets.get(('Containments', c, 'Applets', a, 'Configuration', 'General'), 'launchers')
+                launchers += [l for l in (value or '').split(',') if l and l not in launchers]
+        for a in children:
+            if plugin[a] in REPLACED:
+                applets.remove_tree(('Containments', c, 'Applets', a))
+        tray = next((a for a in children if plugin[a] == 'org.kde.plasma.systemtray'), None)
+        kept = [a for a in children if plugin[a] not in REPLACED and a != tray]
+
+        def add(name, config=()):
+            a = new_id()
+            applets.set(('Containments', c, 'Applets', a), 'immutability', '1')
+            applets.set(('Containments', c, 'Applets', a), 'plugin', name)
+            for group, key, value in config:
+                applets.set(('Containments', c, 'Applets', a, *group), key, value)
+            return a
+
+        taskbar = add('org.win7classic.taskbar', [(('Configuration', 'General'), 'launchers', ','.join(launchers) or DEFAULT_LAUNCHERS)])
+        frame = add('org.win7classic.trayframe')
+        tray = tray or add('org.kde.plasma.systemtray')
+        clock = add('org.win7classic.clock')
+        # Windows order: Start and task buttons, the user's other widgets (like deskbands), then the notification area.
+        applets.set(('Containments', c, 'General'), 'AppletOrder', ';'.join([taskbar, *kept, frame, tray, clock]))
+        applets.set(('Containments', c), 'location', '4')
+        applets.set(('Containments', c), 'formfactor', '2')
+        shellrc.set(('PlasmaViews', f'Panel {c}'), 'floating', '0')
+        shellrc.set(('PlasmaViews', f'Panel {c}', 'Defaults'), 'thickness', '44')
+        print(f'panel {c}: Classic taskbar with {len(kept)} kept widget(s) {[plugin.get(a) for a in kept]}')
+
+    for c in containments:
+        if applets.get(('Containments', c), 'plugin') in ('org.kde.plasma.folder', 'org.kde.desktopcontainment'):
+            applets.set(('Containments', c), 'wallpaperplugin', 'org.kde.color')
+            applets.set(('Containments', c, 'Wallpaper', 'org.kde.color', 'General'), 'Color', '58,110,165')
+    applets.write()
+    shellrc.write()
+
+
+if __name__ == '__main__':
+    main(*sys.argv[1:])

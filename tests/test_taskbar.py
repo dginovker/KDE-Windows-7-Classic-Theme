@@ -71,6 +71,11 @@ def main():
     vmctl.start(VM)
     install()
     user('rm -rf ~/Classic-demo; mkdir -p ~/Classic-demo/{Documents,Downloads,Music,Pictures,Projects}')
+    # Windows mode inherits the current task manager's pinned apps; pin three, like the reference's three icons.
+    user('qdbus6 org.kde.plasmashell /PlasmaShell evaluateScript "for (const w of panels()[0].widgets()) '
+         'if (w.type == \\"org.kde.plasma.icontasks\\") { w.currentConfigGroup = [\\"General\\"]; '
+         'w.writeConfig(\\"launchers\\", [\\"applications:firefox.desktop\\", \\"applications:org.kde.dolphin.desktop\\", '
+         '\\"applications:org.kde.konsole.desktop\\"]); }"')
     toggle('windows')
     user('systemd-run --user --collect -q dolphin --new-window ~/Classic-demo')
     wait_for(lambda: dolphin() is not None, 'Dolphin window')

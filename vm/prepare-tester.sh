@@ -7,6 +7,8 @@ pacman -Q plasma-desktop kwin kate konsole dolphin kdialog pyside6 gtk3-demos qe
 if id tester >/dev/null 2>&1; then
     systemctl stop sddm
     loginctl terminate-user tester 2>/dev/null || true
+    # The per-user systemd manager can outlive the session; stop it explicitly.
+    systemctl stop "user@$(id -u tester).service"
     for _ in $(seq 30); do pgrep -u tester >/dev/null || break; sleep 1; done
     userdel -r tester
 fi

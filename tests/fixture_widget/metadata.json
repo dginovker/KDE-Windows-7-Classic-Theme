@@ -1,0 +1,5 @@
+{
+    "KPackageStructure": "Plasma/Applet",
+    "KPlugin": { "Id": "local.win7test.note", "Name": "Test note", "Description": "Custom widget used by test_widgets.py", "License": "GPL-3.0-or-later" },
+    "X-Plasma-API-Minimum-Version": "6.0"
+}
