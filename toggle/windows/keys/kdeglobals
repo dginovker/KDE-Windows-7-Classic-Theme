@@ -5,6 +5,8 @@ font=Tahoma,8.25,-1,5,400,0,0,0,0,0,0,0,0,0,0,1
 menuFont=Tahoma,8.25,-1,5,400,0,0,0,0,0,0,0,0,0,0,1
 toolBarFont=Tahoma,8.25,-1,5,400,0,0,0,0,0,0,0,0,0,0,1
 smallestReadableFont=Tahoma,8.25,-1,5,400,0,0,0,0,0,0,0,0,0,0,1
+# Apps that load the color scheme by name would otherwise load the current mode's (e.g. Breeze Dark).
+ColorScheme=Win7Classic
 
 [Colors:Window]
 BackgroundAlternate=212,208,200
@@ -49,6 +51,21 @@ ForegroundPositive=0,128,0
 ForegroundVisited=128,0,128
 
 [Colors:Header]
+BackgroundAlternate=212,208,200
+BackgroundNormal=212,208,200
+DecorationFocus=10,36,106
+DecorationHover=10,36,106
+ForegroundActive=0,0,128
+ForegroundInactive=128,128,128
+ForegroundLink=0,0,128
+ForegroundNegative=192,0,0
+ForegroundNeutral=128,96,0
+ForegroundNormal=0,0,0
+ForegroundPositive=0,128,0
+ForegroundVisited=128,0,128
+
+# Plasma paints inactive windows' toolbars from this group; left alone, a dark scheme shows through.
+[Colors:Header][Inactive]
 BackgroundAlternate=212,208,200
 BackgroundNormal=212,208,200
 DecorationFocus=10,36,106

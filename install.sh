@@ -31,12 +31,23 @@ for applet in "$src"/plasma/org.win7classic.*; do
     rm -rf "${data:?}/plasma/plasmoids/$(basename "$applet")"
     cp -r "$applet" "$data/plasma/plasmoids/"
 done
-rm -rf "$data/plasma/desktoptheme/win7-classic" "$data/kwin/decorations/win7classic" "$data/themes/Win7-Classic" "$data/icons/Win7-Classic" "$data/win7-classic"
+rm -rf "$data/plasma/desktoptheme/win7-classic" "$data/kwin/decorations/win7classic" "$data/themes/Win7-Classic" "$data/icons/Win7-Classic" "$data/win7-classic" "$data/color-schemes/Win7Classic.colors"
 cp -r "$src/plasma/theme/win7-classic" "$data/plasma/desktoptheme/"
 cp -r "$src/plasma/decoration/win7classic" "$data/kwin/decorations/"
 cp -r "$src/plasma/gtk/Win7-Classic" "$data/themes/"
-mkdir -p "$data/icons"
+mkdir -p "$data/icons" "$data/color-schemes"
 cp -r "$src/plasma/icons/Win7-Classic" "$data/icons/"
+# The named color scheme Windows mode selects, built from the same colors it swaps in (toggle/windows/keys).
+python3 - "$src/toggle/windows/keys/kdeglobals" > "$data/color-schemes/Win7Classic.colors" <<'PY'
+import sys
+print('[General]\nName=Windows 7 Classic')
+keep = False
+for line in open(sys.argv[1]).read().splitlines():
+    if line.startswith('['):
+        keep = line.startswith(('[Colors:', '[WM]'))
+    if keep and not line.startswith('#') and not line.startswith('activeFont'):
+        print(line)
+PY
 mkdir -p "$data/win7-classic/lockscreen"
 cp -r "$src/toggle/win7-classic" "$src/toggle/kconfig-keys" "$src/toggle/windows" "$data/win7-classic/"
 cp "$src/plasma/lockscreen/LockScreen.qml" "$src/plasma/logon/LogonUi.qml" "$data/win7-classic/lockscreen/"
