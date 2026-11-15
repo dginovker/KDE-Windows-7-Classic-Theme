@@ -129,6 +129,21 @@ def main():
     assert_matches_reference(OUT / '6-windows-again.png')
     print('taskbar still matches after switching current -> windows')
 
+    # Drag the running Explorer button past the Konsole launcher (issue #16).
+    launchers = lambda: user('grep "^launchers=" ~/.config/plasma-org.kde.plasma.desktop-appletsrc')
+    vmctl.pointer(VM, 190, 778)
+    vmctl.button(VM, 'left', True)
+    for x in range(200, 310, 10):
+        vmctl.pointer(VM, x, 778)
+    vmctl.button(VM, 'left', False)
+    vmctl.pointer(VM, 640, 600)
+    wait_for(lambda: launchers() == 'launchers=applications:firefox.desktop,applications:org.kde.konsole.desktop,'
+             'applications:org.win7classic.explorer.desktop', 'dragging the Explorer button moves it after Konsole')
+    time.sleep(1)
+    shot(OUT / '7-dragged.png')
+    assert not explorer()[2], 'releasing a drag also clicked the button (window minimized)'
+    print('dragging a task button rearranges the taskbar and keeps the pinned order; a drag is not a click')
+
     # Side-by-side image for the issue: reference taskbar above ours.
     reference = Image.open(REFERENCE).convert('RGB').crop(PANEL)
     ours = Image.open(OUT / '1-taskbar.png').convert('RGB').crop(PANEL)

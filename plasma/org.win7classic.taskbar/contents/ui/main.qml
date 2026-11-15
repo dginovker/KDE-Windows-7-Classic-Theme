@@ -119,6 +119,7 @@ PlasmoidItem {
         }
 
         Row {
+            id: taskRow
             x: root.tasksX - area.origin.x; y: root.buttonY - area.origin.y
             spacing: root.spacing
             Repeater {
@@ -161,7 +162,28 @@ PlasmoidItem {
                         id: mouse
                         anchors.fill: parent
                         hoverEnabled: true
+                        // Dragging a button past the system drag distance moves it, as Windows 7's taskbar does.
+                        property bool dragged: false
+                        property real pressX: 0
+                        onPressed: (event) => { dragged = false; pressX = event.x; }
+                        onPositionChanged: (event) => {
+                            if (!pressed || (!dragged && Math.abs(event.x - pressX) < Qt.styleHints.startDragDistance))
+                                return;
+                            dragged = true;
+                            const at = mapToItem(taskRow, event.x, height / 2);
+                            const other = taskRow.childAt(at.x, at.y);
+                            if (!other || other === task || other.index === undefined)
+                                return;
+                            // Moving the row tears down this delegate's QML context, so everything used afterwards is
+                            // captured first. Pinned items keep their new order: the launcher list goes back to the config.
+                            const model = tasksModel, config = Plasmoid.configuration;
+                            model.move(task.index, other.index);
+                            model.syncLaunchers();
+                            config.launchers = model.launcherList;
+                        }
                         onClicked: {
+                            if (dragged)
+                                return;
                             const index = tasksModel.makeModelIndex(task.index);
                             if (task.launcher)
                                 tasksModel.requestNewInstance(index);
