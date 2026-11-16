@@ -42,6 +42,10 @@ def fixture(pointer=(640, 790)):
 
 def start_menu():
     fixture()
+    # Keyboard activation makes Start's focus cue independent of the previous scene.
+    vmctl.keys(VM, 'KEY_LEFTMETA')
+    time.sleep(0.5)
+    vmctl.keys(VM, 'KEY_ESC')
     vmctl.pointer(VM, 25, 777, 'left')
     time.sleep(1.5)
 
@@ -69,9 +73,14 @@ def tray_popup(x, y=778):
 LIVE_REGIONS = {'*': [(1100, 756, 1280, 800)], 'calendar': [(1150, 568, 1248, 704)]}
 
 
+# Keep the notification frame and icons checkable; only its clock text is live.
+CROPS = {'notification-area': (1100, 756, 1280, 800)}
+
+
 def differing_pixels(a, b, scene='*'):
     diff = ImageChops.difference(Image.open(a).convert('RGB'), Image.open(b).convert('RGB'))
-    for box in LIVE_REGIONS['*'] + LIVE_REGIONS.get(scene, []):
+    regions = [(103, 7, 163, 39)] if scene == 'notification-area' else LIVE_REGIONS['*'] + LIVE_REGIONS.get(scene, [])
+    for box in regions:
         diff.paste((0, 0, 0), box)
     return sum(1 for v in diff.convert('L').get_flattened_data() if v), diff.getbbox()
 
@@ -115,6 +124,44 @@ def maximized():
     vmctl.pointer(VM, 640, 600)
 
 
+def active_explorer():
+    fixture((849, 419))
+    vmctl.pointer(VM, 849, 419, 'left')
+
+
+def explorer_launcher_tooltip():
+    active_explorer()
+    vmctl.keys(VM, 'KEY_LEFTALT', 'KEY_F4')
+    time.sleep(2)
+    vmctl.pointer(VM, 640, 600, 'left')
+    vmctl.pointer(VM, 140, 788)
+    time.sleep(2)
+
+
+def explorer_file_context():
+    # Fixed timestamps keep Explorer's selected-file details reproducible too.
+    run_dialog('powershell -NoProfile -Command "'
+               "$p=$env:USERPROFILE+'\\Classic-demo\\capture-reference.txt'; "
+               "[IO.File]::WriteAllText($p,'Classic reference'); "
+               "$f=Get-Item $p; $f.LastWriteTime='2010-01-01'; $f.CreationTime='2010-01-01'" + '"')
+    time.sleep(4)
+    active_explorer()
+    vmctl.pointer(VM, 480, 375, 'right')
+    time.sleep(1)
+
+
+def context_menu(x, y):
+    active_explorer()
+    vmctl.pointer(VM, x, y, 'right')
+    time.sleep(1)
+
+
+def shutdown_button(arrow=False):
+    start_menu()
+    vmctl.pointer(VM, 335 if arrow else 315, 735, 'left' if arrow else None)
+    time.sleep(2)
+
+
 SCENES = {
     # w7-explorer.png also shows Start's keyboard-focus rectangle; recaptures lack it (60 pixels).
     'explorer': lambda: (fixture((849, 419)), vmctl.pointer(VM, 849, 419, 'left')),
@@ -150,6 +197,15 @@ SCENES = {
     'explorer-forward-pressed-ul': lambda: (explorer_with_forward((849, 419)), pressed(296, 151)),
     'calendar': lambda: tray_popup(1229),
     'volume': lambda: tray_popup(1187, 777),
+    # The fixture VM pins Explorer between Internet Explorer and Windows Media Player.
+    'explorer-launcher-tooltip': explorer_launcher_tooltip,
+    'explorer-jumplist': lambda: context_menu(190, 778),
+    'explorer-file-context': explorer_file_context,
+    'explorer-background-context': lambda: context_menu(849, 419),
+    'desktop-context': lambda: context_menu(120, 420),
+    'shutdown-hover': shutdown_button,
+    'shutdown-menu': lambda: shutdown_button(arrow=True),
+    'notification-area': lambda: (active_explorer(), vmctl.pointer(VM, 640, 600)),
 }
 
 
@@ -162,20 +218,33 @@ def main():
     reference = Path(__file__).resolve().parent / 'screenshots' / f'w7-{a.scene}.png'
     out = Path(a.out) if a.out else Path(tempfile.mkdtemp()) / reference.name if a.check else reference
     vmctl.start(VM)
-    SCENES[a.scene]()
-    vmctl.virsh('screenshot', VM, str(out))
-    vmctl.pointer(VM, 640, 600)
-    vmctl.button(VM, 'left', False)
-    vmctl.keys(VM, 'KEY_ESC')
-    if a.scene == 'maximized':
-        vmctl.pointer(VM, 1249, 8, 'left')  # Restore, so later scenes start from the normal fixture
-    if a.scene.startswith(('explorer-back', 'explorer-forward')):
-        vmctl.keys(VM, 'KEY_LEFTALT', 'KEY_F4')  # the navigated window; the next fixture opens a fresh one
-    if a.scene == 'explorer-details':
-        # Explorer remembers the view per folder; back to Large Icons for the other scenes.
-        vmctl.pointer(VM, 941, 194, 'left')
-        time.sleep(1)
-        vmctl.pointer(VM, 1014, 62, 'left')  # the menu opens aligned to the current (Details) entry
+    try:
+        SCENES[a.scene]()
+        vmctl.virsh('screenshot', VM, str(out))
+        if a.scene in CROPS:
+            with Image.open(out) as image:
+                image.crop(CROPS[a.scene]).save(out, format='PNG')
+    finally:
+        vmctl.pointer(VM, 640, 600)
+        vmctl.button(VM, 'left', False)
+        vmctl.keys(VM, 'KEY_ESC')
+        if a.scene == 'maximized':
+            vmctl.pointer(VM, 1249, 8, 'left')  # Restore, so later scenes start from the normal fixture
+        if a.scene.startswith(('explorer-back', 'explorer-forward')):
+            vmctl.keys(VM, 'KEY_LEFTALT', 'KEY_F4')  # the navigated window; the next fixture opens a fresh one
+        if a.scene == 'explorer-details':
+            # Explorer remembers the view per folder; back to Large Icons for the other scenes.
+            vmctl.pointer(VM, 941, 194, 'left')
+            time.sleep(1)
+            vmctl.pointer(VM, 1014, 62, 'left')  # the menu opens aligned to the current (Details) entry
+        if a.scene == 'shutdown-menu':
+            vmctl.keys(VM, 'KEY_ESC')
+        if a.scene == 'explorer-file-context':
+            run_dialog('cmd /c del "%USERPROFILE%\\Classic-demo\\capture-reference.txt"')
+            time.sleep(1)
+        if a.scene in ('explorer-launcher-tooltip', 'explorer-file-context'):
+            active_explorer()
+            vmctl.pointer(VM, 640, 600)
     print(out)
     if a.check:
         count, box = differing_pixels(reference, out, a.scene)
