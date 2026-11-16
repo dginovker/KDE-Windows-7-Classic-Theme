@@ -9,7 +9,7 @@ from pathlib import Path
 import sys
 import time
 
-from lab import ROOT, VM, vmctl, shot, wait_for
+from lab import ROOT, VM, vmctl, shot, wait_for, user, assert_portal_display
 from test_lock import PASSWORD, field_band, type_password
 from test_package import build_package, root
 
@@ -26,6 +26,12 @@ def greeter():
     return root('pgrep sddm-greeter >/dev/null && echo yes || echo no') == 'yes'
 
 
+def restart_sddm():
+    # SDDM alone can leave the old user manager/Plasma alive, falsely appearing to be a successful login.
+    root('set -e; systemctl stop sddm; loginctl terminate-user tester; '
+         'systemctl stop user@$(id -u tester).service; systemctl start sddm')
+
+
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     for old in OUT.glob('*.png'):
@@ -38,7 +44,7 @@ def main():
     # The lab normally autologins tester (vm/prepare-tester.sh); this drop-in sorts after it and turns that off.
     root(f'mkdir -p /etc/sddm.conf.d && printf "[Theme]\\nCurrent=win7-classic\\n[Autologin]\\nUser=\\n" > {CONF}')
     try:
-        root('systemctl restart sddm')
+        restart_sddm()
         wait_for(greeter, 'SDDM greeter', 60)
         time.sleep(5)
         shot(OUT / '0-users.png')
@@ -65,7 +71,8 @@ def main():
         shot(OUT / '3-logged-in.png')
         print('right password: Plasma session started')
 
-        root('echo "this is not QML" >> /usr/share/sddm/themes/win7-classic/LogonUi.qml; systemctl restart sddm')
+        root('echo "this is not QML" >> /usr/share/sddm/themes/win7-classic/LogonUi.qml')
+        restart_sddm()
         wait_for(greeter, 'SDDM greeter with a broken theme', 60)
         time.sleep(8)
         shot(OUT / '4-broken-theme.png')
@@ -76,8 +83,11 @@ def main():
     finally:
         root(f'rm -f {CONF}; pacman -Q win7-classic >/dev/null 2>&1 && pacman -Rns --noconfirm win7-classic >/dev/null; true')
         if not logged_in():
-            root('systemctl restart sddm')  # back to autologin for the other tests
+            restart_sddm()  # back to autologin for the other tests
             wait_for(logged_in, 'tester autologin restored', 60)
+        # Forced SDDM transitions can activate the portal before the new session exports its display.
+        user('systemctl --user restart xdg-desktop-portal.service')
+        assert_portal_display()
     print('ALL LOGIN CHECKS PASSED; artifacts in', OUT)
 
 

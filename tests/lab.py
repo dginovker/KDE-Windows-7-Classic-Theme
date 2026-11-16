@@ -37,11 +37,20 @@ def close_test_apps():
          'pkill -f "^/usr/bin/python3 /tmp/fixture_window.py"; pkill -f "^/usr/bin/python3 /tmp/fixture_gtk.py"; rm -f /tmp/counter /tmp/kate-proof.txt; true')
 
 
+def assert_portal_display():
+    user('systemctl --user start xdg-desktop-portal.service')
+    expected = user('systemctl --user show-environment | grep "^WAYLAND_DISPLAY="')
+    actual = user('pid=$(systemctl --user show xdg-desktop-portal.service -p MainPID --value); '
+                  'tr "\\0" "\\n" < /proc/$pid/environ | grep "^WAYLAND_DISPLAY="', check=False)
+    assert expected and actual == expected, f'portal display {actual!r}, session expects {expected!r}'
+
+
 def install(commit=None, reset=True):
     """Run install.sh as tester from the working tree (or from `commit`, to test upgrades).
 
     With reset, switch back to current mode and forget saved profiles so the test starts from scratch.
     """
+    assert_portal_display()
     vmctl.button(VM, 'left', False)
     vmctl.button(VM, 'right', False)
     if commit:
