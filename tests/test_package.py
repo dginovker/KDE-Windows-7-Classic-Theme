@@ -15,7 +15,11 @@ from lab import ROOT, VM, vmctl, user, toggle, close_test_apps, shot
 
 OUT = Path(sys.argv[1] if len(sys.argv) > 1 else '/tmp/win7-package-test')
 USER_STATE = ('cd ~/.config && sha256sum plasma-org.kde.plasma.desktop-appletsrc plasmashellrc kdeglobals kwinrc '
-              'gtk-3.0/settings.ini gtk-4.0/settings.ini 2>&1; dconf read /org/gnome/desktop/interface/gtk-theme; true')
+              'plasmarc kcminputrc mimeapps.list gtk-3.0/settings.ini gtk-4.0/settings.ini 2>&1; '
+              'dconf read /org/gnome/desktop/interface/gtk-theme; true')
+PROFILES = ('cd ~/.local/state/win7-classic/profiles && '
+            'find . -printf "%y %p %l\\n" | sort; '
+            'find . -type f -exec sha256sum {} + | sort')
 # Caches pacman hooks refresh after any transaction (ldconfig, icon/mime/schema caches) are not ours.
 SYSTEM_FILES = "find /usr /etc -xdev \\( -type f -o -type l \\) -newer /tmp/win7-pkg-marker 2>/dev/null | grep -v -e 'icon-theme.cache' -e '/usr/share/mime/' -e 'gschemas.compiled' -e 'mimeinfo.cache' -e '\\.cache-' -e '^/etc/ld.so.cache$' | sort; true"
 
@@ -93,16 +97,30 @@ def main():
     code, _, err = vmctl.run(VM, f'{vmctl.USER_ENV}\nexec runuser -u tester -- win7-classic windows', 180)
     assert code == 0, err
     time.sleep(2)
-    windows_state = user(USER_STATE)
-    root('mv /usr/lib/qt6/plugins/styles/libwin7classicstyle.so /tmp/win7-style-held.so')
-    try:
-        code, _, err = vmctl.run(VM, f'{vmctl.USER_ENV}\nexec runuser -u tester -- win7-classic windows', 180)
-        assert code != 0 and 'cd packaging && makepkg -si' in err, err
-        assert user(USER_STATE) == windows_state, 'same-mode missing-style refusal changed configuration'
-        assert user('win7-classic status') == 'windows'
-    finally:
-        root('mv /tmp/win7-style-held.so /usr/lib/qt6/plugins/styles/libwin7classicstyle.so')
-    print('missing-style refusal also works from already-Windows mode without changing configuration')
+    # Both profiles must exist: a refusal must preserve the saved Windows layout, not just live settings.
+    user('win7-classic current')
+    failures = []
+    for mode in ('current', 'windows'):
+        user(f'win7-classic windows && win7-classic current && win7-classic {mode}')
+        root('mv /usr/lib/qt6/plugins/styles/libwin7classicstyle.so /tmp/win7-style-held.so')
+        try:
+            for command in ('windows', 'rebuild'):
+                config_before, profiles_before = user(USER_STATE), user(PROFILES)
+                code, _, err = vmctl.run(VM, f'{vmctl.USER_ENV}\nexec runuser -u tester -- win7-classic {command}', 180)
+                checks = {
+                    'nonzero exit and repair guidance': code != 0 and 'cd packaging && makepkg -si' in err,
+                    'unchanged mode': user('win7-classic status') == mode,
+                    'byte-identical configuration': user(USER_STATE) == config_before,
+                    'unchanged saved profiles': user(PROFILES) == profiles_before,
+                }
+                for check, passed in checks.items():
+                    print(f'missing-style {command} from {mode}: {check}: {"PASS" if passed else "FAIL"}')
+                    if not passed:
+                        failures.append(f'{command} from {mode}: {check}')
+        finally:
+            root('mv /tmp/win7-style-held.so /usr/lib/qt6/plugins/styles/libwin7classicstyle.so')
+    assert not failures, '\n'.join(failures)
+    print('missing-style windows/rebuild refuse from both modes without changing configuration or saved profiles')
     shot(OUT / '1-windows-from-package.png')
     assert user('kreadconfig6 --file kcminputrc --group Mouse --key cursorTheme') == 'Win7-Classic-Cursors'
     assert user('gsettings get org.gnome.desktop.interface cursor-theme') == "'Win7-Classic-Cursors'"
