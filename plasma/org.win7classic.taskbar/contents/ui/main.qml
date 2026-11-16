@@ -173,13 +173,26 @@ PlasmoidItem {
                         }
                     }
                     z: taskRow.dragIndex === task.index ? 1 : 0
+                    TaskTooltip {
+                        id: tooltip
+                        button: task
+                        text: task.model.display
+                        pointer: Qt.point(mouse.mouseX, mouse.mouseY)
+                    }
+                    Timer {
+                        id: hoverTimer
+                        interval: 700
+                        onTriggered: if (mouse.containsMouse && !mouse.pressed) tooltip.visible = true
+                    }
                     MouseArea {
                         id: mouse
                         anchors.fill: parent
                         hoverEnabled: true
+                        onEntered: hoverTimer.restart()
+                        onExited: { hoverTimer.stop(); tooltip.visible = false; }
                         property bool dragged: false
                         property real pressX: 0
-                        onPressed: (event) => { dragged = false; pressX = event.x; }
+                        onPressed: (event) => { hoverTimer.stop(); tooltip.visible = false; dragged = false; pressX = event.x; }
                         onPositionChanged: (event) => {
                             if (!pressed || (!dragged && Math.abs(event.x - pressX) < Qt.styleHints.startDragDistance))
                                 return;

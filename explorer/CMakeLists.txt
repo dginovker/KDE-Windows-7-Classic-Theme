@@ -11,7 +11,6 @@ install(TARGETS win7-explorer DESTINATION ${CMAKE_INSTALL_BINDIR})
 # Absolute Exec path: a per-user install's ~/.local/bin is not on plasmashell's PATH.
 configure_file(org.win7classic.explorer.desktop.in org.win7classic.explorer.desktop @ONLY)
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/org.win7classic.explorer.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
-# Explorer's taskbar icon is Windows' folder, as its running windows show in the reference taskbar.
 foreach(size 16 32 48 256)
-    install(FILES assets/folder-${size}.png DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/${size}x${size}/apps RENAME org.win7classic.explorer.png)
+    install(FILES assets/explorer-${size}.png DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/${size}x${size}/apps RENAME org.win7classic.explorer.png)
 endforeach()

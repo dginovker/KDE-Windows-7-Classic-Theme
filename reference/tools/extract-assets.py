@@ -2,7 +2,7 @@
 """Extract the genuine Windows 7 art the project ships, from the reference VM.
 
   virt-copy-out --ro -a ~/.local/share/libvirt/images/win7-classic-reference.qcow2 \\
-      /Windows/System32/imageres.dll /Windows/System32/shell32.dll /Windows/System32/ExplorerFrame.dll DLLDIR
+      /Windows/System32/imageres.dll /Windows/System32/shell32.dll /Windows/System32/ExplorerFrame.dll /Windows/explorer.exe DLLDIR
   python reference/tools/extract-assets.py DLLDIR
 
 Writes explorer/assets/ (Explorer's chrome) and plasma/icons/Win7-Classic/ (the Windows-mode icon theme).
@@ -102,6 +102,7 @@ NAV = {
 
 # (dll, icon group) -> Explorer asset name; all sizes are kept so high-DPI screens get real pixels.
 ICONS = {
+    ('explorer.exe', 'ICO_MYCOMPUTER'): 'explorer',
     ('imageres', 3): 'folder', ('imageres', 1024): 'favorites', ('imageres', 110): 'desktop',
     ('imageres', 184): 'downloads', ('imageres', 117): 'recent-places', ('imageres', 1023): 'libraries',
     ('imageres', 1002): 'library-documents', ('imageres', 1004): 'library-music', ('imageres', 1003): 'library-pictures',
@@ -132,7 +133,7 @@ def main():
     icons = {}
     with tempfile.TemporaryDirectory() as tmp:
         for (dll, group), name in ICONS.items():
-            sizes = icon_sizes(resources(dlls / f'{dll}.dll', 14, group, tmp))
+            sizes = icon_sizes(resources(dlls / (dll if dll.endswith('.exe') else f'{dll}.dll'), 14, group, tmp))
             if 256 in sizes and 96 not in sizes:
                 sizes[96] = sizes[256].resize((96, 96), Image.LANCZOS)  # Explorer's Large Icons size
             icons[name] = sizes

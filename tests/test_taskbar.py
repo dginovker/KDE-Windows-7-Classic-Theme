@@ -7,6 +7,7 @@ and text legitimately differ (different apps, fonts and tray icons).
 """
 from pathlib import Path
 import sys
+import subprocess
 import time
 
 from PIL import Image, ImageChops
@@ -78,6 +79,30 @@ def main():
          'w.writeConfig(\\"launchers\\", [\\"applications:firefox.desktop\\", \\"applications:org.kde.dolphin.desktop\\", '
          '\\"applications:org.kde.konsole.desktop\\"]); }"')
     toggle('windows')
+    vmctl.pointer(VM, 137, 778)
+    time.sleep(1.5)
+    shot(OUT / '0-explorer-tooltip.png')
+    tooltip = Image.open(OUT / '0-explorer-tooltip.png').convert('RGB')
+    yellow = [(x, y) for y in range(700, 756) for x in range(60, 400) if tooltip.getpixel((x, y)) == (255, 255, 225)]
+    assert yellow, 'pinned Explorer has no Classic tooltip'
+    box = (min(x for x, y in yellow) - 1, min(y for x, y in yellow) - 1,
+           max(x for x, y in yellow) + 2, max(y for x, y in yellow) + 2)
+    assert box[3] - box[1] == 16, f'Classic tooltip should be 16px high, got {box}'
+    for x in range(box[0], box[2]):
+        assert tooltip.getpixel((x, box[1])) == (0, 0, 0), 'tooltip top border is not black'
+        assert tooltip.getpixel((x, box[3] - 1)) == (0, 0, 0), 'tooltip bottom border is not black'
+    # Reference tooltip in w7-explorer-back-hot.png uses InfoBackground, not the panel face.
+    assert Image.open(ROOT / 'reference/screenshots/w7-explorer-back-hot.png').convert('RGB').getpixel((290, 190)) == (255, 255, 225)
+    icon = Image.new('RGBA', (32, 32), FACE + (255,))
+    icon.alpha_composite(Image.open(ROOT / 'explorer/assets/explorer-32.png').convert('RGBA'))
+    icon_diff = ImageChops.difference(icon.convert('RGB'), tooltip.crop((121, 763, 153, 795)))
+    assert max(high for low, high in icon_diff.getextrema()) <= 1, 'Explorer launcher does not show the genuine explorer.exe icon'
+    tip = tooltip.crop((box[0] + 1, box[1] + 1, box[2] - 1, box[3] - 1))
+    tip.resize((tip.width * 4, tip.height * 4)).save(OUT / 'tooltip-text.png')
+    text = subprocess.check_output(['tesseract', str(OUT / 'tooltip-text.png'), 'stdout', '--psm', '7'], stderr=subprocess.DEVNULL, text=True).strip()
+    assert text == 'Windows Explorer', f'Explorer launcher tooltip says {text!r}'
+    print('pinned launcher shows the Classic Windows Explorer tooltip')
+    vmctl.pointer(VM, 640, 600)
     user('systemd-run --user --collect -q ~/.local/bin/win7-explorer ~/Classic-demo')
     wait_for(lambda: explorer() is not None, 'Explorer window')
     kwin_script('for (const w of workspace.windowList()) if (w.resourceClass == "org.win7classic.explorer") '
@@ -87,6 +112,12 @@ def main():
     shot(OUT / '1-taskbar.png')
     assert_matches_reference(OUT / '1-taskbar.png')
     print('taskbar structure matches the Windows 7 reference')
+    vmctl.pointer(VM, 190, 778)
+    time.sleep(1)
+    shot(OUT / '1-window-tooltip.png')
+    window_tip = Image.open(OUT / '1-window-tooltip.png').convert('RGB')
+    assert any(window_tip.getpixel((x, y)) == (255, 255, 225) for y in range(730, 756) for x in range(180, 400)), 'running window has no Classic tooltip'
+    print('running window button also shows a Classic tooltip')
 
     click(190, 778)
     wait_for(lambda: explorer()[2], 'Explorer minimized by its task button')

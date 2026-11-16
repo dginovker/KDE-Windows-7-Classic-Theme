@@ -1,6 +1,6 @@
 [Desktop Entry]
 Type=Application
-Name=Explorer
+Name=Windows Explorer
 GenericName=File Manager
 Comment=Windows 7 Classic file manager
 Exec=@CMAKE_INSTALL_FULL_BINDIR@/win7-explorer %U
