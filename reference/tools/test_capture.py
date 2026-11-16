@@ -29,7 +29,7 @@ class CaptureTests(unittest.TestCase):
                     self.assertEqual(capture.differing_pixels(reference, actual, 'notification-area')[0], 1)
 
     def test_new_scenes_clean_up_when_screenshot_fails(self):
-        for scene in ('explorer-launcher-tooltip', 'explorer-file-context', 'shutdown-menu'):
+        for scene in ('explorer-file-context', 'shutdown-menu'):
             with self.subTest(scene=scene), \
                     patch.object(sys, 'argv', ['capture.py', scene]), \
                     patch.dict(capture.SCENES, {scene: lambda: None}), \

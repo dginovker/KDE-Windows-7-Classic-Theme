@@ -129,15 +129,6 @@ def active_explorer():
     vmctl.pointer(VM, 849, 419, 'left')
 
 
-def explorer_launcher_tooltip():
-    active_explorer()
-    vmctl.keys(VM, 'KEY_LEFTALT', 'KEY_F4')
-    time.sleep(2)
-    vmctl.pointer(VM, 640, 600, 'left')
-    vmctl.pointer(VM, 140, 788)
-    time.sleep(2)
-
-
 def explorer_file_context():
     # Fixed timestamps keep Explorer's selected-file details reproducible too.
     run_dialog('powershell -NoProfile -Command "'
@@ -198,7 +189,6 @@ SCENES = {
     'calendar': lambda: tray_popup(1229),
     'volume': lambda: tray_popup(1187, 777),
     # The fixture VM pins Explorer between Internet Explorer and Windows Media Player.
-    'explorer-launcher-tooltip': explorer_launcher_tooltip,
     'explorer-jumplist': lambda: context_menu(190, 778),
     'explorer-file-context': explorer_file_context,
     'explorer-background-context': lambda: context_menu(849, 419),
@@ -242,7 +232,7 @@ def main():
         if a.scene == 'explorer-file-context':
             run_dialog('cmd /c del "%USERPROFILE%\\Classic-demo\\capture-reference.txt"')
             time.sleep(1)
-        if a.scene in ('explorer-launcher-tooltip', 'explorer-file-context'):
+        if a.scene == 'explorer-file-context':
             active_explorer()
             vmctl.pointer(VM, 640, 600)
     print(out)
