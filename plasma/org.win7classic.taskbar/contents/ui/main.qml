@@ -122,7 +122,12 @@ PlasmoidItem {
             id: taskRow
             x: root.tasksX - area.origin.x; y: root.buttonY - area.origin.y
             spacing: root.spacing
+            property int dragIndex: -1
+            property int dropIndex: -1
+            property real dragOffset: 0
+            property real dragWidth: 0
             Repeater {
+                id: taskRepeater
                 model: tasksModel
                 delegate: Item {
                     id: task
@@ -135,34 +140,43 @@ PlasmoidItem {
                     width: launcher ? root.launcherWidth : area.windowWidth
                     height: root.buttonHeight
 
-                    Bevel {
-                        anchors.fill: parent
-                        visible: !task.launcher || mouse.containsMouse || mouse.pressed
-                        sunken: task.sunken
-                        fill: task.active && !task.launcher ? "#ffffff" : "#d4d0c8"
+                    Item {
+                        width: task.width; height: task.height
+                        x: taskRow.dragIndex === task.index ? taskRow.dragOffset
+                           : taskRow.dragIndex < 0 ? 0
+                           : task.index > taskRow.dragIndex && task.index <= taskRow.dropIndex ? -taskRow.dragWidth - root.spacing
+                           : task.index < taskRow.dragIndex && task.index >= taskRow.dropIndex ? taskRow.dragWidth + root.spacing : 0
+                        Behavior on x { enabled: taskRow.dragIndex !== task.index; NumberAnimation { duration: 140 } }
+                        z: taskRow.dragIndex === task.index ? 1 : 0
+                        Bevel {
+                            anchors.fill: parent
+                            visible: !task.launcher || mouse.containsMouse || mouse.pressed
+                            sunken: task.sunken
+                            fill: task.active && !task.launcher ? "#ffffff" : "#d4d0c8"
+                        }
+                        Kirigami.Icon {
+                            x: (task.launcher ? (task.width - 32) / 2 : 3) + task.shift
+                            y: 3 + task.shift
+                            width: 32; height: 32
+                            source: task.model.decoration
+                        }
+                        Text {
+                            visible: !task.launcher
+                            x: 39 + task.shift; y: task.shift
+                            width: task.width - x - 4; height: task.height
+                            verticalAlignment: Text.AlignVCenter
+                            elide: Text.ElideRight
+                            text: task.model.display
+                            font.family: "Tahoma"; font.pixelSize: 11; font.bold: task.active
+                            color: "black"
+                            renderType: Text.NativeRendering
+                        }
                     }
-                    Kirigami.Icon {
-                        x: (task.launcher ? (task.width - 32) / 2 : 3) + task.shift
-                        y: 3 + task.shift
-                        width: 32; height: 32
-                        source: task.model.decoration
-                    }
-                    Text {
-                        visible: !task.launcher
-                        x: 39 + task.shift; y: task.shift
-                        width: task.width - x - 4; height: task.height
-                        verticalAlignment: Text.AlignVCenter
-                        elide: Text.ElideRight
-                        text: task.model.display
-                        font.family: "Tahoma"; font.pixelSize: 11; font.bold: task.active
-                        color: "black"
-                        renderType: Text.NativeRendering
-                    }
+                    z: taskRow.dragIndex === task.index ? 1 : 0
                     MouseArea {
                         id: mouse
                         anchors.fill: parent
                         hoverEnabled: true
-                        // Dragging a button past the system drag distance moves it, as Windows 7's taskbar does.
                         property bool dragged: false
                         property real pressX: 0
                         onPressed: (event) => { dragged = false; pressX = event.x; }
@@ -170,16 +184,34 @@ PlasmoidItem {
                             if (!pressed || (!dragged && Math.abs(event.x - pressX) < Qt.styleHints.startDragDistance))
                                 return;
                             dragged = true;
-                            const at = mapToItem(taskRow, event.x, height / 2);
-                            const other = taskRow.childAt(at.x, at.y);
-                            if (!other || other === task || other.index === undefined)
+                            taskRow.dragIndex = task.index;
+                            taskRow.dragWidth = task.width;
+                            taskRow.dragOffset = event.x - pressX;
+                            const center = task.x + task.width / 2 + taskRow.dragOffset;
+                            let target = task.index;
+                            for (let i = 0; i < taskRepeater.count; ++i) {
+                                const other = taskRepeater.itemAt(i);
+                                if (i < task.index && center < other.x + other.width / 2)
+                                    target = Math.min(target, i);
+                                if (i > task.index && center > other.x + other.width / 2)
+                                    target = Math.max(target, i);
+                            }
+                            taskRow.dropIndex = target;
+                        }
+                        onCanceled: { taskRow.dragIndex = -1; taskRow.dropIndex = -1; }
+                        onReleased: {
+                            if (!dragged)
                                 return;
-                            // Moving the row tears down this delegate's QML context, so everything used afterwards is
-                            // captured first. Pinned items keep their new order: the launcher list goes back to the config.
+                            // Keep delegates alive during the grab; moving the model destroys their QML contexts.
+                            const from = task.index, to = taskRow.dropIndex;
                             const model = tasksModel, config = Plasmoid.configuration;
-                            model.move(task.index, other.index);
-                            model.syncLaunchers();
-                            config.launchers = model.launcherList;
+                            taskRow.dragIndex = -1;
+                            taskRow.dropIndex = -1;
+                            if (from !== to) {
+                                model.move(from, to);
+                                model.syncLaunchers();
+                                config.launchers = model.launcherList;
+                            }
                         }
                         onClicked: {
                             if (dragged)

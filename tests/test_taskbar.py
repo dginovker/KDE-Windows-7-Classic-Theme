@@ -133,8 +133,20 @@ def main():
     launchers = lambda: user('grep "^launchers=" ~/.config/plasma-org.kde.plasma.desktop-appletsrc')
     vmctl.pointer(VM, 190, 778)
     vmctl.button(VM, 'left', True)
-    for x in range(200, 310, 10):
+    # Before any slot boundary, the dragged button already follows a small pointer motion.
+    vmctl.pointer(VM, 207, 778)
+    time.sleep(0.3)
+    shot(OUT / '7-drag-follow.png')
+    follow = Image.open(OUT / '7-drag-follow.png').convert('RGB')
+    assert follow.getpixel((130, 760)) == (64, 64, 64), 'dragged button did not follow the pointer by 17 pixels'
+    assert follow.getpixel((113, 760)) == FACE, 'dragged button remained stuck in its original slot'
+    for x in range(217, 310, 10):
         vmctl.pointer(VM, x, 778)
+    time.sleep(0.25)
+    shot(OUT / '7-neighbour-slide.png')
+    slid = Image.open(OUT / '7-neighbour-slide.png').convert('RGB')
+    before = Image.open(OUT / '6-windows-again.png').convert('RGB')
+    assert slid.crop((121, 763, 153, 795)) == before.crop((283, 763, 315, 795)), 'neighbour did not slide into the vacated slot'
     vmctl.button(VM, 'left', False)
     vmctl.pointer(VM, 640, 600)
     wait_for(lambda: launchers() == 'launchers=applications:firefox.desktop,applications:org.kde.konsole.desktop,'
