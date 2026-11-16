@@ -28,8 +28,12 @@ def greeter():
 
 def restart_sddm():
     # SDDM alone can leave the old user manager/Plasma alive, falsely appearing to be a successful login.
-    root('set -e; systemctl stop sddm; loginctl terminate-user tester; '
-         'systemctl stop user@$(id -u tester).service; systemctl start sddm')
+    try:
+        root('systemctl stop sddm')
+        root('set -e; if loginctl show-user tester >/dev/null 2>&1; then loginctl terminate-user tester; fi; '
+             'systemctl stop user@$(id -u tester).service')
+    finally:
+        root('systemctl start sddm')
 
 
 def main():
