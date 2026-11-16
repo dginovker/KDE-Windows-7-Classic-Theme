@@ -70,6 +70,12 @@ def main():
         old.unlink()
     vmctl.start(VM)
     install()
+    user("cp ~/.config/kdeglobals /tmp/toggle-original-kdeglobals; python - <<'PYCONFIG'\n"
+         "from pathlib import Path\n"
+         "p = Path.home() / '.config/kdeglobals'\n"
+         "p.write_text('# Preserve this leading comment\\n[ZZToggleByteTest]\\nzLast=3\\n# Keep key order\\naFirst=1\\n\\n' + p.read_text() + '\\n[AAToggleByteTest]\\nzLast=9\\naFirst=2\\n')\n"
+         "PYCONFIG")
+    kdeglobals_digest = user('sha256sum ~/.config/kdeglobals')
     open_work()
     work = pids()
     assert all(work.values()), work
@@ -99,6 +105,7 @@ def main():
         assert user('qdbus6 org.kde.plasmashell /PlasmaShell evaluateScript "print(panels()[0].height)"') == '46', f'trip {trip}: Windows-mode edit lost'
         before_windows = digest()
         toggle('current')
+        assert user('sha256sum ~/.config/kdeglobals') == kdeglobals_digest, 'comments or unsorted kdeglobals bytes changed'
         assert digest() == before_current, f'trip {trip}: current config changed:\n{before_current}\n{digest()}'
         assert 'org.kde.plasma.panelspacer' in user('grep -h plugin= ~/.config/plasma-org.kde.plasma.desktop-appletsrc'), f'trip {trip}: Current-mode edit lost'
         toggle('windows')
@@ -106,6 +113,8 @@ def main():
         toggle('current')
         assert_work_alive(work, f'trip {trip}')
         print(f'round trip {trip}/10 ok', flush=True)
+    assert user('sha256sum ~/.config/kdeglobals') == kdeglobals_digest, 'comments or unsorted kdeglobals bytes changed'
+    print('commented, deliberately unsorted kdeglobals restored byte-for-byte')
     shot('3-current-restored')
 
     # Save Kate's never-saved buffer now, proving its content survived every switch.
@@ -149,6 +158,7 @@ def main():
 
     subprocess.run(['ffmpeg', '-y', '-loglevel', 'error', '-framerate', '5', '-i', str(OUT / 'frames' / '%05d.png'),
                     '-vf', 'scale=1280:-2', '-pix_fmt', 'yuv420p', str(OUT / 'round-trip.mp4')], check=True)
+    user('cp /tmp/toggle-original-kdeglobals ~/.config/kdeglobals')
     print('ALL TOGGLE CHECKS PASSED; artifacts in', OUT)
 
 

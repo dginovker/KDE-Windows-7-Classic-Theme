@@ -85,7 +85,7 @@ void drawSeparator(QPainter &p,QRect r)
     p.fillRect(r.x(),r.y()+1,1,1,Shadow3D);
     p.fillRect(r.x()+1,r.y()+1,r.width()-1,1,Highlight3D);
 }
-void drawGlyph(QPainter &p,QRect r,Glyph glyph,bool disabled,bool checked,const QColor &ink)
+void drawGlyph(QPainter &p,QRect r,Glyph glyph,bool disabled,CheckState checkState,const QColor &ink)
 {
     const QColor color=disabled?GrayText:ink;
     auto bars=[&](std::initializer_list<QRect> boxes) { for(auto b:boxes) p.fillRect(b.translated(r.topLeft()),color); };
@@ -99,10 +99,16 @@ void drawGlyph(QPainter &p,QRect r,Glyph glyph,bool disabled,bool checked,const 
     case ArrowLeft: case ArrowRight:
         for(int y=0;y<7;++y) { const int w=4-abs(3-y); p.fillRect(r.x()+(glyph==ArrowLeft?4-w:0),r.y()+y,w,1,color); } return;
     case Check: {
-        p.fillRect(r,disabled?Face:Window); drawEdge(p,r,Sunken);
-        if(checked) {
+        p.fillRect(r,disabled?Face:Window);
+        if(checkState==Mixed && !disabled) {
+            for(int y=r.top()+2;y<r.bottom()-1;++y)
+                for(int x=r.left()+2;x<r.right()-1;++x)
+                    if((x+y)&1) p.fillRect(x,y,1,1,Face);
+        }
+        drawEdge(p,r,Sunken);
+        if(checkState!=Unchecked) {
             static const char *tick[]={"......#",".....##","#...###","##.###.","#####..",".###...","..#...."};
-            for(int y=0;y<7;++y)for(int x=0;x<7;++x)if(tick[y][x]=='#')p.fillRect(r.x()+3+x,r.y()+3+y,1,1,color);
+            for(int y=0;y<7;++y)for(int x=0;x<7;++x)if(tick[y][x]=='#')p.fillRect(r.x()+3+x,r.y()+3+y,1,1,checkState==Mixed?GrayText:color);
         }
         return;
     }
@@ -113,7 +119,7 @@ void drawGlyph(QPainter &p,QRect r,Glyph glyph,bool disabled,bool checked,const 
             char c=rows[y][x]; QColor v=c=='S'?Shadow3D:c=='D'?DarkShadow3D:c=='H'?Highlight3D:c=='w'?(disabled?Face:Window):Face;
             p.fillRect(r.x()+x,r.y()+y,1,1,v);
         }
-        if(checked) { p.fillRect(r.x()+6,r.y()+4,2,4,color);p.fillRect(r.x()+5,r.y()+5,4,2,color); }
+        if(checkState==Checked) { p.fillRect(r.x()+6,r.y()+4,2,4,color);p.fillRect(r.x()+5,r.y()+5,4,2,color); }
         return;
     }
     }

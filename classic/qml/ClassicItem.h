@@ -51,7 +51,7 @@ public:
         if(m_separator) Classic::drawSeparator(*p,r);
         if(m_focused) Classic::drawFocusRect(*p,r,m_origin);
         if(m_glyph) Classic::drawGlyph(*p,r.translated(m_pressed?1:0,m_pressed?1:0),
-            Classic::Glyph(m_glyph),m_disabled,false,m_glyphColor);
+            Classic::Glyph(m_glyph),m_disabled,Classic::Unchecked,m_glyphColor);
     }
 signals:
     void changed();

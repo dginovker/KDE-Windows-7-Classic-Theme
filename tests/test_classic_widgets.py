@@ -69,6 +69,13 @@ def main():
     assert_pixels(ours, 'disabled-edit', (324, 215, 604, 239), [(327, 218, 450, 236)])
     assert_pixels(ours, 'combo', (24, 265, 304, 286), [(27, 268, 150, 283)])
     assert_pixels(ours, 'combo-arrow', (286, 267, 302, 284))
+    assert_pixels(ours, 'scrollbar', (324, 265, 604, 282))
+    mixed = ours.crop((550, 125, 563, 138))
+    checked = ours.crop((190, 125, 203, 138))
+    mixed.save(OUT / 'mixed-no-native-oracle.png')
+    assert mixed.tobytes() != checked.tobytes(), 'partially checked was rendered as checked'
+    assert mixed.getpixel((9, 3)) == (128, 128, 128), 'mixed tick must use GrayText, not enabled black'
+    assert mixed.getpixel((3, 3)) != mixed.getpixel((4, 3)), 'mixed background must be stippled'
     assert_pixels(ours, 'group-box', (24, 330, 604, 450), [(31, 330, 100, 345), (44, 368, 400, 392)])
     for group in ('0', '1', '2'):
         assert probe['palette'][group]['Window'] == '#d4d0c8'
@@ -77,7 +84,13 @@ def main():
     restored = json.loads(user('cat /tmp/fixture-palette.json'))
     (OUT / 'current-after.json').write_text(json.dumps(restored, indent=2))
     assert restored == before, 'live widget palettes did not restore exactly'
+    user("python - <<'PYPROFILE'\n"
+         "import json\nfrom pathlib import Path\n"
+         "p = Path.home() / '.local/state/win7-classic/profiles/windows/keys.json'\n"
+         "data = json.loads(p.read_text())\ndata['kdeglobals']['[KDE]']['widgetStyle'] = 'Windows'\n"
+         "p.write_text(json.dumps(data))\nPYPROFILE")
     toggle('windows')
+    assert user('kreadconfig6 --file kdeglobals --group KDE --key widgetStyle') == 'Win7Classic', 'old saved style bypassed required renderer'
     user('pkill -f "^/usr/bin/python3 /tmp/fixture_window.py"; true')
     user('systemd-run --user --collect -q python3 /tmp/fixture_window.py --dialog')
     wait_for(lambda: frames.fixture_state() != 'gone', 'real QDialog default case')

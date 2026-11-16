@@ -25,6 +25,16 @@ public:
         return result;
     }
     QRect subControlRect(ComplexControl c,const QStyleOptionComplex *o,SubControl sc,const QWidget *w=nullptr) const override {
+        if(c==CC_ScrollBar && (o->state&State_Horizontal)) {
+            QRect result=QProxyStyle::subControlRect(c,o,sc,w);
+            // The native 17px control paints a 16px face; its thumb shares the leading button's last column.
+            if(sc==SC_ScrollBarSubLine) result.adjust(0,0,-1,-1);
+            else if(sc==SC_ScrollBarAddLine) result.adjust(1,0,0,-1);
+            else if(sc==SC_ScrollBarSlider) result.adjust(-2,0,0,-1);
+            else if(sc==SC_ScrollBarAddPage) result.adjust(0,0,1,-1);
+            else if(sc==SC_ScrollBarSubPage) result.adjust(0,0,0,-1);
+            return result;
+        }
         if(c==CC_GroupBox && sc==SC_GroupBoxFrame)
             return o->rect.adjusted(0,(o->fontMetrics.height()+1)/2,0,0);
         if(c==CC_ComboBox && sc==SC_ComboBoxArrow)
@@ -60,9 +70,9 @@ public:
         case PE_FrameFocusRect:
             Classic::drawFocusRect(*p,o->rect); return;
         case PE_IndicatorCheckBox:
-            Classic::drawGlyph(*p,o->rect,Classic::Check,disabled,o->state & (State_On|State_NoChange));return;
+            Classic::drawGlyph(*p,o->rect,Classic::Check,disabled,(o->state&State_NoChange)?Classic::Mixed:(o->state&State_On)?Classic::Checked:Classic::Unchecked);return;
         case PE_IndicatorRadioButton:
-            Classic::drawGlyph(*p,o->rect,Classic::Radio,disabled,o->state & State_On);return;
+            Classic::drawGlyph(*p,o->rect,Classic::Radio,disabled,(o->state&State_On)?Classic::Checked:Classic::Unchecked);return;
         case PE_FrameGroupBox:
             Classic::drawEdge(*p,o->rect,Classic::Etched);return;
         case PE_PanelButtonCommand:
@@ -87,8 +97,9 @@ public:
             if(e!=CE_ScrollBarSlider) {
                 const bool horizontal=o->state & State_Horizontal;
                 if(horizontal) {
-                    const auto glyph=e==CE_ScrollBarSubLine?Classic::ArrowLeft:Classic::ArrowRight;
-                    Classic::drawGlyph(*p,QRect(o->rect.center()-QPoint(2,3),QSize(4,7)),glyph,!(o->state&State_Enabled));
+                    const bool left=(e==CE_ScrollBarSubLine)==(o->direction==Qt::LeftToRight);
+                    const auto glyph=left?Classic::ArrowLeft:Classic::ArrowRight;
+                    Classic::drawGlyph(*p,QRect(o->rect.center()-QPoint(left?2:1,3),QSize(4,7)),glyph,!(o->state&State_Enabled));
                 } else {
                     p->save();p->translate(o->rect.center());p->rotate(e==CE_ScrollBarSubLine?180:0);
                     Classic::drawArrow(*p,QPoint(-3,-1),7);p->restore();

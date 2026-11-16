@@ -93,6 +93,16 @@ def main():
     code, _, err = vmctl.run(VM, f'{vmctl.USER_ENV}\nexec runuser -u tester -- win7-classic windows', 180)
     assert code == 0, err
     time.sleep(2)
+    windows_state = user(USER_STATE)
+    root('mv /usr/lib/qt6/plugins/styles/libwin7classicstyle.so /tmp/win7-style-held.so')
+    try:
+        code, _, err = vmctl.run(VM, f'{vmctl.USER_ENV}\nexec runuser -u tester -- win7-classic windows', 180)
+        assert code != 0 and 'cd packaging && makepkg -si' in err, err
+        assert user(USER_STATE) == windows_state, 'same-mode missing-style refusal changed configuration'
+        assert user('win7-classic status') == 'windows'
+    finally:
+        root('mv /tmp/win7-style-held.so /usr/lib/qt6/plugins/styles/libwin7classicstyle.so')
+    print('missing-style refusal also works from already-Windows mode without changing configuration')
     shot(OUT / '1-windows-from-package.png')
     assert user('kreadconfig6 --file kcminputrc --group Mouse --key cursorTheme') == 'Win7-Classic-Cursors'
     assert user('gsettings get org.gnome.desktop.interface cursor-theme') == "'Win7-Classic-Cursors'"
