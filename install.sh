@@ -24,9 +24,25 @@ if [[ ${1:-} != --prefix && ! -f /usr/lib/qt6/plugins/styles/libwin7classicstyle
 fi
 
 # Wine's LGPL Tahoma is metric-compatible with the Windows UI font; Microsoft's own may not be redistributed.
-mkdir -p "$fonts" "$fontconf"
 for f in tahoma.ttf tahomabd.ttf; do
     [[ -f /usr/share/wine/fonts/$f ]] || { echo "missing /usr/share/wine/fonts/$f: install wine" >&2; exit 1; }
+done
+
+# Dependency/build failures must leave the previous installation intact.
+build=$(mktemp -d)
+trap 'rm -rf "$build"' EXIT
+if [[ ${1:-} == --prefix ]]; then prefix=/usr; else prefix=$(dirname "$data"); fi
+cmake -S "$src/explorer" -B "$build" -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$prefix" >/dev/null
+cmake --build "$build" --parallel 2 >/dev/null
+if [[ ${1:-} != --prefix ]]; then
+    QT_QPA_PLATFORM=offscreen "$build/classic/win7-classic-probe" --available || {
+        echo "win7-classic: Win7Classic style cannot load; reinstall: cd packaging && makepkg -si" >&2
+        exit 1
+    }
+fi
+
+mkdir -p "$fonts" "$fontconf"
+for f in tahoma.ttf tahomabd.ttf; do
     install -m644 /usr/share/wine/fonts/$f "$fonts/"
 done
 install -m644 "$src/fonts/70-win7-classic-tahoma.conf" "$fontconf/"
@@ -64,11 +80,6 @@ if [[ ${1:-} == --prefix ]]; then
 fi
 ln -sfn "$(realpath -m --relative-to="$bin" "$data/win7-classic/win7-classic")" "$bin/win7-classic"
 
-build=$(mktemp -d)
-trap 'rm -rf "$build"' EXIT
-if [[ ${1:-} == --prefix ]]; then prefix=/usr; else prefix=$(dirname "$data"); fi
-cmake -S "$src/explorer" -B "$build" -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$prefix" >/dev/null
-cmake --build "$build" --parallel 2 >/dev/null
 DESTDIR=${root:-} cmake --install "$build" >/dev/null
 
 [[ ${1:-} == --prefix ]] || fc-cache "$fonts"

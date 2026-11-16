@@ -56,6 +56,66 @@ def build_package():
     return package
 
 
+def installed_user_files():
+    return user("""python - <<'PY'
+import hashlib
+import json
+from pathlib import Path
+home = Path.home()
+patterns = (
+    '.local/share/plasma/plasmoids/org.win7classic.*', '.local/share/plasma/desktoptheme/win7-classic',
+    '.local/share/kwin/decorations/win7classic', '.local/share/themes/Win7-Classic',
+    '.local/share/icons/Win7-Classic*', '.local/share/win7-classic', '.local/share/fonts/win7-classic',
+    '.local/share/color-schemes/Win7Classic.colors', '.local/bin/win7-*',
+    '.local/share/applications/org.win7classic.explorer.desktop',
+    '.local/share/icons/hicolor/*/apps/org.win7classic.explorer.png',
+    '.config/fontconfig/conf.d/70-win7-classic-tahoma.conf',
+)
+manifest = {}
+for pattern in patterns:
+    for root in home.glob(pattern):
+        for p in [root, *root.rglob('*')] if root.is_dir() else [root]:
+            value = ('link', str(p.readlink())) if p.is_symlink() else (
+                ('dir',) if p.is_dir() else ('file', hashlib.sha256(p.read_bytes()).hexdigest()))
+            manifest[str(p.relative_to(home))] = [p.lstat().st_mode, *value]
+print(json.dumps(manifest, sort_keys=True))
+PY""")
+
+
+def check_failed_development_installs(package):
+    root(f'pacman -U --noconfirm {package} >/dev/null 2>&1')
+    user('/tmp/win7-build/install.sh')
+    failures = []
+    for problem in ('unloadable-plugin', 'failed-build'):
+        # A marker catches deleting/recreating an otherwise identical installation too.
+        user('echo preserve-me > ~/.local/share/win7-classic/preserve-on-failure')
+        before = installed_user_files(), user(USER_STATE), user(PROFILES), user('win7-classic status')
+        if problem == 'unloadable-plugin':
+            root('mv /usr/lib/qt6/plugins/styles/libwin7classicstyle.so /tmp/win7-style-held.so; '
+                 'printf "not a Qt plugin" > /usr/lib/qt6/plugins/styles/libwin7classicstyle.so')
+        else:
+            user('cp /tmp/win7-build/explorer/CMakeLists.txt /tmp/win7-cmake-held; '
+                 'echo "invalid_cmake_command()" >> /tmp/win7-build/explorer/CMakeLists.txt')
+        try:
+            code, _, err = vmctl.run(VM, f'{vmctl.USER_ENV}\nexec runuser -u tester -- /tmp/win7-build/install.sh', 180)
+            after = installed_user_files(), user(USER_STATE), user(PROFILES), user('win7-classic status')
+            checks = {'nonzero exit': code != 0, 'previous install and state unchanged': after == before}
+            if problem == 'unloadable-plugin':
+                checks['repair guidance'] = 'cd packaging && makepkg -si' in err
+            for check, passed in checks.items():
+                print(f'install {problem}: {check}: {"PASS" if passed else "FAIL"}')
+                if not passed:
+                    failures.append(f'install {problem}: {check}')
+        finally:
+            if problem == 'unloadable-plugin':
+                root('mv /tmp/win7-style-held.so /usr/lib/qt6/plugins/styles/libwin7classicstyle.so')
+            else:
+                user('mv /tmp/win7-cmake-held /tmp/win7-build/explorer/CMakeLists.txt')
+    remove_user_install()
+    root('pacman -R --noconfirm win7-classic >/dev/null 2>&1')
+    assert not failures, '\n'.join(failures)
+
+
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     vmctl.start(VM)
@@ -159,6 +219,7 @@ def main():
     root('pacman -R --noconfirm win7-classic >/dev/null 2>&1')
     assert user(USER_STATE) == before_user, 'reinstall + switch back did not recover the current layout'
     print('removing while in Windows mode warns; reinstalling and switching back recovers the layout exactly')
+    check_failed_development_installs(package)
     print('ALL PACKAGE CHECKS PASSED; artifacts in', OUT)
 
 
