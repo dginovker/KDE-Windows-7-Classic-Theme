@@ -1,4 +1,5 @@
 import QtQuick
+import "../../../../../win7-classic/primitives" as Classic
 import QtQuick.Layouts
 import QtQuick.Window
 import org.kde.plasma.plasmoid
@@ -27,15 +28,6 @@ PlasmoidItem {
             console.error("win7-classic: font family 'Tahoma' is not installed; run install.sh. Text will use a substitute font.");
     }
 
-    // Dots of a 30x32 dotted rectangle at button (19,3), on pixels where x+y is odd in screen coordinates.
-    readonly property var focusDots: {
-        const dots = [];
-        for (let x = 19; x <= 48; x++)
-            for (let y = 3; y <= 34; y++)
-                if ((x === 19 || x === 48 || y === 3 || y === 34) && (x + 2 + y + 760) % 2 === 1)
-                    dots.push([x, y]);
-        return dots;
-    }
     property double menuClosedAt: 0
     function toggleMenu() {
         // Clicking Start while the menu is open first deactivates (and hides) the menu; don't reopen it.
@@ -111,10 +103,10 @@ PlasmoidItem {
                 color: "black"
                 renderType: Text.NativeRendering
             }
-            // Keyboard focus rectangle Windows draws around the label while the menu is open (DrawFocusRect pattern).
-            Repeater {
-                model: startMenu.visible && !startMenu.hotTracking ? focusDots : []
-                delegate: Rectangle { required property var modelData; x: modelData[0]; y: modelData[1]; width: 1; height: 1; color: "black" }
+            Classic.Raster {
+                x: 19; y: 3; width: 30; height: 32
+                focused: startMenu.visible && !startMenu.hotTracking
+                patternOrigin: Qt.point(21, 763)
             }
             MouseArea {
                 id: startMouse
@@ -157,7 +149,7 @@ PlasmoidItem {
                             anchors.fill: parent
                             visible: !task.launcher || mouse.containsMouse || mouse.pressed
                             sunken: task.sunken
-                            fill: task.active && !task.launcher ? "#ffffff" : "#d4d0c8"
+                            fill: task.active && !task.launcher ? Classic.Palette.highlight3D : Classic.Palette.face
                         }
                         Kirigami.Icon {
                             x: (task.launcher ? (task.width - 32) / 2 : 3) + task.shift

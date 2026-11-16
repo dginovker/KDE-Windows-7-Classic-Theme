@@ -1,4 +1,5 @@
 import QtQuick
+import "../../../../../win7-classic/primitives" as Classic
 import QtQuick.Window
 import org.kde.plasma.core as PlasmaCore
 import org.kde.plasma.plasmoid
@@ -46,12 +47,12 @@ PlasmaCore.Dialog {
         }
     }
 
-    mainItem: Rectangle {
+    mainItem: Classic.Raster {
         id: body
         width: 230
         height: menu.launcher ? 72 : 94
-        color: "#d4d0c8"
-        border.color: "black"
+        fill: Classic.Palette.face
+        flatBorder: true
         focus: true
         Keys.onEscapePressed: menu.visible = false
         Keys.onDownPressed: menu.current = (menu.current + 1) % rows.count
@@ -66,7 +67,7 @@ PlasmaCore.Dialog {
                 required property int index
                 x: 5; y: 16 + index * 22
                 width: body.width - 10; height: 22
-                color: menu.current === index ? "#0a246a" : "transparent"
+                color: menu.current === index ? Classic.Palette.selection : "transparent"
                 Kirigami.Icon {
                     visible: row.index === 0
                     x: 4; y: 3; width: 16; height: 16

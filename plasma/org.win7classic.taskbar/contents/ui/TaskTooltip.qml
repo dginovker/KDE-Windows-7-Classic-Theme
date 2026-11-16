@@ -1,4 +1,5 @@
 import QtQuick
+import "../../../../../win7-classic/primitives" as Classic
 import QtQuick.Window
 import org.kde.plasma.core as PlasmaCore
 
@@ -15,12 +16,12 @@ PlasmaCore.Dialog {
     y: button.mapToGlobal(0, pointer.y).y + 21 + body.height <= button.Screen.virtualY + button.Screen.height
        ? button.mapToGlobal(0, pointer.y).y + 21 : button.mapToGlobal(0, 0).y - body.height - 3
 
-    mainItem: Rectangle {
+    mainItem: Classic.Raster {
         id: body
         width: Math.ceil(label.implicitWidth) + 6
         height: 16
-        color: "#ffffe1"
-        border.color: "black"
+        fill: "#ffffe1"
+        flatBorder: true
         Text {
             id: label
             x: 3; height: parent.height

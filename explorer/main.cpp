@@ -1,6 +1,7 @@
 // Windows 7 Classic Explorer: Explorer's chrome, laid out to the pixel geometry of reference/screenshots/w7-explorer*.png
 // and drawn with Windows' own art (explorer/assets, see reference/tools/extract-assets.py), around KDE's KIO file
 // widgets, which do the actual file management.
+#include "ClassicPrimitives.h"
 #include <KDirModel>
 #include <KDirOperator>
 #include <KFileItemActions>
@@ -40,11 +41,9 @@
 #include <QTreeView>
 #include <QVBoxLayout>
 
-// Windows Classic system colors (Win32 GetSysColor in the reference VM). Explorer only runs in Windows mode.
-namespace classic
-{
-const QColor face(212, 208, 200), shadow(128, 128, 128), darkShadow(64, 64, 64), light(255, 255, 255);
-const QColor highlight(10, 36, 106), text(0, 0, 0);
+namespace classic {
+const auto &face=Classic::Face, &shadow=Classic::Shadow3D, &darkShadow=Classic::DarkShadow3D,
+           &light=Classic::Highlight3D, &highlight=Classic::Selection, &text=Classic::Text;
 }
 
 static QPixmap asset(const QString &name)
@@ -72,29 +71,20 @@ static QIcon assetIcon(const QString &name)
 // Solid downward triangle, `width` pixels wide at the top, as Explorer draws its menu arrows.
 static void arrow(QPainter &p, int x, int y, int width, const QColor &color = classic::text)
 {
-    for (int row = 0; width - 2 * row > 0; ++row)
-        p.fillRect(x + row, y + row, width - 2 * row, 1, color);
+    Classic::drawArrow(p, QPoint(x,y), width, color);
 }
 
-// DrawEdge's etched and sunken edges, as Classic Explorer frames its bands and fields.
-static void etched(QPainter &p, const QRect &r)
-{
-    p.fillRect(r.left(), r.top(), r.width() - 1, 1, classic::shadow);
-    p.fillRect(r.left(), r.top(), 1, r.height() - 1, classic::shadow);
-    p.fillRect(r.left() + 1, r.top() + 1, r.width() - 3, 1, classic::light);
-    p.fillRect(r.left() + 1, r.top() + 1, 1, r.height() - 3, classic::light);
-    p.fillRect(r.left() + 1, r.bottom() - 1, r.width() - 2, 1, classic::shadow);
-    p.fillRect(r.right() - 1, r.top() + 1, 1, r.height() - 2, classic::shadow);
-    p.fillRect(r.left(), r.bottom(), r.width(), 1, classic::light);
-    p.fillRect(r.right(), r.top(), 1, r.height(), classic::light);
-}
-
+static void etched(QPainter &p, const QRect &r) { Classic::drawEdge(p,r,Classic::Etched); }
 static void edge(QPainter &p, const QRect &r, const QColor &topLeft, const QColor &bottomRight)
 {
-    p.fillRect(r.left(), r.top(), r.width(), 1, topLeft);
-    p.fillRect(r.left(), r.top(), 1, r.height(), topLeft);
-    p.fillRect(r.left(), r.bottom(), r.width(), 1, bottomRight);
-    p.fillRect(r.right(), r.top(), 1, r.height(), bottomRight);
+    if(topLeft==Classic::Shadow3D && bottomRight==Classic::Highlight3D)
+        Classic::drawEdge(p,r,Classic::SunkenOuter);
+    else if(topLeft==Classic::Highlight3D && bottomRight==Classic::Shadow3D)
+        Classic::drawEdge(p,r,Classic::RaisedInner);
+    else if(topLeft==Classic::DarkShadow3D && bottomRight==Classic::Face)
+        Classic::drawEdge(p,r,Classic::SunkenInner);
+    else
+        qFatal("unsupported Explorer edge color pair");
 }
 
 // KDirOperator's own right-click menu is a file-dialog menu (sorting, hidden files, …); Explorer's is per item.

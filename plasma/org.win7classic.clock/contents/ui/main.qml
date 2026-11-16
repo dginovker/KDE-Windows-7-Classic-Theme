@@ -1,4 +1,5 @@
 import QtQuick
+import "../../../../../win7-classic/primitives" as Classic
 import QtQuick.Layouts
 import QtQuick.Window
 import org.kde.plasma.plasmoid
@@ -6,7 +7,7 @@ import org.kde.plasma.core as PlasmaCore
 import org.kde.kirigami as Kirigami
 import org.kde.plasma.workspace.dbus as DBus
 
-// Must be the last applet in the panel: it closes the frame org.win7classic.trayframe started.
+// Must be the last applet: its right padding reserves the notification frame termination.
 // Positions are relative to the panel window's right edge (reference: frame ends 3px from it), not the applet.
 PlasmoidItem {
     id: root
@@ -26,7 +27,7 @@ PlasmoidItem {
         function syncOrigin() { origin = mapToItem(null, 0, 0) }
         Component.onCompleted: Qt.callLater(syncOrigin)
         onWidthChanged: Qt.callLater(syncOrigin)
-        Connections { target: area.Window.window; function onWidthChanged() { Qt.callLater(area.syncOrigin) } }
+        Connections { target: area.Window.window; function onAfterAnimating() { area.syncOrigin() } }
 
         Column {
             x: area.panelRight - 84; width: 66
@@ -43,7 +44,7 @@ PlasmoidItem {
                     horizontalAlignment: Text.AlignHCenter
                     text: modelData
                     font.family: "Tahoma"; font.pixelSize: 11
-                    color: "black"
+                    color: Classic.Palette.text
                     renderType: Text.NativeRendering
                 }
             }
@@ -56,8 +57,5 @@ PlasmoidItem {
                 onClicked: DBus.SessionBus.asyncCall({ service: "org.kde.kglobalaccel", path: "/component/kwin", iface: "org.kde.kglobalaccel.Component", member: "invokeShortcut", arguments: [new DBus.string("Show Desktop")], signature: "(s)" })
             }
         }
-        // Right edge of the sunken frame, then panel face over the trayframe lines' overflow.
-        Rectangle { x: area.panelRight - 3; y: 4 - area.origin.y; width: 1; height: 38; color: "#ffffff" }
-        Rectangle { x: area.panelRight - 2; y: 4 - area.origin.y; width: 2; height: 38; color: "#d4d0c8" }
     }
 }

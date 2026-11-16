@@ -1,5 +1,6 @@
 import QtCore
 import QtQuick
+import "../../../../../win7-classic/primitives" as Classic
 import org.kde.plasma.core as PlasmaCore
 import org.kde.plasma.plasmoid
 import org.kde.kirigami as Kirigami
@@ -20,8 +21,8 @@ PlasmaCore.Dialog {
     // but not over All Programs/Back (w7-programs.png).
     readonly property bool hotTracking: favoritesHover.count > 0 || placesHover.count > 0
 
-    readonly property color face: "#d4d0c8"
-    readonly property color highlight: "#0a246a"
+    readonly property color face: Classic.Palette.face
+    readonly property color highlight: Classic.Palette.selection
     readonly property font uiFont: Qt.font({ family: "Tahoma", pixelSize: 11 })
 
     type: PlasmaCore.Dialog.PopupMenu
@@ -89,22 +90,9 @@ PlasmaCore.Dialog {
         KCoreAddons.KUser { id: user }
 
 
-        Rectangle { anchors.fill: parent; color: menu.face }
-        // DrawEdge EDGE_RAISED with Classic colors: ButtonLight/Highlight top-left, Shadow/DkShadow bottom-right.
-        Rectangle { x: 1; y: 1; width: 402; height: 1; color: "#ffffff" }
-        Rectangle { x: 1; y: 1; width: 1; height: 458; color: "#ffffff" }
-        Rectangle { x: 403; y: 1; width: 1; height: 459; color: "#808080" }
-        Rectangle { x: 1; y: 459; width: 403; height: 1; color: "#808080" }
-        Rectangle { x: 404; y: 0; width: 1; height: 461; color: "#404040" }
-        Rectangle { x: 0; y: 460; width: 405; height: 1; color: "#404040" }
+        Classic.Raster { anchors.fill: parent; fill: menu.face; edge: Classic.Raster.Raised }
 
-        component Etch: Item {
-            // A sunken 2px line: shadow row, then a highlight row starting one pixel in.
-            height: 2
-            Rectangle { width: parent.width; height: 1; color: "#808080" }
-            Rectangle { y: 1; width: 1; height: 1; color: "#808080" }
-            Rectangle { x: 1; y: 1; width: parent.width - 1; height: 1; color: "#ffffff" }
-        }
+        component Etch: Classic.Raster { height: 2; separator: true }
         component Label: Text {
             font: menu.uiFont
             color: "black"
@@ -112,20 +100,12 @@ PlasmaCore.Dialog {
             verticalAlignment: Text.AlignVCenter
             elide: Text.ElideRight
         }
-        component Triangle: Item {
-            // Solid arrow 4 wide and 7 tall, pointing left or right.
+        component Triangle: Classic.Raster {
             property bool pointsLeft: false
             property color color: "black"
             width: 4; height: 7
-            Repeater {
-                model: [1, 2, 3, 4, 3, 2, 1]
-                delegate: Rectangle {
-                    required property int modelData
-                    required property int index
-                    x: parent.pointsLeft ? 4 - modelData : 0
-                    y: index; width: modelData; height: 1; color: parent.color
-                }
-            }
+            glyph: pointsLeft ? Classic.Raster.ArrowLeft : Classic.Raster.ArrowRight
+            glyphColor: color
         }
 
         // ---------- favorites view: left column ----------
@@ -250,15 +230,12 @@ PlasmaCore.Dialog {
         Item {
             visible: menu.view !== "search"
             anchors.fill: parent
-            Rectangle { x: 253; y: 3; width: 1; height: 421; color: "#808080" }
-            Rectangle { x: 254; y: 3; width: 1; height: 421; color: "#ffffff" }
+            Classic.Raster { x: 253; y: 3; width: 2; height: 421; edge: Classic.Raster.SunkenOuter; flags: Classic.Raster.Left | Classic.Raster.Right }
 
-            // User picture in a raised frame, where Windows shows the account picture.
             Item {
-                x: 296; y: 7; width: 68; height: 64
-                Rectangle { anchors.fill: parent; color: "#ffffff"; radius: 3 }
-                Rectangle { x: 1; y: 1; width: 66; height: 62; radius: 3; color: "#a0a0a0" }
-                Kirigami.Icon { x: 6; y: 4; width: 56; height: 56; source: user.faceIconUrl.toString() ? user.faceIconUrl : "user-identity" }
+                x: 300; y: 8; width: 62; height: 62
+                Kirigami.Icon { x: 7; y: 7; width: 48; height: 46; source: user.faceIconUrl.toString() ? user.faceIconUrl : "user-identity" }
+                Image { anchors.fill: parent; source: "assets/account-frame.png"; smooth: false }
             }
 
             Repeater {
@@ -292,23 +269,13 @@ PlasmaCore.Dialog {
         }
 
         // ---------- bottom: separator, search box, Shut down ----------
-        Rectangle { x: 3; y: 424; width: 399; height: 1; color: "#808080" }
-        Rectangle { x: 3; y: 425; width: 399; height: 1; color: "#ffffff" }
+        Classic.Raster { x: 3; y: 424; width: 399; height: 2; edge: Classic.Raster.SunkenOuter; flags: Classic.Raster.Top | Classic.Raster.Bottom }
 
         Item {
             id: searchBox
             // Windows widens the box by 3px while searching, when the magnifier turns into a clear button.
             x: 7; y: 428; width: menu.view === "search" ? 224 : 221; height: 23
-            // DrawEdge EDGE_SUNKEN around a white field.
-            Rectangle { anchors.fill: parent; color: "#ffffff" }
-            Rectangle { width: parent.width - 1; height: 1; color: "#808080" }
-            Rectangle { width: 1; height: 22; color: "#808080" }
-            Rectangle { x: 1; y: 1; width: parent.width - 3; height: 1; color: "#404040" }
-            Rectangle { x: 1; y: 1; width: 1; height: 20; color: "#404040" }
-            Rectangle { x: 1; y: 21; width: parent.width - 2; height: 1; color: menu.face }
-            Rectangle { x: parent.width - 2; y: 1; width: 1; height: 21; color: menu.face }
-            Rectangle { x: parent.width - 1; width: 1; height: 23; color: "#ffffff" }
-            Rectangle { y: 22; width: parent.width; height: 1; color: "#ffffff" }
+            Classic.Raster { anchors.fill: parent; fill: "white"; edge: Classic.Raster.Sunken }
             TextInput {
                 id: search
                 x: 5; y: 2; width: searchBox.width - 9; height: 19
@@ -333,9 +300,10 @@ PlasmaCore.Dialog {
                 }
             }
         }
-        Kirigami.Icon {
-            x: searchBox.x + searchBox.width + 2; y: 431; width: 16; height: 16
-            source: search.text.length ? "edit-clear" : "search"
+        Image {
+            x: searchBox.x + searchBox.width; y: 428; width: 22; height: 23
+            source: search.text.length ? "assets/clear.png" : "assets/search.png"
+            smooth: false
             MouseArea { anchors.fill: parent; onClicked: search.text = "" }
         }
 
@@ -343,25 +311,36 @@ PlasmaCore.Dialog {
         Item {
             id: shutdown
             x: 257; y: 428; width: 86; height: 23
-            Rectangle { anchors.fill: parent; color: menu.face }
-            Rectangle { width: 85; height: 1; color: "#ffffff" }
-            Rectangle { width: 1; height: 22; color: "#ffffff" }
-            Rectangle { x: 84; y: 1; width: 1; height: 21; color: "#808080" }
-            Rectangle { x: 1; y: 21; width: 84; height: 1; color: "#808080" }
-            Rectangle { x: 85; width: 1; height: 23; color: "#404040" }
-            Rectangle { y: 22; width: 86; height: 1; color: "#404040" }
-            Rectangle { x: 71; y: 1; width: 1; height: 20; color: "#808080" }
-            Rectangle { x: 72; width: 1; height: 22; color: "#ffffff" }
-            Label { x: 1; width: 70; height: 22; horizontalAlignment: Text.AlignHCenter; text: "Shut down" }
-            Triangle { x: 77; y: 7 }
+            readonly property bool mainPressed: shutdownMain.pressed && shutdownMain.containsMouse
+            readonly property bool arrowPressed: shutdownArrow.pressed && shutdownArrow.containsMouse
+            Classic.Raster { anchors.fill: parent; button: true }
+            Classic.Raster { x: 0; width: 73; height: 23; button: true; pressed: true; visible: shutdown.mainPressed }
+            Classic.Raster { x: 72; width: 14; height: 23; button: true; pressed: true; visible: shutdown.arrowPressed }
+            Classic.Raster { x: 71; y: 1; width: 1; height: 20; edge: Classic.Raster.SunkenOuter; flags: Classic.Raster.Left; visible: !shutdown.mainPressed && !shutdown.arrowPressed }
+            Classic.Raster { x: 72; width: 1; height: 22; edge: Classic.Raster.SunkenOuter; flags: Classic.Raster.Right; visible: !shutdown.mainPressed && !shutdown.arrowPressed }
+            Label { x: 1 + (shutdown.mainPressed ? 1 : 0); y: shutdown.mainPressed ? 1 : 0; width: 70; height: 22; horizontalAlignment: Text.AlignHCenter; text: "Shut down" }
+            Triangle { x: 77 + (shutdown.arrowPressed ? 1 : 0); y: 7 + (shutdown.arrowPressed ? 1 : 0) }
+            Classic.Raster { x: 4; y: 4; width: 64; height: 15; focused: shutdownMain.activeFocus }
             MouseArea {
+                id: shutdownMain
                 x: 0; width: 71; height: 23
-                // KDE's confirmation dialog rather than an immediate power-off: unsaved work must never be lost to a misclick.
-                onClicked: { menu.close(); menu.runCommand("org.kde.LogoutPrompt", "/LogoutPrompt", "org.kde.LogoutPrompt", "promptShutDown", [], "()"); }
+                hoverEnabled: true
+                activeFocusOnTab: true
+                // Confirmation protects unsaved work from a misplaced click or key.
+                function confirm() { menu.close(); menu.runCommand("org.kde.LogoutPrompt", "/LogoutPrompt", "org.kde.LogoutPrompt", "promptShutDown", [], "()"); }
+                onClicked: confirm()
+                Keys.onReturnPressed: confirm()
+                Keys.onSpacePressed: confirm()
             }
             MouseArea {
+                id: shutdownArrow
                 x: 72; width: 14; height: 23
-                onClicked: { menu.close(); menu.runCommand("org.kde.LogoutPrompt", "/LogoutPrompt", "org.kde.LogoutPrompt", "promptAll", [], "()"); }
+                hoverEnabled: true
+                activeFocusOnTab: true
+                function confirm() { menu.close(); menu.runCommand("org.kde.LogoutPrompt", "/LogoutPrompt", "org.kde.LogoutPrompt", "promptAll", [], "()"); }
+                onClicked: confirm()
+                Keys.onReturnPressed: confirm()
+                Keys.onSpacePressed: confirm()
             }
         }
     }

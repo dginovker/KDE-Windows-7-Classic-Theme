@@ -1,4 +1,5 @@
 import QtQuick
+import "../../../../../win7-classic/primitives" as Classic
 import org.kde.kwin.decoration
 
 // Windows 7 Classic frame, measured from reference/screenshots/w7-{taskbar,inactive,maximized}.png:
@@ -9,8 +10,8 @@ Decoration {
     alpha: false
     readonly property bool maximized: decoration.client.maximized
     readonly property bool active: decoration.client.active
-    readonly property color dark: active ? "#0a246a" : "#808080"
-    readonly property color light: active ? "#a6caf0" : "#c0c0c0"
+    readonly property color dark: active ? Classic.Palette.activeCaption : Classic.Palette.inactiveCaption
+    readonly property color light: active ? Classic.Palette.activeCaptionGradient : Classic.Palette.inactiveCaptionGradient
     readonly property int edge: maximized ? 0 : 4
     readonly property int margin: maximized ? 2 : 6
 
@@ -23,19 +24,9 @@ Decoration {
         maximizedBorders.setTitle(19);
     }
 
-    Rectangle { anchors.fill: parent; color: "#d4d0c8" }
+    Rectangle { anchors.fill: parent; color: Classic.Palette.face }
 
-    // Raised outer edge (DrawEdge EDGE_RAISED): face/white rings top-left, dark/gray rings bottom-right.
-    Item {
-        anchors.fill: parent
-        visible: !root.maximized
-        Rectangle { x: 1; y: 1; width: parent.width - 3; height: 1; color: "#ffffff" }
-        Rectangle { x: 1; y: 1; width: 1; height: parent.height - 3; color: "#ffffff" }
-        Rectangle { x: parent.width - 2; y: 1; width: 1; height: parent.height - 2; color: "#808080" }
-        Rectangle { x: 1; y: parent.height - 2; width: parent.width - 2; height: 1; color: "#808080" }
-        Rectangle { x: parent.width - 1; y: 0; width: 1; height: parent.height; color: "#404040" }
-        Rectangle { x: 0; y: parent.height - 1; width: parent.width; height: 1; color: "#404040" }
-    }
+    Classic.Raster { anchors.fill: parent; visible: !root.maximized; edge: Classic.Raster.Raised }
 
     Item {
         id: caption
@@ -70,7 +61,7 @@ Decoration {
         text: decoration.client.caption
         textFormat: Text.PlainText
         font: options.titleFont
-        color: root.active ? "#ffffff" : "#d4d0c8"
+        color: root.active ? Classic.Palette.highlight3D : Classic.Palette.face
         renderType: Text.NativeRendering
     }
     Buttons {

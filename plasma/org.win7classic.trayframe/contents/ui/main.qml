@@ -1,10 +1,11 @@
 import QtQuick
+import QtQuick.Window
+import "../../../../../win7-classic/primitives" as Classic
 import QtQuick.Layouts
 import org.kde.plasma.plasmoid
 import org.kde.plasma.core as PlasmaCore
 
-// Draws the notification area's 1px sunken frame from here to the panel's right end, so the
-// stock system tray placed after this applet sits inside it. org.win7classic.clock closes the frame.
+// The stock system tray sits inside this single sunken outer edge, not a two-ring client edge.
 PlasmoidItem {
     preferredRepresentation: fullRepresentation
     Plasmoid.backgroundHints: PlasmaCore.Types.NoBackground
@@ -13,11 +14,18 @@ PlasmoidItem {
         Layout.maximumWidth: 7
         Layout.fillHeight: true
         id: area
-        property real originY: 0
-        Component.onCompleted: Qt.callLater(() => originY = mapToItem(null, 0, 0).y)
-        // Panel-window rows 4 and 41 (screen 760 and 797); the clock applet trims the overflow on the right.
-        Rectangle { x: 0; y: 4 - area.originY; width: 10000; height: 1; color: "#808080" }
-        Rectangle { x: 0; y: 4 - area.originY; width: 1; height: 37; color: "#808080" }
-        Rectangle { x: 0; y: 41 - area.originY; width: 10000; height: 1; color: "#ffffff" }
+        property point origin: Qt.point(0, 0)
+        function syncOrigin() { origin = mapToItem(null, 0, 0) }
+        Component.onCompleted: Qt.callLater(syncOrigin)
+        Connections {
+            target: area.Window.window
+            function onAfterAnimating() { area.syncOrigin() }
+        }
+        Classic.Raster {
+            x: 0; y: 4 - area.origin.y
+            width: area.Window.window ? area.Window.window.width - area.origin.x - 2 : 0
+            height: 38
+            edge: Classic.Raster.SunkenOuter
+        }
     }
 }
