@@ -10,9 +10,10 @@ items) keeps its config groups untouched. With no such panel, a new bottom panel
 from pathlib import Path
 import re
 import sys
+from urllib.parse import unquote, urlsplit
 
 REPLACED = {'org.kde.plasma.kickoff', 'org.kde.plasma.kicker', 'org.kde.plasma.kickerdash', 'org.kde.plasma.taskmanager',
-            'org.kde.plasma.icontasks', 'org.kde.plasma.digitalclock', 'org.kde.plasma.showdesktop',
+            'org.kde.plasma.icontasks', 'org.kde.plasma.quicklaunch', 'org.kde.plasma.digitalclock', 'org.kde.plasma.showdesktop',
             'org.kde.plasma.minimizeall', 'org.kde.plasma.panelspacer', 'org.kde.plasma.marginsseparator'}
 TASKS = {'org.kde.plasma.taskmanager', 'org.kde.plasma.icontasks'}
 EXPLORER = 'applications:org.win7classic.explorer.desktop'
@@ -93,11 +94,20 @@ def main(configdir):
         plugin = {a: applets.get(('Containments', c, 'Applets', a), 'plugin') for a in children}
         launchers = []
         for a in children:
-            if plugin[a] in TASKS:
-                value = applets.get(('Containments', c, 'Applets', a, 'Configuration', 'General'), 'launchers')
-                # Dolphin pins become Explorer; preferred://filemanager follows the folder handler set in windows/keys.
-                pins = [EXPLORER if 'org.kde.dolphin.desktop' in l else l for l in (value or '').split(',') if l]
-                launchers += [l for l in pins if l not in launchers]
+            general = ('Containments', c, 'Applets', a, 'Configuration', 'General')
+            keys = ('launchers',) if plugin[a] in TASKS else ('launcherUrls', 'popupUrls') if plugin[a] == 'org.kde.plasma.quicklaunch' else ()
+            for key in keys:
+                for launcher in (applets.get(general, key) or '').split(','):
+                    if not launcher:
+                        continue
+                    path = unquote(urlsplit(launcher).path)
+                    if launcher.startswith('file:') and (path.startswith(('/usr/share/applications/', '/usr/local/share/applications/'))
+                                                        or '/.local/share/applications/' in path):
+                        launcher = 'applications:' + Path(path).name
+                    if launcher == 'preferred://filemanager' or 'org.kde.dolphin.desktop' in launcher:
+                        launcher = EXPLORER
+                    if launcher not in launchers:
+                        launchers.append(launcher)
         for a in children:
             if plugin[a] in REPLACED:
                 applets.remove_tree(('Containments', c, 'Applets', a))

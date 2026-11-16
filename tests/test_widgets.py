@@ -14,7 +14,7 @@ from importlib.machinery import SourceFileLoader
 
 from PIL import Image
 
-from lab import ROOT, VM, vmctl, user, toggle, digest, install, shot, wait_for
+from lab import ROOT, VM, vmctl, user, toggle, digest, install, shot, wait_for, windows, close_test_apps
 
 seed = SourceFileLoader('seed', str(ROOT / 'toggle/windows/seed')).load_module()
 OUT = Path(sys.argv[1] if len(sys.argv) > 1 else '/tmp/win7-widgets-test')
@@ -70,8 +70,14 @@ def main():
     if user('qdbus6 org.kde.KWin /VirtualDesktopManager org.kde.KWin.VirtualDesktopManager.count') == '1':
         user('qdbus6 org.kde.KWin /VirtualDesktopManager org.kde.KWin.VirtualDesktopManager.createDesktop 1 Two')
     user(f'{SHELL} "const p = panels()[0];'
-         ' const n = p.addWidget(\\"local.win7test.note\\"); n.currentConfigGroup = [\\"General\\"]; n.writeConfig(\\"text\\", \\"kept-123\\");'
-         ' for (const w of p.widgets()) if (w.type == \\"org.kde.plasma.pager\\") { w.currentConfigGroup = [\\"General\\"]; w.writeConfig(\\"displayedText\\", 0); }"')
+         ' const n = p.addWidget(\\\"local.win7test.note\\\"); n.currentConfigGroup = [\\\"General\\\"]; n.writeConfig(\\\"text\\\", \\\"kept-123\\\");'
+         ' for (const w of p.widgets()) if (w.type == \\\"org.kde.plasma.pager\\\") { w.currentConfigGroup = [\\\"General\\\"]; w.writeConfig(\\\"displayedText\\\", 0); }"')
+    user(f'{SHELL} "const p = panels()[0];'
+         ' for (const w of p.widgets()) if (w.type == \\"org.kde.plasma.icontasks\\") { w.currentConfigGroup = [\\"General\\"];'
+         ' w.writeConfig(\\"launchers\\", [\\"applications:firefox.desktop\\", \\"applications:org.kde.dolphin.desktop\\"]); }'
+         ' const q = p.addWidget(\\"org.kde.plasma.quicklaunch\\"); q.currentConfigGroup = [\\"General\\"];'
+         ' q.writeConfig(\\"launcherUrls\\", [\\"file:///usr/share/applications/org.kde.dolphin.desktop\\", \\"file:///usr/share/applications/firefox.desktop\\"]);'
+         ' q.writeConfig(\\"popupUrls\\", [\\"file:///usr/share/applications/org.kde.kate.desktop\\"]); q.writeConfig(\\"enablePopup\\", true);"')
     time.sleep(2)
     user('qdbus6 org.kde.KWin /KWin org.kde.KWin.setCurrentDesktop 1')
     before = user(f'cat {APPLETSRC}')
@@ -85,6 +91,17 @@ def main():
                 'org.kde.plasma.systemtray', 'org.win7classic.clock']
     assert types == expected, f'Windows taskbar widgets {types}, expected {expected}'
     after = user(f'cat {APPLETSRC}')
+    pins = widget_groups(after, 'org.win7classic.taskbar')['[Configuration][General]']
+    assert 'launchers=applications:firefox.desktop,applications:org.win7classic.explorer.desktop,applications:org.kde.kate.desktop' in pins, pins
+    assert 'org.kde.plasma.quicklaunch' not in types, 'Quick Launch was kept as a second toolbar'
+    vmctl.pointer(VM, 137, 778, 'left')
+    wait_for(lambda: 'org.win7classic.explorer' in windows(), 'folded Dolphin pin opens Explorer')
+    close_test_apps()
+    time.sleep(1)
+    vmctl.pointer(VM, 187, 778, 'left')
+    wait_for(lambda: any('kate' in cls for cls in windows()), 'folded popup launcher opens Kate')
+    close_test_apps()
+    print('Quick Launch and its popup folded into deduplicated working taskbar pins; Dolphin opens Explorer')
     for plugin in ('org.kde.plasma.pager', 'local.win7test.note', 'org.kde.plasma.systemtray'):
         assert widget_groups(after, plugin) == widget_groups(before, plugin), f'{plugin} config changed'
     print('pager, custom widget and tray carried over with byte-identical config, before the notification area')
