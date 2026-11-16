@@ -29,6 +29,7 @@ def root(script, timeout=600):
 
 def remove_user_install():
     """The per-user development install would shadow the packaged files, so it is removed for this test."""
+    root('if ! pacman -Qo /usr/lib/qt6/plugins/styles/libwin7classicstyle.so >/dev/null 2>&1; then rm -f /usr/lib/qt6/plugins/styles/libwin7classicstyle.so; fi')
     user('rm -rf ~/.local/share/plasma/plasmoids/org.win7classic.* ~/.local/share/plasma/desktoptheme/win7-classic '
          '~/.local/share/kwin/decorations/win7classic ~/.local/share/themes/Win7-Classic ~/.local/share/win7-classic '
          '~/.local/share/icons/Win7-Classic ~/.local/share/icons/Win7-Classic-Cursors '
@@ -40,12 +41,12 @@ def build_package():
     """Builds the Arch package from this checkout inside the VM; returns its path there."""
     buffer = io.BytesIO()
     with tarfile.open(fileobj=buffer, mode='w:gz') as tar:
-        for name in ('install.sh', 'LICENSE', 'explorer', 'fonts', 'packaging', 'plasma', 'toggle'):
+        for name in ('install.sh', 'LICENSE', 'classic', 'explorer', 'fonts', 'packaging', 'plasma', 'toggle'):
             tar.add(ROOT / name, arcname=name, filter=lambda t: None if '__pycache__' in t.name or t.name.endswith('.pkg.tar.zst') else t)
     Path('/tmp/win7-src.tgz').write_bytes(buffer.getvalue())
     vmctl.transfer(VM, 'put', '/tmp/win7-src.tgz', '/tmp/win7-src.tgz')
     root('chmod 644 /tmp/win7-src.tgz')
-    user('rm -rf /tmp/win7-build && mkdir /tmp/win7-build && tar -xzf /tmp/win7-src.tgz -C /tmp/win7-build && cd /tmp/win7-build/packaging && makepkg -f --nodeps >/tmp/makepkg.log 2>&1 || { cat /tmp/makepkg.log; exit 1; }')
+    user('rm -rf /tmp/win7-build && mkdir /tmp/win7-build && tar -xzf /tmp/win7-src.tgz -C /tmp/win7-build && cd /tmp/win7-build/packaging && makepkg -f --nodeps >/tmp/makepkg.log 2>&1 || { cat /tmp/makepkg.log; exit 1; }', timeout=600)
     package = user('ls /tmp/win7-build/packaging/*.pkg.tar.zst')
     print('built', package.rsplit('/', 1)[-1])
     return package
@@ -62,6 +63,7 @@ def main():
     user('systemctl --user reset-failed plasma-plasmashell; systemctl --user restart plasma-plasmashell')
     time.sleep(4)
 
+    root('rm -f /usr/lib/qt6/plugins/styles/libwin7classicstyle.so')
     package = build_package()
 
     before_user = user(USER_STATE)
@@ -71,10 +73,23 @@ def main():
     print(f'installed {len(owned)} files')
     assert '/usr/share/icons/Win7-Classic-Cursors/cursors/default' in owned, 'cursor theme not packaged'
     assert root('readlink /usr/share/icons/Win7-Classic-Cursors/cursors/xterm') == 'text'
+    assert '/usr/lib/qt6/plugins/styles/libwin7classicstyle.so' in owned
+    assert '/usr/share/win7-classic/primitives/libwin7classicqml.so' in owned
+    assert '/usr/bin/win7-classic-probe' in owned
     assert '/usr/bin/win7-classic' in owned and root('readlink -f /usr/bin/win7-classic') == '/usr/share/win7-classic/win7-classic'
     assert root('test -L /etc/fonts/conf.d/70-win7-classic-tahoma.conf && echo linked') == 'linked', 'fontconfig rule not enabled'
     assert root('fc-match -f "%{file}" Tahoma') == '/usr/share/fonts/win7-classic/tahoma.ttf'
 
+    root('mv /usr/lib/qt6/plugins/styles/libwin7classicstyle.so /tmp/win7-style-held.so')
+    try:
+        code, _, err = vmctl.run(VM, f'{vmctl.USER_ENV}\nexec runuser -u tester -- win7-classic windows', 180)
+        assert code != 0 and 'cd packaging && makepkg -si' in err, err
+        assert user(USER_STATE) == before_user, 'missing-style refusal changed configuration'
+        code, _, err = vmctl.run(VM, f'{vmctl.USER_ENV}\nexec runuser -u tester -- /tmp/win7-build/install.sh', 180)
+        assert code != 0 and 'cd packaging && makepkg -si' in err, err
+    finally:
+        root('mv /tmp/win7-style-held.so /usr/lib/qt6/plugins/styles/libwin7classicstyle.so')
+    print('missing-style install/switch both fail before changing configuration')
     code, _, err = vmctl.run(VM, f'{vmctl.USER_ENV}\nexec runuser -u tester -- win7-classic windows', 180)
     assert code == 0, err
     time.sleep(2)

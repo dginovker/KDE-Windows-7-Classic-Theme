@@ -60,7 +60,7 @@ def fixture_state():
 def start_fixture():
     vmctl.transfer(VM, 'put', str(ROOT / 'tests/fixture_window.py'), '/tmp/fixture_window.py')
     vmctl.run(VM, 'chmod 644 /tmp/fixture_window.py', 10)
-    user('pkill -f "^/usr/bin/python3 /tmp/fixture_window.py"; systemd-run --user --collect -q python3 /tmp/fixture_window.py; true')
+    user('pkill -f "^/usr/bin/python3 /tmp/fixture_window.py"; rm -f /tmp/fixture-palette.json; systemd-run --user --collect -q python3 /tmp/fixture_window.py; true')
     wait_for(lambda: fixture_state() != 'gone', 'fixture window')
 
 
@@ -111,6 +111,12 @@ def main():
     shot(OUT / '3-close-pressed.png')
     bad = frame_diff(OUT / '3-close-pressed.png', REF / 'w7-close-pressed.png', (1002, 126, 1004, 140), [])
     assert not bad, f'pressed bevel left edge differs: {bad[:6]}'
+    vmctl.pointer(VM, 100, 400)
+    time.sleep(0.5)
+    assert_frame('3-close-outside', 'w7-taskbar.png', (1002, 126, 1018, 140), [])
+    vmctl.pointer(VM, 1009, 132)
+    time.sleep(0.5)
+    assert_frame('3-close-reenter', 'w7-close-pressed.png', (1002, 126, 1018, 131), [])
     vmctl.pointer(VM, 100, 400)
     vmctl.button(VM, 'left', False)  # released off the button: the window must stay open
     time.sleep(1)

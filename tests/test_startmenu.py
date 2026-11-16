@@ -20,10 +20,10 @@ START = (0, 756, 56, 800)
 # Content that legitimately differs, in screen coordinates (left, top, right, bottom exclusive).
 LEFT_ITEMS = (9, 300, 251, 686)
 ALL_PROGRAMS_LABEL = (40, 695, 250, 717)
-AVATAR = (290, 298, 372, 372)
+AVATAR = (307, 310, 355, 356)
 RIGHT_LABELS = [(264, y, 403, y + 32) for y in (373, 407, 441, 475, 512, 546, 583, 617, 651, 685)]
 SEARCH_LABEL = (11, 725, 226, 744)
-SEARCH_ICON = (228, 723, 253, 747)
+SEARCH_ICON = (0, 0, 0, 0)
 SHUTDOWN_LABEL = (258, 724, 328, 744)
 # Flag; label inside the dotted focus rectangle (Wine's bold Tahoma runs 1px wider, issue #11); the reference's
 # mouse pointer, which sits on the Start button in every menu screenshot.
@@ -89,6 +89,28 @@ def main():
     vmctl.pointer(VM, 640, 790)  # off the menu, like the reference
     time.sleep(0.5)
     check('1-menu', 'w7-menu.png', NORMAL_MASKS)
+
+    vmctl.pointer(VM, 315, 735)
+    time.sleep(0.5)
+    check('shutdown-hover', 'w7-shutdown-hover.png', [SHUTDOWN_LABEL, (315, 734, 335, 756)], [(257, 723, 343, 746)])
+    vmctl.button(VM, 'left', True)
+    time.sleep(0.3)
+    shot(OUT / 'shutdown-held.png')
+    pressed = Image.open(OUT / 'shutdown-held.png').convert('RGB')
+    assert pressed.getpixel((257, 723)) == (64, 64, 64), 'shutdown main half did not become sunken'
+    vmctl.pointer(VM, 640, 600)
+    time.sleep(0.3)
+    shot(OUT / 'shutdown-outside.png')
+    outside = Image.open(OUT / 'shutdown-outside.png').convert('RGB')
+    assert outside.getpixel((257, 723)) == (255, 255, 255), 'shutdown stayed armed outside'
+    vmctl.pointer(VM, 315, 735)
+    time.sleep(0.3)
+    shot(OUT / 'shutdown-reenter.png')
+    reenter = Image.open(OUT / 'shutdown-reenter.png').convert('RGB')
+    assert reenter.getpixel((257, 723)) == (64, 64, 64), 'shutdown did not re-arm'
+    vmctl.pointer(VM, 640, 600)
+    vmctl.button(VM, 'left', False)
+    assert menu_open(), 'release outside triggered shutdown'
 
     vmctl.pointer(VM, 230, 395)
     time.sleep(0.5)

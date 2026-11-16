@@ -62,7 +62,7 @@ def main():
 
     toggle('windows')
     assert 'win7classic' in user('qdbus6 org.kde.KWin /KWin supportInformation | grep -A3 ^Decoration'), 'Classic frame not applied'
-    assert user('kreadconfig6 --file kdeglobals --group KDE --key widgetStyle') == 'Windows'
+    assert user('kreadconfig6 --file kdeglobals --group KDE --key widgetStyle') == 'Win7Classic'
     assert user('gsettings get org.gnome.desktop.interface gtk-theme') == "'Win7-Classic'"
     print('Windows mode from an old saved profile gets the new Classic frame, colors and GTK theme')
     check_start(1, '2-start-100.png')

@@ -29,5 +29,6 @@ Session=plasma
 User=tester
 CONF
 systemctl is-active --quiet qemu-guest-agent
+systemctl reset-failed sddm
 systemctl start sddm
 echo "tester $(id -u tester) ready; Plasma $(pacman -Q plasma-workspace | cut -d' ' -f2)"

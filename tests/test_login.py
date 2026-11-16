@@ -31,6 +31,7 @@ def main():
     for old in OUT.glob('*.png'):
         old.unlink()
     vmctl.start(VM)
+    root('if ! pacman -Qo /usr/lib/qt6/plugins/styles/libwin7classicstyle.so >/dev/null 2>&1; then rm -f /usr/lib/qt6/plugins/styles/libwin7classicstyle.so; fi')
     package = build_package()
     root(f'pacman -U --noconfirm {package} >/tmp/pacman-install.log 2>&1 || {{ cat /tmp/pacman-install.log; exit 1; }}')
     assert root('test -f /usr/share/sddm/themes/win7-classic/Main.qml && echo ok') == 'ok', 'package did not install the SDDM theme'
