@@ -31,6 +31,7 @@ def remove_user_install():
     """The per-user development install would shadow the packaged files, so it is removed for this test."""
     user('rm -rf ~/.local/share/plasma/plasmoids/org.win7classic.* ~/.local/share/plasma/desktoptheme/win7-classic '
          '~/.local/share/kwin/decorations/win7classic ~/.local/share/themes/Win7-Classic ~/.local/share/win7-classic '
+         '~/.local/share/icons/Win7-Classic ~/.local/share/icons/Win7-Classic-Cursors '
          '~/.local/share/fonts/win7-classic ~/.local/bin/win7-classic ~/.config/fontconfig/conf.d/70-win7-classic-tahoma.conf '
          '~/.local/state/win7-classic; fc-cache ~/.local/share/fonts 2>/dev/null; true')
 
@@ -68,6 +69,8 @@ def main():
     root(f'pacman -U --noconfirm {package} >/tmp/pacman-install.log 2>&1 || {{ cat /tmp/pacman-install.log; exit 1; }}')
     owned = root('pacman -Qlq win7-classic | grep -v "/$" | sort').splitlines()
     print(f'installed {len(owned)} files')
+    assert '/usr/share/icons/Win7-Classic-Cursors/cursors/default' in owned, 'cursor theme not packaged'
+    assert root('readlink /usr/share/icons/Win7-Classic-Cursors/cursors/xterm') == 'text'
     assert '/usr/bin/win7-classic' in owned and root('readlink -f /usr/bin/win7-classic') == '/usr/share/win7-classic/win7-classic'
     assert root('test -L /etc/fonts/conf.d/70-win7-classic-tahoma.conf && echo linked') == 'linked', 'fontconfig rule not enabled'
     assert root('fc-match -f "%{file}" Tahoma') == '/usr/share/fonts/win7-classic/tahoma.ttf'
@@ -76,6 +79,8 @@ def main():
     assert code == 0, err
     time.sleep(2)
     shot(OUT / '1-windows-from-package.png')
+    assert user('kreadconfig6 --file kcminputrc --group Mouse --key cursorTheme') == 'Win7-Classic-Cursors'
+    assert user('gsettings get org.gnome.desktop.interface cursor-theme') == "'Win7-Classic-Cursors'"
     widgets = user('qdbus6 org.kde.plasmashell /PlasmaShell evaluateScript "print(panels()[0].widgets().map(w => w.type).join(\\" \\"))"')
     assert 'org.win7classic.taskbar' in widgets and 'org.win7classic.clock' in widgets, widgets
     assert 'win7classic' in user('qdbus6 org.kde.KWin /KWin supportInformation | grep -A3 ^Decoration'), 'packaged decoration not loaded'
