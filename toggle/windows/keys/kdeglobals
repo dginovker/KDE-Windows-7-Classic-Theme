@@ -122,7 +122,7 @@ ForegroundPositive=0,128,0
 ForegroundVisited=128,0,128
 
 [KDE]
-widgetStyle=Windows
+widgetStyle=Win7Classic
 
 [WM]
 activeBackground=10,36,106

@@ -18,6 +18,11 @@ else
     fontconf=${XDG_CONFIG_HOME:-$HOME/.config}/fontconfig/conf.d
 fi
 
+if [[ ${1:-} != --prefix && ! -f /usr/lib/qt6/plugins/styles/libwin7classicstyle.so ]]; then
+    echo "win7-classic: system-wide Win7Classic Qt style is missing; run: cd packaging && makepkg -si" >&2
+    exit 1
+fi
+
 # Wine's LGPL Tahoma is metric-compatible with the Windows UI font; Microsoft's own may not be redistributed.
 mkdir -p "$fonts" "$fontconf"
 for f in tahoma.ttf tahomabd.ttf; do
@@ -63,7 +68,7 @@ build=$(mktemp -d)
 trap 'rm -rf "$build"' EXIT
 if [[ ${1:-} == --prefix ]]; then prefix=/usr; else prefix=$(dirname "$data"); fi
 cmake -S "$src/explorer" -B "$build" -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$prefix" >/dev/null
-cmake --build "$build" >/dev/null
+cmake --build "$build" --parallel 2 >/dev/null
 DESTDIR=${root:-} cmake --install "$build" >/dev/null
 
 [[ ${1:-} == --prefix ]] || fc-cache "$fonts"

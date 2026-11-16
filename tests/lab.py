@@ -42,19 +42,26 @@ def install(commit=None, reset=True):
 
     With reset, switch back to current mode and forget saved profiles so the test starts from scratch.
     """
+    vmctl.button(VM, 'left', False)
+    vmctl.button(VM, 'right', False)
     if commit:
         archive = subprocess.run(['git', '-C', str(ROOT), 'archive', '--format=tar.gz', commit, 'install.sh', 'plasma', 'toggle'],
                                  check=True, capture_output=True).stdout
     else:
         buffer = io.BytesIO()
         with tarfile.open(fileobj=buffer, mode='w:gz') as tar:
-            for name in ('install.sh', 'explorer', 'fonts', 'plasma', 'toggle'):
+            for name in ('install.sh', 'classic', 'explorer', 'fonts', 'plasma', 'toggle'):
                 tar.add(ROOT / name, arcname=name, filter=lambda t: None if '__pycache__' in t.name else t)
         archive = buffer.getvalue()
     Path('/tmp/win7-install.tgz').write_bytes(archive)
     vmctl.transfer(VM, 'put', '/tmp/win7-install.tgz', '/tmp/win7-install.tgz')
     vmctl.run(VM, 'chmod 644 /tmp/win7-install.tgz', 10)
-    user('rm -rf /tmp/win7-src && mkdir /tmp/win7-src && tar -xzf /tmp/win7-install.tgz -C /tmp/win7-src && /tmp/win7-src/install.sh')
+    user('rm -rf /tmp/win7-src && mkdir /tmp/win7-src && tar -xzf /tmp/win7-install.tgz -C /tmp/win7-src')
+    if not commit:
+        user('cmake -S /tmp/win7-src/classic -B /tmp/win7-classic-build -DCMAKE_BUILD_TYPE=Release && cmake --build /tmp/win7-classic-build --target win7classicstyle -j2')
+        code, out, err = vmctl.run(VM, 'install -Dm755 /tmp/win7-classic-build/libwin7classicstyle.so /usr/lib/qt6/plugins/styles/libwin7classicstyle.so.new && mv /usr/lib/qt6/plugins/styles/libwin7classicstyle.so{.new,}', 30)
+        assert code == 0, out + err
+    user('/tmp/win7-src/install.sh')
     if not reset:
         return
     close_test_apps()

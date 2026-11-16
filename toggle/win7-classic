@@ -8,6 +8,7 @@ config=${XDG_CONFIG_HOME:-$HOME/.config}
 state=${XDG_STATE_HOME:-$HOME/.local/state}/win7-classic
 share=$(dirname "$(readlink -f "$0")")
 [[ -d $share/windows ]] || { echo "win7-classic: $share/windows is missing; reinstall" >&2; exit 1; }
+probe=$(dirname "$(dirname "$share")")/bin/win7-classic-probe
 mkdir -p "$state/profiles"
 
 log() { printf '%s %s\n' "$(date -Is)" "$*" | tee -a "$state/switch.log" >&2; }
@@ -46,6 +47,10 @@ load_keys() {
         # D-Bus object paths allow only [A-Za-z0-9_]; KConfigWatcher maps the rest of a config name to _ too.
         gdbus emit --session --object-path "/${file//[^A-Za-z0-9]/_}" --signal org.kde.kconfig.notify.ConfigChanged "$changed" >/dev/null
     done < <("$share/kconfig-keys" load "$1" "$config" ${2:+"$2"})
+    if [[ $(cat "$state/appearance") == windows ]]; then
+        # Saved profiles from the Windows-style release must not bypass the native renderer.
+        kwriteconfig6 --file kdeglobals --group KDE --key widgetStyle Win7Classic
+    fi
     # KDE apps resolve the folder handler (mimeapps.list) from the sycoca cache, which doesn't notice the change.
     # Built in the session's environment (XDG_CURRENT_DESKTOP=KDE selects kde-mimeapps.list), even from a TTY.
     systemd-run --user --wait --collect -q kbuildsycoca6 || die "kbuildsycoca6 failed (journalctl --user); folders may open in the wrong app"
@@ -124,6 +129,10 @@ switch_to() {
     local target=$1 from
     from=$(mode)
     [[ $target != "$from" ]] || { log "already in $target mode"; return 0; }
+    if [[ $target == windows ]]; then
+        [[ -f /usr/lib/qt6/plugins/styles/libwin7classicstyle.so ]] || die "system-wide Win7Classic Qt style is missing; run: cd packaging && makepkg -si"
+        systemd-run --user --wait --pipe --collect -q "$probe" --available || die "Win7Classic style cannot load; reinstall: cd packaging && makepkg -si"
+    fi
     log "switching $from -> $target"
     stop_shell
     rm -rf "$state/profiles/$from.new" && mkdir "$state/profiles/$from.new"
@@ -159,6 +168,9 @@ switch_to() {
         problem="plasmashell did not start"
     else
         local bad; bad=$(unknown_widgets); [[ -z $bad ]] || problem="unknown widgets: $bad"
+    fi
+    if [[ -z $problem && $target == windows ]]; then
+        systemd-run --user --wait --pipe --collect -q "$probe" >> "$state/switch.log" || problem="effective Win7Classic style/palette check failed (see switch.log)"
     fi
     if [[ -n $problem ]]; then
         log "rolling back to $from: $problem"
