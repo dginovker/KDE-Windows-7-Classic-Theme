@@ -155,7 +155,15 @@ def main():
             image.save(THEME / f'{size}x{size}/places/{icon}.png')
     (ASSETS / 'assets.qrc').write_text('<RCC><qresource prefix="/explorer">\n' + ''.join(
         f'  <file>{p.name}</file>\n' for p in sorted(ASSETS.glob('*.png'))) + '</qresource></RCC>\n')
-    print(f'{len(list(ASSETS.glob("*.png")))} Explorer assets, {len(list(THEME.rglob("*.png")))} theme icons')
+    taskbar = ROOT / 'plasma/org.win7classic.taskbar/contents/ui'
+    for name, box in {'pin': (86, 702, 102, 718), 'close': (86, 724, 102, 740)}.items():
+        icon = shot('explorer-jumplist').crop(box).convert('RGBA')
+        for y in range(icon.height):
+            for x in range(icon.width):
+                if icon.getpixel((x, y))[:3] == (212, 208, 200):
+                    icon.putpixel((x, y), (0, 0, 0, 0))
+        icon.save(taskbar / f'jumplist-{name}.png')
+    print(f'{len(list(ASSETS.glob("*.png")))} Explorer assets, {len(list(THEME.rglob("*.png")))} theme icons, 2 jump-list icons')
 
 
 if __name__ == '__main__':

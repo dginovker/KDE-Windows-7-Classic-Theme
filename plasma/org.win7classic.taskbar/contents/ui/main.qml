@@ -70,6 +70,11 @@ PlasmoidItem {
         filterByScreen: true
     }
 
+    TaskMenu {
+        id: taskMenu
+        tasks: tasksModel
+    }
+
     fullRepresentation: Item {
         id: area
         Layout.fillWidth: true
@@ -135,7 +140,7 @@ PlasmoidItem {
                     required property int index
                     readonly property bool launcher: model.IsLauncher === true
                     readonly property bool active: model.IsActive === true && model.IsMinimized !== true
-                    readonly property bool sunken: (active && !launcher) || mouse.pressed
+                    readonly property bool sunken: (active && !launcher) || mouse.pressed || (taskMenu.visible && taskMenu.taskButton === task)
                     readonly property int shift: sunken ? 1 : 0
                     width: launcher ? root.launcherWidth : area.windowWidth
                     height: root.buttonHeight
@@ -182,19 +187,20 @@ PlasmoidItem {
                     Timer {
                         id: hoverTimer
                         interval: 700
-                        onTriggered: if (mouse.containsMouse && !mouse.pressed) tooltip.visible = true
+                        onTriggered: if (mouse.containsMouse && !mouse.pressed && !taskMenu.visible) tooltip.visible = true
                     }
                     MouseArea {
                         id: mouse
                         anchors.fill: parent
                         hoverEnabled: true
+                        acceptedButtons: Qt.LeftButton | Qt.RightButton
                         onEntered: hoverTimer.restart()
                         onExited: { hoverTimer.stop(); tooltip.visible = false; }
                         property bool dragged: false
                         property real pressX: 0
                         onPressed: (event) => { hoverTimer.stop(); tooltip.visible = false; dragged = false; pressX = event.x; }
                         onPositionChanged: (event) => {
-                            if (!pressed || (!dragged && Math.abs(event.x - pressX) < Qt.styleHints.startDragDistance))
+                            if (!(pressedButtons & Qt.LeftButton) || (!dragged && Math.abs(event.x - pressX) < Qt.styleHints.startDragDistance))
                                 return;
                             dragged = true;
                             taskRow.dragIndex = task.index;
@@ -226,9 +232,13 @@ PlasmoidItem {
                                 config.launchers = model.launcherList;
                             }
                         }
-                        onClicked: {
+                        onClicked: (event) => {
                             if (dragged)
                                 return;
+                            if (event.button === Qt.RightButton) {
+                                taskMenu.open(task);
+                                return;
+                            }
                             const index = tasksModel.makeModelIndex(task.index);
                             if (task.launcher)
                                 tasksModel.requestNewInstance(index);

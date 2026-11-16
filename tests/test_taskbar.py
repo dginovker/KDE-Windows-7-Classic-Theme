@@ -187,6 +187,77 @@ def main():
     assert not explorer()[2], 'releasing a drag also clicked the button (window minimized)'
     print('dragging a task button rearranges the taskbar and keeps the pinned order; a drag is not a click')
 
+    # Right-click a running button, not the empty panel (issue #25).
+    vmctl.pointer(VM, 240, 778, 'right')
+    vmctl.pointer(VM, 640, 600)
+    time.sleep(1)
+    shot(OUT / '8-jumplist.png')
+    menu = Image.open(OUT / '8-jumplist.png').convert('RGB')
+    # The action block has the genuine reference's 230px width, 22px rows and black frame.
+    left, top = 163, 662
+    assert menu.getpixel((left, top + 10)) == (0, 0, 0), 'task right-click did not open the Classic jump list'
+    reference_actions = Image.open(ROOT / 'reference/screenshots/w7-explorer-jumplist.png').convert('RGB').crop((78, 662, 308, 756))
+    actions = menu.crop((left, top, left + 230, 756))
+    diff = ImageChops.difference(actions, reference_actions)
+    diff.paste((0, 0, 0), (0, 0, 230, 1))  # the reference has Frequent items above its action block
+    for y in (16, 38, 60):
+        diff.paste((0, 0, 0), (8, y, 222, y + 22))  # app-specific icons and text
+    assert diff.getbbox() is None, f'jump-list action frame/spacing differs from Classic: {diff.getbbox()}'
+    text_image = actions.resize((920, 376))
+    text_image.save(OUT / 'jumplist-text.png')
+    text = subprocess.check_output(['tesseract', str(OUT / 'jumplist-text.png'), 'stdout', '--psm', '6'], stderr=subprocess.DEVNULL, text=True)
+    for label in ('Windows Explorer', 'Unpin this program from taskbar', 'Close window'):
+        assert label in text, f'jump list missing {label!r}: {text!r}'
+    # Escape dismisses without activating or closing the task.
+    vmctl.keys(VM, 'KEY_ESC')
+    assert explorer() is not None and not explorer()[2], 'Escape affected the window'
+    vmctl.pointer(VM, 240, 778, 'right')
+    vmctl.pointer(VM, left + 70, top + 71)
+    time.sleep(0.4)
+    shot(OUT / '8-close-hot.png')
+    hot = Image.open(OUT / '8-close-hot.png').convert('RGB')
+    assert hot.getpixel((left + 210, top + 65)) == (10, 36, 106), 'Close window does not hot-track with Classic highlight'
+    click(left + 70, top + 71)
+    wait_for(lambda: explorer() is None, 'Close window from the task jump list')
+    print('Classic jump list matches the reference action frame and labels; Close window closes the actual window')
+
+    # A launcher has launch + unpin, but no Close window. Unpin removes the saved pin.
+    vmctl.pointer(VM, 187, 778, 'right')
+    time.sleep(0.4)
+    shot(OUT / '9-launcher-jumplist.png')
+    click(163 + 80, 756 - 72 + 27)
+    wait_for(lambda: explorer() is not None, 'jump-list application entry launches Explorer')
+    vmctl.keys(VM, 'KEY_LEFTCTRL', 'KEY_W')
+    wait_for(lambda: explorer() is None, 'launched Explorer closes with Ctrl+W')
+    vmctl.pointer(VM, 187, 778, 'right')
+    time.sleep(0.4)
+    click(163 + 80, 756 - 72 + 49)
+    wait_for(lambda: 'org.win7classic.explorer.desktop' not in launchers(), 'launcher unpinned by jump list')
+    user('systemd-run --user --collect -q ~/.local/bin/win7-explorer ~/Classic-demo')
+    wait_for(lambda: explorer() is not None, 'unpinned Explorer running')
+    vmctl.pointer(VM, 200, 778, 'right')
+    time.sleep(0.4)
+    shot(OUT / '10-unpinned-jumplist.png')
+    vmctl.keys(VM, 'KEY_DOWN')
+    vmctl.keys(VM, 'KEY_DOWN')
+    vmctl.keys(VM, 'KEY_ENTER')
+    wait_for(lambda: 'org.win7classic.explorer.desktop' in launchers(), 'running app pinned by jump list')
+    toggle('current')
+    toggle('windows')
+    assert 'org.win7classic.explorer.desktop' in launchers(), 'jump-list pin did not persist across switching modes'
+    print('launcher unpin and running-window pin work and persist')
+
+    # Empty taskbar space still exposes Plasma panel configuration.
+    vmctl.pointer(VM, 700, 778, 'right')
+    time.sleep(0.7)
+    shot(OUT / '11-panel-context.png')
+    image = Image.open(OUT / '11-panel-context.png').convert('RGB')
+    image.crop((700, 650, 1000, 756)).resize((1200, 424)).save(OUT / 'panel-context-text.png')
+    text = subprocess.check_output(['tesseract', str(OUT / 'panel-context-text.png'), 'stdout', '--psm', '6'], stderr=subprocess.DEVNULL, text=True)
+    assert 'Show Panel Configuration' in text, f'empty panel no longer offers configuration: {text!r}'
+    vmctl.keys(VM, 'KEY_ESC')
+    print('empty taskbar space still offers panel configuration')
+
     # Side-by-side image for the issue: reference taskbar above ours.
     reference = Image.open(REFERENCE).convert('RGB').crop(PANEL)
     ours = Image.open(OUT / '1-taskbar.png').convert('RGB').crop(PANEL)
