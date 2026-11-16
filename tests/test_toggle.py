@@ -6,7 +6,7 @@ import sys
 import threading
 import time
 
-from lab import VM, vmctl, user, toggle, digest, kwin_script, windows, activate, install
+from lab import VM, vmctl, user, toggle, digest, kwin_script, windows, activate, install, wait_for
 
 OUT = Path(sys.argv[1] if len(sys.argv) > 1 else '/tmp/win7-toggle-test')
 TEXT = 'unsaved line typed before any switch\n'
@@ -87,8 +87,11 @@ def main():
     time.sleep(2)
     recorder.running = False
     recorder.join()
+    spacers = lambda: user('cat ~/.config/plasma-org.kde.plasma.desktop-appletsrc').count('plugin=org.kde.plasma.panelspacer')
+    before_spacers = spacers()
     user('qdbus6 org.kde.plasmashell /PlasmaShell evaluateScript "panels()[0].addWidget(\'org.kde.plasma.panelspacer\')"')
-    time.sleep(1)
+    # Plasma saves the new widget asynchronously; snapshotting before that save tests a stale config.
+    wait_for(lambda: spacers() == before_spacers + 1, 'current-mode panel edit saved')
 
     for trip in range(1, 11):
         before_current = digest()
