@@ -147,6 +147,15 @@ def context_menu(x, y):
     time.sleep(1)
 
 
+def view_submenu(desktop=False, checked_hover=False):
+    context_menu(120 if desktop else 849, 420 if desktop else 419)
+    vmctl.pointer(VM, 220 if desktop else 940, 430)
+    time.sleep(1.5)
+    if checked_hover:
+        vmctl.pointer(VM, 395 if desktop else 1105, 509 if desktop else 447)
+        time.sleep(0.5)
+
+
 def shutdown_button(arrow=False):
     start_menu()
     vmctl.pointer(VM, 335 if arrow else 315, 735, 'left' if arrow else None)
@@ -193,6 +202,10 @@ SCENES = {
     'explorer-file-context': explorer_file_context,
     'explorer-background-context': lambda: context_menu(849, 419),
     'desktop-context': lambda: context_menu(120, 420),
+    'desktop-view-submenu': lambda: view_submenu(desktop=True),
+    'explorer-view-submenu': view_submenu,
+    'desktop-view-checked-hover': lambda: view_submenu(desktop=True, checked_hover=True),
+    'explorer-view-radio-hover': lambda: view_submenu(checked_hover=True),
     'shutdown-hover': shutdown_button,
     'shutdown-menu': lambda: shutdown_button(arrow=True),
     'notification-area': lambda: (active_explorer(), vmctl.pointer(VM, 640, 600)),
@@ -227,6 +240,8 @@ def main():
             vmctl.pointer(VM, 941, 194, 'left')
             time.sleep(1)
             vmctl.pointer(VM, 1014, 62, 'left')  # the menu opens aligned to the current (Details) entry
+        if a.scene in ('desktop-view-submenu', 'explorer-view-submenu', 'desktop-view-checked-hover', 'explorer-view-radio-hover'):
+            vmctl.keys(VM, 'KEY_ESC')
         if a.scene == 'shutdown-menu':
             vmctl.keys(VM, 'KEY_ESC')
         if a.scene == 'explorer-file-context':

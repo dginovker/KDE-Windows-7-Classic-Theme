@@ -10,6 +10,8 @@ Scenes need `D:\native-bench.exe`: `reference/tools/make-tools-cd.sh` builds it 
 
 `w7-search.png` was recaptured with this script (the earlier file showed only the desktop), and `w7-taskbar.png` is new.
 
+Menu-state scenes `desktop-view-submenu`, `explorer-view-submenu`, `desktop-view-checked-hover` and `explorer-view-radio-hover` capture genuine radio/check rasters, checked-row hover, submenu selection and disabled embossed text. All four were captured and passed `--check` twice each for #17/#18; `menu` and `taskbar` also passed unchanged. Their cleanup dismisses both menu levels even if the screenshot fails. The existing `explorer --check` 60px Start focus-cue limitation described above remains; it does not affect menu or frame comparisons.
+
 ## Native fixture
 
 Windows 7 Ultimate SP1 x64, Classic, 1280×800, 96 DPI, Never combine, large icons:

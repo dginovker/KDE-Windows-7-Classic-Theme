@@ -29,7 +29,8 @@ class CaptureTests(unittest.TestCase):
                     self.assertEqual(capture.differing_pixels(reference, actual, 'notification-area')[0], 1)
 
     def test_new_scenes_clean_up_when_screenshot_fails(self):
-        for scene in ('explorer-file-context', 'shutdown-menu'):
+        for scene in ('explorer-file-context', 'shutdown-menu', 'desktop-view-submenu', 'explorer-view-submenu',
+                      'desktop-view-checked-hover', 'explorer-view-radio-hover'):
             with self.subTest(scene=scene), \
                     patch.object(sys, 'argv', ['capture.py', scene]), \
                     patch.dict(capture.SCENES, {scene: lambda: None}), \
@@ -45,11 +46,12 @@ class CaptureTests(unittest.TestCase):
                     capture.main()
                 pointer.assert_any_call(capture.VM, 640, 600)
                 button.assert_called_once_with(capture.VM, 'left', False)
-                self.assertEqual(keys.call_count, 2 if scene == 'shutdown-menu' else 1)
+                self.assertEqual(keys.call_count, 1 if scene == 'explorer-file-context' else 2)
                 if scene == 'explorer-file-context':
                     run_dialog.assert_called_once_with('cmd /c del "%USERPROFILE%\\Classic-demo\\capture-reference.txt"')
-                if scene != 'shutdown-menu':
                     active_explorer.assert_called_once_with()
+                else:
+                    active_explorer.assert_not_called()
 
 
 if __name__ == '__main__':
