@@ -8,6 +8,8 @@ PlasmaCore.Dialog {
     required property Item button
     property string text
     property point pointer
+    // Wayland needs the panel parent even after a jump list releases its popup grab.
+    visualParent: button
     type: PlasmaCore.Dialog.Tooltip
     flags: Qt.ToolTip | Qt.WindowDoesNotAcceptFocus | Qt.WindowStaysOnTopHint
     backgroundHints: PlasmaCore.Dialog.NoBackground
