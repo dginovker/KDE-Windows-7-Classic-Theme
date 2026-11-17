@@ -7,9 +7,28 @@ pre_remove() {
         echo "==> WARNING: $user is still in Windows 7 Classic mode. Before removing, have them run: win7-classic current"
         echo "    (their saved layout stays in ~$user/.local/state/win7-classic/profiles/current)"
     done
+    for user in /home/*; do
+        if [[ -d $user/.local/share/kwin/decorations/win7classic || -d $user/.local/share/kwin/decorations/win7classic2 ||
+              -d $user/.local/share/win7-classic/primitives || -d $user/.local/share/win7-classic/primitives2 ]]; then
+            echo "==> WARNING: user-local Classic renderers remain in $user/.local/share; package removal does not remove them."
+            echo "    Switch to current first; see README.md 'Mixed installs and removal' for exact user cleanup paths. Config/profiles are preserved."
+        fi
+    done
 }
 
 post_install() {
     echo "==> Switch with: win7-classic windows"
     echo "    Windows 7 login screen (system-wide, optional): printf '[Theme]\\nCurrent=win7-classic\\n' > /etc/sddm.conf.d/win7-classic.conf"
+    rm -rf /usr/share/kwin/decorations/win7classic /usr/share/win7-classic/primitives
+    local home owner
+    for home in /home/*; do
+        [[ -d $home ]] || continue
+        owner=$(stat -c %U "$home")
+        runuser -u "$owner" -- /usr/share/win7-classic/kconfig-keys migrate-decoration "$home/.config" "$home/.local/state/win7-classic" || return 1
+        if [[ -d $home/.local/share/kwin/decorations/win7classic || -d $home/.local/share/win7-classic/primitives ]]; then
+            echo "==> WARNING: legacy Classic renderers remain in $home/.local/share; run ./install.sh as $owner too. No user files were removed."
+        fi
+    done
 }
+
+post_upgrade() { post_install; }

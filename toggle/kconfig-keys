@@ -104,6 +104,24 @@ def load(source, configdir, patchdir=None, requireddir=None):
         print(f'{name}\t{{{payload}}}')
 
 
+def migrate_decoration(configdir, state):
+    group = '[org.kde.kdecoration2]'
+    live = Path(configdir) / 'kwinrc'
+    if live.exists():
+        keys = parse(live).get(group, {})
+        if keys.get('library') == 'org.kde.kwin.aurorae' and keys.get('theme') == 'win7classic':
+            set_keys(live, {group: {'theme': 'win7classic2'}})
+            print(f'migrated legacy Classic decoration: {live}')
+    profile = Path(state) / 'profiles/current/keys.json'
+    if profile.exists():
+        data = json.loads(profile.read_text())
+        keys = data.get('kwinrc', {}).get(group, {})
+        if keys.get('library') == 'org.kde.kwin.aurorae' and keys.get('theme') == 'win7classic':
+            keys['theme'] = 'win7classic2'
+            profile.write_text(json.dumps(data, indent=1, sort_keys=True) + '\n')
+            print(f'migrated legacy Classic decoration: {profile}')
+
+
 if __name__ == '__main__':
     command, *args = sys.argv[1:]
-    {'save': save, 'load': load}[command](*args)
+    {'save': save, 'load': load, 'migrate-decoration': migrate_decoration}[command](*args)

@@ -113,9 +113,33 @@ def check_failed_development_installs(package):
                 root('mv /tmp/win7-style-held.so /usr/lib/qt6/plugins/styles/libwin7classicstyle.so')
             else:
                 user('mv /tmp/win7-cmake-held /tmp/win7-build/explorer/CMakeLists.txt')
+    assert_no_renderers('/usr/share', legacy_only=True)
+    assert_no_renderers('/home/tester/.local/share', legacy_only=True)
+    preserved = user(USER_STATE), user(PROFILES)
+    warning = root('pacman -R --noconfirm win7-classic 2>&1')
+    assert 'user-local Classic renderers remain' in warning, warning
+    assert user('test -d ~/.local/share/kwin/decorations/win7classic2 && echo kept') == 'kept'
+    cleanup_user_renderers()  # Explicit documented user action, never a package hook deleting another root.
+    assert_no_renderers('/usr/share')
+    assert_no_renderers('/home/tester/.local/share')
+    assert preserved == (user(USER_STATE), user(PROFILES)), 'mixed cleanup altered config/profiles'
+    print('mixed install removal warned; explicit user renderer cleanup leaves both roots clean and preserves config/profiles')
     remove_user_install()
-    root('pacman -R --noconfirm win7-classic >/dev/null 2>&1')
     assert not failures, '\n'.join(failures)
+
+
+RENDERERS = ('kwin/decorations/win7classic', 'kwin/decorations/win7classic2',
+             'win7-classic/primitives', 'win7-classic/primitives2')
+
+
+def assert_no_renderers(data, legacy_only=False):
+    paths = RENDERERS[::2] if legacy_only else RENDERERS
+    for path in paths:
+        assert root(f'test ! -e {data}/{path} && echo absent') == 'absent', f'renderer remains: {data}/{path}'
+
+
+def cleanup_user_renderers():
+    user('rm -rf ~/.local/share/kwin/decorations/win7classic{,2} ~/.local/share/win7-classic/primitives{,2}')
 
 
 def main():

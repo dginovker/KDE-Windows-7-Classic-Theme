@@ -16,6 +16,16 @@ Arch: `cd packaging && makepkg -si` (needs `wine` at build time for its LGPL Tah
 
 `win7-classic windows|current|toggle|status|restore` swaps the whole Plasma panel/desktop layout and panel theme by restarting only plasmashell; KWin and applications keep running. Each mode keeps its own saved layout under `~/.local/state/win7-classic/`, and every switch is logged there. Colors, fonts, widget style and window decoration are swapped key-by-key (only the keys listed in `toggle/windows/keys/`), so other settings in `kdeglobals`/`kwinrc` stay untouched, and running Qt apps update live. A switch that fails (e.g. a widget plugin is missing) rolls back and stays in the old mode; `restore` brings back the current layout from a terminal even with no panel running. The first switch builds Windows mode from your current panel (`toggle/windows/seed`): the launcher, task manager, clock, show-desktop and spacers become the Classic ones; every other widget (pager, monitors, your own widgets, the tray and its items) keeps its settings and sits before the notification area. `win7-classic rebuild` discards the Windows layout and builds it again from the current one.
 
+## Mixed installs and removal
+
+A package plus a development install must both be upgraded: `cd packaging && makepkg -si`, then `./install.sh` as the desktop user. Each cleans its own legacy renderers; install/switch warnings identify legacy copies in the other root. Only the known old Classic decoration identity is migrated in live/saved current settings.
+
+Before removing the package, run `win7-classic current`. If current mode itself uses Classic, first select a different current decoration. Package removal warns about user-local renderers and leaves them untouched. Remove those exact project renderers explicitly (configs and saved profiles stay):
+
+```
+rm -rf "${XDG_DATA_HOME:-$HOME/.local/share}"/kwin/decorations/win7classic{,2} "${XDG_DATA_HOME:-$HOME/.local/share}"/win7-classic/primitives{,2}
+```
+
 ## Lock and login screens
 
 Windows mode locks with a Windows 7 logon-style screen (`plasma/lockscreen/`, `plasma/logon/`); current mode keeps Plasma's. Plasma reads the lock screen from its shell package, so Windows mode adds `~/.local/share/plasma/shells/org.kde.plasma.desktop/` (marked by `.win7-classic`): links to the system shell, plus real copies of `lockscreen/` (ours) and `logout/`. If the Windows lock screen fails to load, a plain password field replaces it. If you can't unlock, run `loginctl unlock-sessions` from a TTY.

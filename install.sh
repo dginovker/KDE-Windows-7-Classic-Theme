@@ -52,7 +52,7 @@ for applet in "$src"/plasma/org.win7classic.*; do
     rm -rf "${data:?}/plasma/plasmoids/$(basename "$applet")"
     cp -r "$applet" "$data/plasma/plasmoids/"
 done
-rm -rf "$data/plasma/desktoptheme/win7-classic" "$data/kwin/decorations/win7classic" "$data/kwin/decorations/win7classic2" "$data/themes/Win7-Classic" "$data/icons/Win7-Classic" "$data/icons/Win7-Classic-Cursors" "$data/win7-classic" "$data/color-schemes/Win7Classic.colors"
+rm -rf "$data/plasma/desktoptheme/win7-classic" "$data/kwin/decorations/win7classic2" "$data/themes/Win7-Classic" "$data/icons/Win7-Classic" "$data/icons/Win7-Classic-Cursors" "$data/win7-classic" "$data/color-schemes/Win7Classic.colors"
 cp -r "$src/plasma/theme/win7-classic" "$data/plasma/desktoptheme/"
 cp -r "$src/plasma/decoration/win7classic" "$data/kwin/decorations/win7classic2"
 cp -r "$src/plasma/gtk/Win7-Classic" "$data/themes/"
@@ -82,5 +82,12 @@ ln -sfn "$(realpath -m --relative-to="$bin" "$data/win7-classic/win7-classic")" 
 
 DESTDIR=${root:-} cmake --install "$build" >/dev/null
 
-[[ ${1:-} == --prefix ]] || fc-cache "$fonts"
+if [[ ${1:-} != --prefix ]]; then
+    "$data/win7-classic/kconfig-keys" migrate-decoration "${XDG_CONFIG_HOME:-$HOME/.config}" "${XDG_STATE_HOME:-$HOME/.local/state}/win7-classic"
+    if [[ -d /usr/share/kwin/decorations/win7classic || -d /usr/share/win7-classic/primitives ]]; then
+        echo 'WARNING: legacy Classic renderers remain in /usr/share; upgrade the system package too. No system files were removed.' >&2
+    fi
+    fc-cache "$fonts"
+fi
+rm -rf "$data/kwin/decorations/win7classic"
 echo "installed; switch with: win7-classic windows"
