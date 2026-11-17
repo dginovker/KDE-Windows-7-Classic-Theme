@@ -54,6 +54,12 @@ def main():
     install()  # normalise, then strip everything the old release didn't have
     user('rm -rf ~/.local/share/kwin/decorations/win7classic{,2} ~/.local/share/themes/Win7-Classic '
          '~/.config/fontconfig/conf.d/70-win7-classic-tahoma.conf ~/.local/state/win7-classic')
+    # KDE lazily adds its GTK decoration module even with a native-only GtkConfig.setGtkTheme(Breeze) call.
+    gtk_theme = user('set -e; theme=$(qdbus6 org.kde.GtkConfig /GtkConfig gtkTheme); '
+                     'qdbus6 org.kde.GtkConfig /GtkConfig setGtkTheme "$theme"; printf "%s" "$theme"')
+    if gtk_theme == 'Breeze':
+        wait_for(lambda: 'window-decorations-gtk-module' in user('cat ~/.config/gtk-3.0/settings.ini'),
+                 'native GTK decoration module initialized before baseline')
     original = capture_state('before')
 
     install(OLD, reset=False)
