@@ -21,6 +21,8 @@ class ClassicItem : public QQuickPaintedItem {
     Q_PROPERTY(QColor fill MEMBER m_fill NOTIFY changed)
     Q_PROPERTY(QPoint patternOrigin MEMBER m_origin NOTIFY changed)
     Q_PROPERTY(bool separator MEMBER m_separator NOTIFY changed)
+    Q_PROPERTY(bool caption MEMBER m_caption NOTIFY changed)
+    Q_PROPERTY(bool captionActive MEMBER m_captionActive NOTIFY changed)
 public:
     enum Edge { RaisedOuter=Classic::RaisedOuter, SunkenOuter=Classic::SunkenOuter,
         RaisedInner=Classic::RaisedInner, SunkenInner=Classic::SunkenInner,
@@ -45,6 +47,7 @@ public:
     void paint(QPainter *p) override {
         const QRect r(0,0,qRound(width()),qRound(height()));
         if(m_fill.isValid()) p->fillRect(r,m_fill);
+        if(m_caption) Classic::drawCaption(*p,r,m_captionActive);
         if(m_button) Classic::drawButton(*p,r,m_pressed);
         else if(m_edge) Classic::drawEdge(*p,r,m_edge,m_flags);
         if(m_flatBorder) Classic::drawFlatBorder(*p,r);
@@ -76,6 +79,7 @@ private:
     bool m_pointerInside=false;
     int m_edge=0,m_flags=Classic::Rect,m_glyph=0;
     bool m_button=false,m_pressed=false,m_focused=false,m_disabled=false,m_separator=false,m_flatBorder=false;
+    bool m_caption=false,m_captionActive=true;
     QColor m_fill,m_glyphColor=Classic::Text;
     QPoint m_origin;
 };

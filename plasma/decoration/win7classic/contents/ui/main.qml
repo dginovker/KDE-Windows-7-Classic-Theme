@@ -10,8 +10,6 @@ Decoration {
     alpha: false
     readonly property bool maximized: decoration.client.maximized
     readonly property bool active: decoration.client.active
-    readonly property color dark: active ? Classic.Palette.activeCaption : Classic.Palette.inactiveCaption
-    readonly property color light: active ? Classic.Palette.activeCaptionGradient : Classic.Palette.inactiveCaptionGradient
     readonly property int edge: maximized ? 0 : 4
     readonly property int margin: maximized ? 2 : 6
 
@@ -28,21 +26,13 @@ Decoration {
 
     Classic.Raster { anchors.fill: parent; visible: !root.maximized; edge: Classic.Raster.Raised }
 
-    Item {
+    Classic.Raster {
         id: caption
         x: root.edge; y: root.edge
         width: root.width - 2 * root.edge
         height: 18
-        Rectangle { width: 20; height: parent.height; color: root.dark }
-        Rectangle {
-            x: 20; width: parent.width - 20 - 54; height: parent.height
-            gradient: Gradient {
-                orientation: Gradient.Horizontal
-                GradientStop { position: 0; color: root.dark }
-                GradientStop { position: 1; color: root.light }
-            }
-        }
-        Rectangle { x: parent.width - 54; width: 54; height: parent.height; color: root.light }
+        caption: true
+        captionActive: root.active
         Component.onCompleted: decoration.installTitleItem(caption)
     }
 

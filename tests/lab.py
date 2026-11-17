@@ -34,7 +34,8 @@ def close_test_apps():
     user('pkill -f "^/usr/bin/python /tmp/fixture_icons.py"; pkill -f "^/usr/bin/python /tmp/fixture_cursors.py"; '
          'pkill -u tester -x kate; pkill -u tester -x kdialog; pkill -u tester -x konsole; pkill -u tester -x dolphin; pkill -u tester -x win7-explorer; '
          'pkill -u tester -x gtk3-demo; pkill -u tester firefox; pkill -f "^counter-loop"; '
-         'pkill -f "^/usr/bin/python3 /tmp/fixture_window.py"; pkill -f "^/usr/bin/python3 /tmp/fixture_gtk.py"; rm -f /tmp/counter /tmp/kate-proof.txt; true')
+         'pkill -f "^/usr/bin/python3 /tmp/fixture_window.py"; pkill -f "^/usr/bin/python3 /tmp/fixture_menus.py"; '
+         'pkill -f "^/usr/bin/python3 /tmp/fixture_gtk.py"; rm -f /tmp/counter /tmp/kate-proof.txt; true')
 
 
 def assert_portal_display():
@@ -70,7 +71,7 @@ def install(commit=None, reset=True):
         user('cmake -S /tmp/win7-src/classic -B /tmp/win7-classic-build -DCMAKE_BUILD_TYPE=Release && cmake --build /tmp/win7-classic-build --target win7classicstyle -j2')
         code, out, err = vmctl.run(VM, 'install -Dm755 /tmp/win7-classic-build/libwin7classicstyle.so /usr/lib/qt6/plugins/styles/libwin7classicstyle.so.new && mv /usr/lib/qt6/plugins/styles/libwin7classicstyle.so{.new,}', 30)
         assert code == 0, out + err
-    user('/tmp/win7-src/install.sh')
+    user('/tmp/win7-src/install.sh', timeout=600)
     if not reset:
         return
     close_test_apps()

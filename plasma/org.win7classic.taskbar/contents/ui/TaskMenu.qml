@@ -65,7 +65,7 @@ PlasmaCore.Dialog {
             delegate: Rectangle {
                 id: row
                 required property int index
-                x: 5; y: 16 + index * 22
+                x: 5; y: 15 + index * 22
                 width: body.width - 10; height: 22
                 color: menu.current === index ? Classic.Palette.selection : "transparent"
                 Kirigami.Icon {

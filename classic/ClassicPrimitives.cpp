@@ -57,6 +57,19 @@ QRect drawEdge(QPainter &p, QRect r, int edge, int flags)
     if(flags&Middle) p.fillRect(r,Face);
     return r;
 }
+void drawCaption(QPainter &p,QRect r,bool active)
+{
+    const QColor from=active?ActiveCaption:InactiveCaption, to=active?ActiveCaptionGradient:InactiveCaptionGradient;
+    p.fillRect(r,from);
+    const int left=r.x()+18, width=r.width()-18-54;
+    if(width<=0) return;
+    // GDI's half-open ramp keeps an exact channel transition on its lower sample, unlike Qt's rounded gradient.
+    for(int x=0;x<width;++x) {
+        auto channel=[&](int a,int b) { return a+qMax(0,((b-a)*x-1)/width); };
+        p.fillRect(left+x,r.y(),1,r.height(),QColor(channel(from.red(),to.red()),channel(from.green(),to.green()),channel(from.blue(),to.blue())));
+    }
+    p.fillRect(r.right()-53,r.y(),54,r.height(),to);
+}
 void drawFlatBorder(QPainter &p,QRect r)
 {
     p.fillRect(r.x(),r.y(),r.width(),1,Text);p.fillRect(r.x(),r.bottom(),r.width(),1,Text);
@@ -98,6 +111,13 @@ void drawGlyph(QPainter &p,QRect r,Glyph glyph,bool disabled,CheckState checkSta
     case ArrowDown: drawArrow(p,r.topLeft(),r.width(),color); return;
     case ArrowLeft: case ArrowRight:
         for(int y=0;y<7;++y) { const int w=4-abs(3-y); p.fillRect(r.x()+(glyph==ArrowLeft?4-w:0),r.y()+y,w,1,color); } return;
+    case MenuCheck: {
+        static const char *tick[]={"......#",".....##","#...###","##.###.","#####..",".###...","..#...."};
+        for(int y=0;y<7;++y)for(int x=0;x<7;++x)if(tick[y][x]=='#')p.fillRect(r.x()+x,r.y()+y,1,1,color);
+        return;
+    }
+    case MenuBullet:
+        bars({{1,0,4,1},{0,1,6,4},{1,5,4,1}});return;
     case Check: {
         p.fillRect(r,disabled?Face:Window);
         if(checkState==Mixed && !disabled) {
@@ -106,10 +126,8 @@ void drawGlyph(QPainter &p,QRect r,Glyph glyph,bool disabled,CheckState checkSta
                     if((x+y)&1) p.fillRect(x,y,1,1,Face);
         }
         drawEdge(p,r,Sunken);
-        if(checkState!=Unchecked) {
-            static const char *tick[]={"......#",".....##","#...###","##.###.","#####..",".###...","..#...."};
-            for(int y=0;y<7;++y)for(int x=0;x<7;++x)if(tick[y][x]=='#')p.fillRect(r.x()+3+x,r.y()+3+y,1,1,checkState==Mixed?GrayText:color);
-        }
+        if(checkState!=Unchecked)
+            drawGlyph(p,QRect(r.topLeft()+QPoint(3,3),QSize(7,7)),MenuCheck,disabled,Unchecked,checkState==Mixed?GrayText:ink);
         return;
     }
     case Radio: {

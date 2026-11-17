@@ -2,8 +2,8 @@
 """Acceptance test for Classic window frames and colors (issue #9), run from the host against the lab VM.
 
 A Qt fixture window gets the same geometry as the Windows reference window, and every frame pixel must equal
-the reference except the app icon and title text (different apps and font). The caption gradient may differ
-by 1 per channel: Windows truncates the interpolation, Qt rounds it.
+the reference except the app icon and title text (different apps and font). The caption gradient is compared
+exactly, including GDI's lower-sample channel transitions.
 """
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
@@ -12,18 +12,18 @@ import time
 
 from PIL import Image, ImageChops
 
-from lab import ROOT, VM, vmctl, user, toggle, kwin_script, kwin_query, wait_for, install, shot
+from lab import ROOT, VM, vmctl, user, toggle, kwin_script, kwin_query, wait_for, install, shot, windows, activate
 
 OUT = Path(sys.argv[1] if len(sys.argv) > 1 else '/tmp/win7-frames-test')
 REF = ROOT / 'reference/screenshots'
 kconfig = SourceFileLoader('kconfig', str(ROOT / 'toggle/kconfig-keys')).load_module()
 WINDOW = (256, 120, 768, 560)  # x, y, width, height of the reference window
 CLIENT = (260, 143, 1020, 676)
-ICON, TEXT, GRADIENT = (262, 125, 278, 141), (279, 124, 430, 142), (280, 124, 966, 142)
+ICON, TEXT = (262, 125, 278, 141), (279, 124, 430, 142)
 
 
-def frame_diff(ours, reference, region, masks, tolerant=()):
-    """Pixels in region (minus masks) that differ; inside tolerant boxes a 1-per-channel difference is allowed."""
+def frame_diff(ours, reference, region, masks):
+    """Pixels in region (minus icon/text masks) that differ from genuine Windows."""
     a, b = Image.open(ours).convert('RGB'), Image.open(reference).convert('RGB')
     bad = []
     x0, y0, x1, y1 = region
@@ -32,15 +32,14 @@ def frame_diff(ours, reference, region, masks, tolerant=()):
             if any(l <= x < r and t <= y < bt for l, t, r, bt in masks):
                 continue
             pa, pb = a.getpixel((x, y)), b.getpixel((x, y))
-            limit = 1 if any(l <= x < r and t <= y < bt for l, t, r, bt in tolerant) else 0
-            if max(abs(i - j) for i, j in zip(pa, pb)) > limit:
+            if pa != pb:
                 bad.append((x, y, pa, pb))
     return bad
 
 
-def assert_frame(name, reference, region, masks, tolerant=()):
+def assert_frame(name, reference, region, masks):
     shot(OUT / f'{name}.png')
-    bad = frame_diff(OUT / f'{name}.png', REF / reference, region, masks, tolerant)
+    bad = frame_diff(OUT / f'{name}.png', REF / reference, region, masks)
     assert not bad, f'{name}: {len(bad)} frame pixels differ from {reference}, e.g. (x, y, ours, windows) {bad[:6]}'
     print(f'{name}: frame matches {reference}')
 
@@ -90,7 +89,7 @@ def main():
     time.sleep(1.5)
     x, y, w, h = WINDOW
     window = (x, y, x + w, y + h)
-    assert_frame('1-active', 'w7-taskbar.png', window, [CLIENT, ICON, TEXT], [GRADIENT])
+    assert_frame('1-active', 'w7-taskbar.png', window, [CLIENT, ICON, TEXT])
     # Glyph edges are anti-aliased differently until issue #11, so "text" here is any clearly light pixel.
     text_rows = lambda path: sorted({y for y in range(TEXT[1], TEXT[3]) for x in range(TEXT[0], TEXT[2])
                                      if min(Image.open(path).convert('RGB').getpixel((x, y))) > 120})
@@ -100,7 +99,7 @@ def main():
 
     vmctl.pointer(VM, 100, 400, 'left')  # click the desktop: the window goes inactive
     time.sleep(1.5)
-    assert_frame('2-inactive', 'w7-inactive.png', window, [CLIENT, ICON, TEXT], [GRADIENT])
+    assert_frame('2-inactive', 'w7-inactive.png', window, [CLIENT, ICON, TEXT])
 
     fixture(WINDOW)
     vmctl.pointer(VM, 1009, 132)
@@ -127,7 +126,7 @@ def main():
     wait_for(lambda: fixture_state().endswith('\t3'), 'maximize button maximizes')
     vmctl.pointer(VM, 640, 400)
     time.sleep(1.5)
-    assert_frame('4-maximized', 'w7-maximized.png', (0, 0, 1280, 19), [(2, 1, 18, 17), (19, 0, 170, 18)], [(20, 0, 1226, 18)])
+    assert_frame('4-maximized', 'w7-maximized.png', (0, 0, 1280, 19), [(2, 1, 18, 17), (19, 0, 170, 18)])
     vmctl.pointer(VM, 1251, 8, 'left')
     wait_for(lambda: fixture_state().endswith('\t0'), 'restore button restores')
 
@@ -159,6 +158,26 @@ def main():
     vmctl.pointer(VM, 1009, 132, 'left')
     wait_for(lambda: fixture_state() == 'gone', 'close button closes the window')
     print('close button closes the window')
+
+    # A fixture alone misses application decoration modes (notably Firefox's default client-side titlebar).
+    user('mkdir -p /tmp/win7-frame-firefox; printf \'user_pref("browser.tabs.inTitlebar", 0);\\n'
+         'user_pref("browser.shell.checkDefaultBrowser", false);\\nuser_pref("browser.startup.page", 0);\\n\' '
+         '> /tmp/win7-frame-firefox/user.js')
+    vmctl.transfer(VM, 'put', str(ROOT / 'tests/fixture_gtk.py'), '/tmp/fixture_gtk.py')
+    vmctl.run(VM, 'chmod 644 /tmp/fixture_gtk.py', 10)
+    for resource, command in [('org.win7classic.explorer', '~/.local/bin/win7-explorer'),
+                              ('org.kde.dolphin', 'dolphin'), ('org.kde.kate', 'kate'),
+                              ('fixture_gtk.py', '--setenv=GTK_CSD=0 python3 /tmp/fixture_gtk.py'),
+                              ('firefox', 'firefox --no-remote --profile /tmp/win7-frame-firefox about:blank')]:
+        user(f'systemd-run --user --collect -q {command}')
+        wait_for(lambda: resource in windows(), resource, 60)
+        activate(resource)
+        kwin_script(f'for(const w of workspace.windowList()) if(w.resourceClass=="{resource}") '
+                    '{ w.setMaximize(false,false); w.frameGeometry={x:256,y:120,width:768,height:560}; }')
+        vmctl.pointer(VM, 100, 400)
+        time.sleep(1)
+        assert_frame(f'app-{resource}', 'w7-taskbar.png', window, [CLIENT, ICON, (279, 127, 966, 139)])
+    user('pkill -f "^/usr/bin/python3 /tmp/fixture_gtk.py"; pkill -x firefox; true')
 
     toggle('current')
     start_fixture()

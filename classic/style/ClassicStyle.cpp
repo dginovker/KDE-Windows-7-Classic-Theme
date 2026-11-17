@@ -22,6 +22,14 @@ public:
     QSize sizeFromContents(ContentsType t,const QStyleOption *o,const QSize &s,const QWidget *w=nullptr) const override {
         QSize result=QProxyStyle::sizeFromContents(t,o,s,w);
         if(t==CT_ComboBox) result.setHeight(o->fontMetrics.height()+10);
+        if(t==CT_MenuItem) {
+            if(auto item=qstyleoption_cast<const QStyleOptionMenuItem *>(o)) {
+                if(item->menuItemType!=QStyleOptionMenuItem::Separator) {
+                    result.setHeight(qMax(o->fontMetrics.height()+6,item->icon.isNull()?0:18));
+                    result.rwidth()-=item->maxIconWidth?6:1;
+                }
+            }
+        }
         return result;
     }
     QRect subControlRect(ComplexControl c,const QStyleOptionComplex *o,SubControl sc,const QWidget *w=nullptr) const override {
@@ -67,6 +75,8 @@ public:
     void drawPrimitive(PrimitiveElement e,const QStyleOption *o,QPainter *p,const QWidget *w=nullptr) const override {
         const bool disabled=!(o->state & State_Enabled);
         switch(e) {
+        case PE_FrameMenu:
+            Classic::drawEdge(*p,o->rect,Classic::Raised);return;
         case PE_FrameFocusRect:
             Classic::drawFocusRect(*p,o->rect); return;
         case PE_IndicatorCheckBox:
@@ -91,6 +101,11 @@ public:
         QProxyStyle::drawPrimitive(e,o,p,w);
     }
     void drawControl(ControlElement e,const QStyleOption *o,QPainter *p,const QWidget *w=nullptr) const override {
+        if(e==CE_MenuItem) {
+            if(auto item=qstyleoption_cast<const QStyleOptionMenuItem *>(o)) {
+                drawMenuItem(*item,*p,w);return;
+            }
+        }
         if(e==CE_ScrollBarAddLine || e==CE_ScrollBarSubLine || e==CE_ScrollBarSlider) {
             p->fillRect(o->rect,Classic::Face);
             Classic::drawEdge(*p,o->rect,(o->state&State_Sunken)?Classic::Sunken:Classic::Raised);
@@ -142,6 +157,67 @@ public:
         QProxyStyle::drawComplexControl(c,o,p,w);
     }
 private:
+    void drawMenuItem(const QStyleOptionMenuItem &item,QPainter &p,const QWidget *w) const {
+        const QRect r=item.rect;
+        const bool disabled=!(item.state&State_Enabled), selected=item.state&State_Selected;
+        const QColor ink=disabled?Classic::GrayText:selected?Classic::SelectionText:Classic::Text;
+        p.save();
+        p.fillRect(r,selected?Classic::Selection:Classic::Face);
+        auto visual=[&](QRect box) { return visualRect(item.direction,r,box); };
+        if(item.menuItemType==QStyleOptionMenuItem::Separator) {
+            // Native separators keep two face pixels on each side of the etched line.
+            QRect line(r.x()+1,r.y()-1+r.height()/2,r.width()-2,2);
+            p.fillRect(line.x(),line.y(),line.width(),1,Classic::Shadow3D);
+            p.fillRect(line.x(),line.y()+1,line.width(),1,Classic::Highlight3D);
+            p.restore();return;
+        }
+        const int column=item.maxIconWidth?16:13;
+        const QRect iconRect=visual(QRect(r.x()+1,r.y()+(r.height()-16)/2,column,16));
+        if(!item.icon.isNull()) {
+            if(item.checked) {
+                const QRect check=visual(QRect(r.x(),r.y(),column+2,r.height()));
+                if(!selected) {
+                    for(int y=check.top();y<=check.bottom();++y)
+                        for(int x=check.left();x<=check.right();++x)
+                            if((x+y)&1) p.fillRect(x,y,1,1,Classic::Highlight3D);
+                }
+                Classic::drawEdge(p,check,Classic::SunkenOuter);
+            }
+            item.icon.paint(&p,iconRect,Qt::AlignCenter,disabled?QIcon::Disabled:selected?QIcon::Active:QIcon::Normal,
+                            item.checked?QIcon::On:QIcon::Off);
+        } else if(item.checked) {
+            const bool radio=item.checkType==QStyleOptionMenuItem::Exclusive;
+            const QSize size=radio?QSize(6,6):QSize(7,7);
+            QRect mark(QPoint(),size);mark.moveCenter(iconRect.center());
+            mark.moveTop(r.y()+(r.height()-size.height())/2+(radio?0:1));
+            if(disabled && !selected) Classic::drawGlyph(p,mark.translated(1,1),radio?Classic::MenuBullet:Classic::MenuCheck,false,Classic::Unchecked,Classic::Highlight3D);
+            Classic::drawGlyph(p,mark,radio?Classic::MenuBullet:Classic::MenuCheck,false,Classic::Unchecked,ink);
+        }
+        QFont font=item.font;
+        if(item.menuItemType==QStyleOptionMenuItem::DefaultItem) font.setBold(true);
+        p.setFont(font);
+        int flags=Qt::AlignVCenter|Qt::AlignLeft|Qt::TextSingleLine|Qt::TextShowMnemonic;
+        if(!styleHint(SH_UnderlineShortcut,&item,w)) flags|=Qt::TextHideMnemonic;
+        const QStringList parts=item.text.split('\t');
+        const int textLeft=column+3;
+        const QRect label=visual(QRect(r.x()+textLeft,r.y(),r.width()-textLeft-item.reservedShortcutWidth-12,r.height()));
+        auto text=[&](QRect box,const QString &value) {
+            if(disabled && !selected) {
+                p.setPen(Classic::Highlight3D);p.drawText(box.translated(1,1),flags,value);
+            }
+            p.setPen(ink);p.drawText(box,flags,value);
+        };
+        text(label,parts.first());
+        if(parts.size()>1)
+            text(visual(QRect(r.right()-item.reservedShortcutWidth-11,r.y(),item.reservedShortcutWidth,r.height())),parts.at(1));
+        if(item.menuItemType==QStyleOptionMenuItem::SubMenu) {
+            const QRect arrow=visual(QRect(r.right()-9,r.y()+(r.height()-7)/2-1,4,7));
+            const auto glyph=item.direction==Qt::RightToLeft?Classic::ArrowLeft:Classic::ArrowRight;
+            if(disabled && !selected) Classic::drawGlyph(p,arrow.translated(1,1),glyph,false,Classic::Unchecked,Classic::Highlight3D);
+            Classic::drawGlyph(p,arrow,glyph,false,Classic::Unchecked,ink);
+        }
+        p.restore();
+    }
     void enforcePalette() {
         if(!m_app || m_app->palette()==Classic::palette()) return;
         m_externalPalette=m_app->palette();

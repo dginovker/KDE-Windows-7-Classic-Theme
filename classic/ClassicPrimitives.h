@@ -14,10 +14,11 @@ enum Edge { RaisedOuter=1, SunkenOuter=2, RaisedInner=4, SunkenInner=8,
 enum Flag { Left=1, Top=2, Right=4, Bottom=8, Rect=15, Soft=0x1000,
             Adjust=0x2000, Flat=0x4000, Middle=0x800 };
 enum CheckState { Unchecked, Checked, Mixed };
-enum Glyph { None, Minimize, Maximize, Restore, Close, Check, Radio, ArrowDown, ArrowRight, ArrowLeft };
+enum Glyph { None, Minimize, Maximize, Restore, Close, Check, Radio, MenuCheck, MenuBullet, ArrowDown, ArrowRight, ArrowLeft };
 QPalette palette();
 // QRect uses inclusive right()/bottom(); all fills below use width/height (Win32 half-open bounds).
 QRect drawEdge(QPainter &, QRect, int edge, int flags=Rect);
+void drawCaption(QPainter &, QRect, bool active);
 void drawFlatBorder(QPainter &, QRect);
 void drawButton(QPainter &, QRect, bool pressed=false, bool isDefault=false);
 void drawFocusRect(QPainter &, QRect, QPoint origin={});

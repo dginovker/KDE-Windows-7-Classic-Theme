@@ -112,6 +112,23 @@ def main():
     shot(OUT / '1-taskbar.png')
     assert_matches_reference(OUT / '1-taskbar.png')
     print('taskbar structure matches the Windows 7 reference')
+    vmctl.pointer(VM, 190, 778, 'right')
+    vmctl.pointer(VM, 640, 600)
+    time.sleep(1)
+    shot(OUT / '1-jumplist.png')
+    jump = Image.open(OUT / '1-jumplist.png').convert('RGB').crop((113, 662, 343, 756))
+    native_jump = Image.open(ROOT / 'reference/screenshots/w7-explorer-jumplist.png').convert('RGB').crop((78, 662, 308, 756))
+    jump_diff = ImageChops.difference(jump, native_jump)
+    # Our action-only popup has its own top border; native has the Frequent section above this block.
+    jump_diff.paste((0, 0, 0), (0, 0, 230, 1))
+    for top in (21, 43, 65):
+        jump_diff.paste((0, 0, 0), (29, top, 222, top + 12))
+    jump.save(OUT / 'jumplist-ours.png')
+    native_jump.save(OUT / 'jumplist-native.png')
+    jump_diff.point(lambda v: 255 if v else 0).save(OUT / 'jumplist-diff.png')
+    assert jump_diff.getbbox() is None, f'jump-list action geometry/art differs: {jump_diff.getbbox()}'
+    vmctl.keys(VM, 'KEY_ESC')
+    print('jump-list action border, icon column and 22px rows match native pixels')
     vmctl.pointer(VM, 190, 778)
     time.sleep(1)
     shot(OUT / '1-window-tooltip.png')
