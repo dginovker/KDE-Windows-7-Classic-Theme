@@ -87,7 +87,7 @@ static void edge(QPainter &p, const QRect &r, const QColor &topLeft, const QColo
         qFatal("unsupported Explorer edge color pair");
 }
 
-// KDirOperator's own right-click menu is a file-dialog menu (sorting, hidden files, …); Explorer's is per item.
+// KDirOperator's file-dialog menu needs separate Explorer background and item actions.
 class Files : public KDirOperator
 {
 public:
@@ -95,7 +95,13 @@ public:
     std::function<void(const KFileItem &, const QPoint &)> onMenu;
 
 protected:
-    void activatedMenu(const KFileItem &item, const QPoint &pos) override { onMenu(item, pos); }
+    void activatedMenu(const KFileItem &item, const QPoint &pos) override
+    {
+        // KDirModel returns the directory itself for an invalid (background) index, not a null item.
+        const bool background = item.url().matches(url(), QUrl::StripTrailingSlash);
+        updateSelectionDependentActions();
+        onMenu(background ? KFileItem() : item, pos);
+    }
 };
 
 // A row of clickable parts painted by the widget itself; parts report hover and press so they can be drawn per state.
@@ -600,7 +606,10 @@ public:
             if (auto *tree = qobject_cast<QTreeView *>(view))
                 explorerColumns(tree);
             connect(view->selectionModel(), &QItemSelectionModel::selectionChanged, this, &Explorer::updateDetails);
+            connect(view->selectionModel(), &QItemSelectionModel::selectionChanged, this, &Explorer::updateActions);
         });
+        connect(QApplication::clipboard(), &QClipboard::dataChanged, this, &Explorer::updateActions);
+        connect(KIO::FileUndoManager::self(), &KIO::FileUndoManager::undoAvailable, this, &Explorer::updateActions);
         // Filtering the view's model rather than KDirLister's name filter, which always shows folders.
         connect(nav->search, &QLineEdit::textChanged, this, [this](const QString &text) {
             proxy()->setFilterCaseSensitivity(Qt::CaseInsensitive);
@@ -875,17 +884,24 @@ private:
         if (item.isNull()) {
             auto *view = menu.addMenu(QStringLiteral("&View"));
             view->addActions(views->actions());
-            menu.addAction(files->action(KDirOperator::Reload));
+            auto *sort = menu.addMenu(QStringLiteral("Sort &by"));
+            sort->addActions({files->action(KDirOperator::SortByName), files->action(KDirOperator::SortByDate),
+                             files->action(KDirOperator::SortByType), files->action(KDirOperator::SortBySize)});
+            sort->addSeparator();
+            sort->addActions({files->action(KDirOperator::SortAscending), files->action(KDirOperator::SortDescending)});
+            menu.addAction(QStringLiteral("R&efresh"), files, &KDirOperator::rereadDir);
             menu.addSeparator();
-            menu.addAction(paste);
-            menu.addAction(undo);
+            menu.addAction(QStringLiteral("&Paste"), paste, &QAction::trigger)->setEnabled(paste->isEnabled());
+            menu.addAction(QStringLiteral("Paste &shortcut"), this, [this] {
+                auto *job = KIO::link(KUrlMimeData::urlsFromMimeData(QApplication::clipboard()->mimeData()), files->url());
+                job->setUiDelegate(KIO::createDefaultJobUiDelegate(KJobUiDelegate::AutoHandlingEnabled, this));
+                KIO::FileUndoManager::self()->recordCopyJob(job);
+            })->setEnabled(paste->isEnabled());
+            menu.addAction(QStringLiteral("&Undo"), undo, &QAction::trigger)->setEnabled(undo->isEnabled());
             menu.addSeparator();
             menu.addMenu(QStringLiteral("Ne&w"))->addAction(assetIcon(QStringLiteral("folder")), QStringLiteral("&Folder"), files, &KDirOperator::mkdir);
             menu.addSeparator();
-            menu.addAction(QStringLiteral("P&roperties"), this, [this] {
-                files->view()->clearSelection();
-                files->action(KDirOperator::Properties)->trigger();
-            });
+            menu.addAction(QStringLiteral("P&roperties"), this, [this] { KPropertiesDialog::showDialog(files->url(), this); });
         } else {
             const KFileItemList items = files->selectedItems().isEmpty() ? KFileItemList{item} : files->selectedItems();
             auto *openItem = menu.addAction(QStringLiteral("&Open"), this, [this, items] {

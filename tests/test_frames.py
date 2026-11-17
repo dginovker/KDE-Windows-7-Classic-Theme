@@ -162,7 +162,9 @@ def main():
     print('close button closes the window')
 
     # A fixture alone misses application decoration modes (notably Firefox's default client-side titlebar).
+    # Firefox's early blank window accepts geometry before startup restores its saved size.
     user('mkdir -p /tmp/win7-frame-firefox; printf \'user_pref("browser.tabs.inTitlebar", 0);\\n'
+         'user_pref("browser.startup.blankWindow", false);\\n'
          'user_pref("browser.shell.checkDefaultBrowser", false);\\nuser_pref("browser.startup.page", 0);\\n\' '
          '> /tmp/win7-frame-firefox/user.js')
     vmctl.transfer(VM, 'put', str(ROOT / 'tests/fixture_gtk.py'), '/tmp/fixture_gtk.py')
