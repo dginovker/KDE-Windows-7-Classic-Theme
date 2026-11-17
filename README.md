@@ -16,6 +16,20 @@ Arch: `cd packaging && makepkg -si` (needs `wine` at build time for its LGPL Tah
 
 `win7-classic windows|current|toggle|status|restore` swaps the whole Plasma panel/desktop layout and panel theme by restarting only plasmashell; KWin and applications keep running. Each mode keeps its own saved layout under `~/.local/state/win7-classic/`, and every switch is logged there. Colors, fonts, widget style and window decoration are swapped key-by-key (only the keys listed in `toggle/windows/keys/`), so other settings in `kdeglobals`/`kwinrc` stay untouched, and running Qt apps update live. A switch that fails (e.g. a widget plugin is missing) rolls back and stays in the old mode; `restore` brings back the current layout from a terminal even with no panel running. The first switch builds Windows mode from your current panel (`toggle/windows/seed`): the launcher, task manager, clock, show-desktop and spacers become the Classic ones; every other widget (pager, monitors, your own widgets, the tray and its items) keeps its settings and sits before the notification area. `win7-classic rebuild` discards the Windows layout and builds it again from the current one.
 
+## Firefox and Dark Reader
+
+Firefox's **System theme — auto** follows the GTK/desktop light preference live; no Firefox profile writes or restart are needed for normal mode switches. An explicitly selected Firefox Dark/custom theme remains the user's choice, not a per-mode preference managed by this project.
+
+If History has black text on a nearly black background while the toolbar is light, check custom `chrome/userChrome.css`. A blanket `browser { background-color: #131314 !important; }` also overrides Firefox's privileged History sidebar. Scope that blank-page workaround to content tabs instead:
+
+```css
+#tabbrowser-tabpanels browser { background-color: #131314 !important; }
+```
+
+Keep unrelated CSS unchanged. Back up the file before editing; Firefox reads userChrome.css at startup, so this repair takes effect on the next normal Firefox restart. It is not a live stylesheet migration performed by `win7-classic`. The History defect was reproduced without Dark Reader installed.
+
+Dark Reader is separate: **Automation → Use system color scheme**, with behavior **Toggle on/off**, follows the existing live light/dark signal when Firefox follows the system. This is opt-in configuration in Dark Reader; the switcher does not change automation, enabled state, site lists or other extension settings. A manually enabled Dark Reader can still darken web content in Windows mode. Disabling the extension alone can leave injected styles on running pages, so it is not a reliable live substitute. Missing/disabled extensions require no integration. Automatic control of arbitrary Dark Reader settings, with exact per-mode restoration, is not implemented.
+
 ## Mixed installs and removal
 
 A package plus a development install must both be upgraded: `cd packaging && makepkg -si`, then `./install.sh` as the desktop user. Each cleans its own legacy renderers; install/switch warnings identify legacy copies in the other root. Only the known old Classic decoration identity is migrated in live/saved current settings.
@@ -73,6 +87,7 @@ All run from the host against the lab VM and write screenshots to the given dire
 - `python tests/test_cursors.py [outdir]`: VM desktop arrow and white/dark text-field pixels, animations and Breeze restoration with unchanged KWin/app PIDs. Temporarily enables a software cursor in the lab (QEMU omits hardware cursors), restarting the lab session only before/after the test, and removes its instrumentation afterward.
 - `python tests/test_icons.py [outdir]`: portal file picker, Dolphin and a Qt/KDE app started before switching render Windows folders only in Windows mode; all three processes survive both directions.
 - `python tests/test_light.py [outdir]`: with Breeze Dark as the current theme, Windows mode leaves no dark colors, selects the Win7Classic scheme, makes the desktop portal prefer light and draws an inactive Dolphin toolbar light; switching back restores Breeze Dark exactly.
+- `python tests/test_firefox.py outdir /path/to/signed-darkreader.xpi`: isolated lab Firefox profiles, genuine History red→green for the blanket/scoped userChrome selector, three running-browser round trips, exact appearance preference restoration and unsaved textarea survival. Tests signed Dark Reader absent, manually enabled (content intentionally stays dark), System automation (content follows live switches with identical local/sync storage) and disabled. An explicit Firefox Dark theme remains dark in both modes. Never connects to the owner's Firefox.
 
 ## Recovery
 
