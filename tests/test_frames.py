@@ -178,7 +178,7 @@ def main():
                     '{ w.setMaximize(false,false); w.frameGeometry={x:256,y:120,width:768,height:560}; }')
         vmctl.pointer(VM, 100, 400)
         time.sleep(1)
-        assert_frame(f'app-{resource}', 'w7-taskbar.png', window, [CLIENT, ICON, (279, 127, 966, 139)])
+        assert_frame(f'app-{resource}', 'w7-taskbar.png', window, [CLIENT, ICON, (TEXT[0], TEXT[1], 966, TEXT[3])])
     user('pkill -f "^/usr/bin/python3 /tmp/fixture_gtk.py"; pkill -x firefox; true')
 
     toggle('current')

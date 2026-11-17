@@ -40,13 +40,21 @@ def check_start(scale, name):
     time.sleep(1)
 
 
+def capture_state(label):
+    state = user(STATE)
+    (OUT / f'{label}-state.txt').write_text(state)
+    for config in ('plasma-org.kde.plasma.desktop-appletsrc', 'kdeglobals', 'kwinrc', 'gtk-3.0/settings.ini'):
+        vmctl.transfer(VM, 'get', str(OUT / (label + '-' + config.replace('/', '-'))), '/home/tester/.config/' + config)
+    return state
+
+
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     vmctl.start(VM)
     install()  # normalise, then strip everything the old release didn't have
     user('rm -rf ~/.local/share/kwin/decorations/win7classic{,2} ~/.local/share/themes/Win7-Classic '
          '~/.config/fontconfig/conf.d/70-win7-classic-tahoma.conf ~/.local/state/win7-classic')
-    original = user(STATE)
+    original = capture_state('before')
 
     install(OLD, reset=False)
     toggle('windows')
@@ -57,7 +65,8 @@ def main():
 
     install(reset=False)  # upgrade while still in Windows mode
     toggle('current')
-    assert user(STATE) == original, f'current mode not restored after upgrading:\n{original}\n---\n{user(STATE)}'
+    after = capture_state('first-return')
+    assert after == original, f'current mode not restored after upgrading:\n{original}\n---\n{after}'
     print('after upgrading: switching to current restores the original configuration exactly')
 
     toggle('windows')
@@ -79,7 +88,8 @@ def main():
         time.sleep(3)
 
     toggle('current')
-    assert user(STATE) == original, 'second return to current mode differs'
+    after = capture_state('after')
+    assert after == original, f'second return to current mode differs:\n{original}\n---\n{after}'
     close_test_apps()
     (OUT / 'probe.png').unlink()
     print('ALL UPGRADE CHECKS PASSED; artifacts in', OUT)
