@@ -10,15 +10,12 @@ items) keeps its config groups untouched. With no such panel, a new bottom panel
 from pathlib import Path
 import re
 import sys
-from urllib.parse import unquote, urlsplit
+from launchers import DEFAULT_LAUNCHERS, normalize_launchers
 
 REPLACED = {'org.kde.plasma.kickoff', 'org.kde.plasma.kicker', 'org.kde.plasma.kickerdash', 'org.kde.plasma.taskmanager',
             'org.kde.plasma.icontasks', 'org.kde.plasma.quicklaunch', 'org.kde.plasma.digitalclock', 'org.kde.plasma.showdesktop',
             'org.kde.plasma.minimizeall', 'org.kde.plasma.panelspacer', 'org.kde.plasma.marginsseparator'}
 TASKS = {'org.kde.plasma.taskmanager', 'org.kde.plasma.icontasks'}
-EXPLORER = 'applications:org.win7classic.explorer.desktop'
-DEFAULT_LAUNCHERS = f'applications:firefox.desktop,{EXPLORER},applications:org.kde.konsole.desktop'
-
 
 class Config:
     """A KConfig file as an ordered list of (group path, lines), so untouched groups are written back verbatim."""
@@ -96,18 +93,7 @@ def main(configdir):
         for a in children:
             general = ('Containments', c, 'Applets', a, 'Configuration', 'General')
             keys = ('launchers',) if plugin[a] in TASKS else ('launcherUrls', 'popupUrls') if plugin[a] == 'org.kde.plasma.quicklaunch' else ()
-            for key in keys:
-                for launcher in (applets.get(general, key) or '').split(','):
-                    if not launcher:
-                        continue
-                    path = unquote(urlsplit(launcher).path)
-                    if launcher.startswith('file:') and (path.startswith(('/usr/share/applications/', '/usr/local/share/applications/'))
-                                                        or '/.local/share/applications/' in path):
-                        launcher = 'applications:' + Path(path).name
-                    if launcher == 'preferred://filemanager' or 'org.kde.dolphin.desktop' in launcher:
-                        launcher = EXPLORER
-                    if launcher not in launchers:
-                        launchers.append(launcher)
+            launchers.extend(applets.get(general, key) or '' for key in keys)
         for a in children:
             if plugin[a] in REPLACED:
                 applets.remove_tree(('Containments', c, 'Applets', a))
@@ -122,7 +108,7 @@ def main(configdir):
                 applets.set(('Containments', c, 'Applets', a, *group), key, value)
             return a
 
-        taskbar = add('org.win7classic.taskbar', [(('Configuration', 'General'), 'launchers', ','.join(launchers) or DEFAULT_LAUNCHERS)])
+        taskbar = add('org.win7classic.taskbar', [(('Configuration', 'General'), 'launchers', normalize_launchers(launchers) or DEFAULT_LAUNCHERS)])
         frame = add('org.win7classic.trayframe')
         tray = tray or add('org.kde.plasma.systemtray')
         clock = add('org.win7classic.clock')

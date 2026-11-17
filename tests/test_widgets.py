@@ -16,6 +16,7 @@ from PIL import Image
 
 from lab import ROOT, VM, vmctl, user, toggle, digest, install, shot, wait_for, windows, close_test_apps
 
+sys.path.insert(0, str(ROOT / 'toggle/windows'))
 seed = SourceFileLoader('seed', str(ROOT / 'toggle/windows/seed')).load_module()
 OUT = Path(sys.argv[1] if len(sys.argv) > 1 else '/tmp/win7-widgets-test')
 APPLETSRC = '~/.config/plasma-org.kde.plasma.desktop-appletsrc'

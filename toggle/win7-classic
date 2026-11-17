@@ -177,7 +177,28 @@ switch_to() {
     local problem=""
     if [[ -d $state/profiles/$target ]]; then
         copy_files "$state/profiles/$target" "$config"
-        load_appearance $target "$state/profiles/$target"
+        if [[ $target == windows ]]; then
+            local migrated backup migration_status
+            if migrated=$("$share/windows/migrate-quicklaunch" --check "$config/plasma-org.kde.plasma.desktop-appletsrc" 2>&1); then
+                if [[ -n $migrated ]]; then
+                    # Recovery must exist before mutation, even if the helper dies just after atomic replacement.
+                    if backup=$(mktemp -d "$state/profiles/windows-before-quicklaunch.XXXXXX") &&
+                            cp -a "$state/profiles/windows/." "$backup/"; then
+                        log "Quick Launch original profile: $backup"
+                        if migrated=$("$share/windows/migrate-quicklaunch" "$config/plasma-org.kde.plasma.desktop-appletsrc" 2>&1); then
+                            log "$migrated"
+                        else
+                            migration_status=$?
+                            problem="Quick Launch migration failed (exit $migration_status): $migrated"
+                        fi
+                    else problem="could not preserve the pre-migration Windows profile: $backup"; fi
+                fi
+            else
+                migration_status=$?
+                problem="Quick Launch migration check failed (exit $migration_status): $migrated"
+            fi
+        fi
+        [[ -n $problem ]] || load_appearance $target "$state/profiles/$target"
     else
         # First use of a mode: build it from the layout being left, plus the mode's shipped files (e.g. panel theme).
         for f in "${FILES[@]}"; do [[ ! -e $share/$target/$f ]] || cp "$share/$target/$f" "$config/$f"; done

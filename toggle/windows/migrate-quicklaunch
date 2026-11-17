@@ -1,0 +1,117 @@
+#!/usr/bin/env python3
+"""Fold legacy Quick Launch widgets into an existing Classic taskbar, preserving all unrelated bytes.
+
+Called only with plasmashell stopped, on the Windows layout being activated. No panel is rebuilt.
+"""
+import argparse
+import os
+from pathlib import Path
+import re
+import sys
+import tempfile
+
+from launchers import normalize_launchers
+
+
+class Layout:
+    def __init__(self, text):
+        self.text = text
+        self.groups = {}
+        headers = list(re.finditer(r'(?m)^(\[[^\r\n]+\])(?:\r?\n|$)', text))
+        for index, header in enumerate(headers):
+            group = tuple(re.findall(r'\[([^\]]*)\]', header[1]))
+            if ''.join(f'[{part}]' for part in group) != header[1] or group in self.groups:
+                raise ValueError(f'ambiguous layout group: {header[1]}')
+            self.groups[group] = (header.start(), headers[index + 1].start() if index + 1 < len(headers) else len(text))
+
+    def value_span(self, group, key):
+        if group not in self.groups:
+            return None
+        start, end = self.groups[group]
+        matches = list(re.finditer(r'(?m)^' + re.escape(key) + r'=([^\r\n]*)', self.text[start:end]))
+        if len(matches) > 1:
+            raise ValueError(f'duplicate {key} in {group}')
+        return tuple(start + position for position in matches[0].span(1)) if matches else None
+
+    def get(self, group, key):
+        span = self.value_span(group, key)
+        return self.text[slice(*span)] if span else None
+
+
+def migrate(text):
+    layout = Layout(text)
+    edits, plans = [], []
+    for panel in layout.groups:
+        if len(panel) != 2 or panel[0] != 'Containments' or layout.get(panel, 'plugin') != 'org.kde.panel':
+            continue
+        children = [g for g in layout.groups if len(g) == 4 and g[:3] == (*panel, 'Applets')]
+        quick = [g for g in children if layout.get(g, 'plugin') == 'org.kde.plasma.quicklaunch']
+        classic = [g for g in children if layout.get(g, 'plugin') == 'org.win7classic.taskbar']
+        if not quick or not classic:
+            continue
+        order_group = (*panel, 'General')
+        order = (layout.get(order_group, 'AppletOrder') or '').split(';')
+        if len(classic) != 1 or order.count(classic[0][-1]) != 1:
+            raise ValueError(f'panel {panel[1]} has no unambiguous ordered Classic destination')
+        pins_group = (*classic[0], 'Configuration', 'General')
+        pins = layout.get(pins_group, 'launchers')
+        if pins is None:
+            raise ValueError(f'panel {panel[1]} Classic taskbar has no explicit saved launcher list')
+        quick.sort(key=lambda g: order.index(g[-1]) if g[-1] in order else len(order))
+        values = [pins]
+        for group in quick:
+            general = (*group, 'Configuration', 'General')
+            values.extend(layout.get(general, key) or '' for key in ('launcherUrls', 'popupUrls'))
+        merged = normalize_launchers(values)
+        remaining = ';'.join(item for item in order if item not in {g[-1] for g in quick})
+        edits.append((*layout.value_span(pins_group, 'launchers'), merged))
+        edits.append((*layout.value_span(order_group, 'AppletOrder'), remaining))
+        for group, (start, end) in layout.groups.items():
+            if any(group[:4] == q for q in quick):
+                edits.append((start, end, ''))
+        plans.append((panel[1], pins_group, merged, order_group, remaining, quick))
+
+    result = text
+    for start, end, replacement in sorted(edits, reverse=True):
+        result = result[:start] + replacement + result[end:]
+    verified = Layout(result)
+    for panel, pins_group, merged, order_group, remaining, quick in plans:
+        if verified.get(pins_group, 'launchers') != merged or verified.get(order_group, 'AppletOrder') != remaining or any(
+                group[:4] in quick for group in verified.groups):
+            raise ValueError(f'panel {panel} migration validation failed')
+    return result, [panel for panel, *_ in plans]
+
+
+def main(path, check=False):
+    path = Path(path)
+    original = path.read_bytes()
+    result, panels = migrate(original.decode('utf-8'))
+    if not panels:
+        return
+    message = 'folded Quick Launch into Classic taskbar on panel(s): ' + ', '.join(panels)
+    if check:
+        print(message)
+        return
+    fd, temporary = tempfile.mkstemp(dir=path.parent)
+    try:
+        with os.fdopen(fd, 'wb') as stream:
+            stream.write(result.encode('utf-8'))
+        os.chmod(temporary, path.stat().st_mode & 0o7777)
+        if path.read_bytes() != original:
+            raise ValueError(f'{path} changed during migration; refusing to overwrite')
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+    print(message)
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--check', action='store_true', help='validate and report the plan without writing')
+    parser.add_argument('path')
+    args = parser.parse_args()
+    try:
+        main(args.path, check=args.check)
+    except (OSError, ValueError) as error:
+        sys.exit(f'Quick Launch migration failed: {error}')
