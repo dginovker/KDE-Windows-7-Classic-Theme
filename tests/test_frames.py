@@ -59,7 +59,7 @@ def fixture_state():
 def start_fixture():
     vmctl.transfer(VM, 'put', str(ROOT / 'tests/fixture_window.py'), '/tmp/fixture_window.py')
     vmctl.run(VM, 'chmod 644 /tmp/fixture_window.py', 10)
-    user('pkill -f "^/usr/bin/python3 /tmp/fixture_window.py"; rm -f /tmp/fixture-palette.json; systemd-run --user --collect -q python3 /tmp/fixture_window.py; true')
+    user('pkill -f "^/usr/bin/python3 /tmp/fixture_window.py"; rm -f /tmp/fixture-palette.json /tmp/fixture-font.txt; systemd-run --user --collect -q python3 /tmp/fixture_window.py; true')
     wait_for(lambda: fixture_state() != 'gone', 'fixture window')
 
 
@@ -79,11 +79,13 @@ def main():
     install()
     before = config_snapshot()
     start_fixture()  # opened in current mode: it must change live
-    font = lambda: user('cat /tmp/fixture-font.txt')
-    wait_for(lambda: not font().startswith('Tahoma'), 'fixture reporting its current-mode font')
+    font = lambda: user('cat /tmp/fixture-font.txt', check=False)
+    wait_for(lambda: bool(font()), 'fixture reporting its current-mode font')
+    current_font = font()
+    (OUT / 'current-font.txt').write_text(current_font)
     toggle('windows')
-    wait_for(lambda: font() == 'Tahoma 11', 'running app switching to Tahoma 11px')
-    print('already-running app switched to Tahoma 11px without restarting')
+    wait_for(lambda: font() == 'Tahoma 11', 'running app using Tahoma 11px in Windows mode')
+    print(f'already-running app uses Tahoma 11px without restarting (current mode: {current_font})')
     fixture(WINDOW)
     vmctl.pointer(VM, 100, 400)
     time.sleep(1.5)
@@ -181,6 +183,7 @@ def main():
 
     toggle('current')
     start_fixture()
+    wait_for(lambda: font() == current_font, 'current-mode font restored')
     fixture(WINDOW)
     time.sleep(1.5)
     shot(OUT / '7-current.png')
