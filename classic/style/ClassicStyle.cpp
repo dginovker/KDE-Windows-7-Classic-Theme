@@ -140,6 +140,8 @@ public:
         QProxyStyle::drawControl(e,o,p,w);
     }
     void drawComplexControl(ComplexControl c,const QStyleOptionComplex *o,QPainter *p,const QWidget *w=nullptr) const override {
+        // QScrollBar is opaque; the native 17th face row must not expose uninitialized backing pixels.
+        if(c==CC_ScrollBar) p->fillRect(o->rect,Classic::Face);
         if(c==CC_ComboBox) {
             auto box=qstyleoption_cast<const QStyleOptionComboBox *>(o);
             if(box && !box->editable) {
