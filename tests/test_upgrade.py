@@ -44,7 +44,7 @@ def main():
     OUT.mkdir(parents=True, exist_ok=True)
     vmctl.start(VM)
     install()  # normalise, then strip everything the old release didn't have
-    user('rm -rf ~/.local/share/kwin/decorations/win7classic ~/.local/share/themes/Win7-Classic '
+    user('rm -rf ~/.local/share/kwin/decorations/win7classic{,2} ~/.local/share/themes/Win7-Classic '
          '~/.config/fontconfig/conf.d/70-win7-classic-tahoma.conf ~/.local/state/win7-classic')
     original = user(STATE)
 

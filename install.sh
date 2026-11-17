@@ -52,9 +52,9 @@ for applet in "$src"/plasma/org.win7classic.*; do
     rm -rf "${data:?}/plasma/plasmoids/$(basename "$applet")"
     cp -r "$applet" "$data/plasma/plasmoids/"
 done
-rm -rf "$data/plasma/desktoptheme/win7-classic" "$data/kwin/decorations/win7classic" "$data/themes/Win7-Classic" "$data/icons/Win7-Classic" "$data/icons/Win7-Classic-Cursors" "$data/win7-classic" "$data/color-schemes/Win7Classic.colors"
+rm -rf "$data/plasma/desktoptheme/win7-classic" "$data/kwin/decorations/win7classic" "$data/kwin/decorations/win7classic2" "$data/themes/Win7-Classic" "$data/icons/Win7-Classic" "$data/icons/Win7-Classic-Cursors" "$data/win7-classic" "$data/color-schemes/Win7Classic.colors"
 cp -r "$src/plasma/theme/win7-classic" "$data/plasma/desktoptheme/"
-cp -r "$src/plasma/decoration/win7classic" "$data/kwin/decorations/"
+cp -r "$src/plasma/decoration/win7classic" "$data/kwin/decorations/win7classic2"
 cp -r "$src/plasma/gtk/Win7-Classic" "$data/themes/"
 mkdir -p "$data/icons" "$data/color-schemes"
 cp -r "$src/plasma/icons/Win7-Classic" "$src/plasma/cursors/Win7-Classic-Cursors" "$data/icons/"

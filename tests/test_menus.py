@@ -5,7 +5,7 @@ from pathlib import Path
 import sys
 import time
 from PIL import Image, ImageChops
-from lab import ROOT, VM, vmctl, install, toggle, user, shot, kwin_script, wait_for, windows, activate
+from lab import ROOT, VM, vmctl, install, toggle, user, shot, kwin_script, wait_for, windows, activate, kwin_query
 
 OUT = Path(sys.argv[1] if len(sys.argv) > 1 else '/tmp/win7-menus-test')
 FACE, WHITE, GRAY, BLUE = (212, 208, 200), (255, 255, 255), (128, 128, 128), (10, 36, 106)
@@ -20,6 +20,53 @@ def popup_box(image):
     raise AssertionError('no 168x268 menu bevel in lab screenshot')
 
 
+def popup_bevel(image):
+    pixels = image.load()
+    for bottom in range(150, 756):
+        left = None
+        for x in range(250, 1281):
+            if x < 1280 and pixels[x, bottom] == (64, 64, 64):
+                if left is None:
+                    left = x
+                continue
+            if left is not None:
+                right = x - 1
+                if 60 < right - left < 600 and all(pixels[col, bottom - 1] == GRAY for col in range(left + 1, right)):
+                    for top in range(max(145, bottom - 500), bottom - 30):
+                        if (all(pixels[col, top + 1] == WHITE for col in range(left + 1, right - 1))
+                                and all(pixels[left + 1, row] == WHITE and pixels[right, row] == (64, 64, 64)
+                                        for row in range(top + 1, bottom - 1))):
+                            return (left, top, right + 1, bottom + 1)
+                left = None
+    return None
+
+
+def assert_live_popup(name):
+    path = OUT / f'{name}-menu.png'
+    def visible():
+        shot(path)
+        return popup_bevel(Image.open(path).convert('RGB'))
+    wait_for(visible, f'{name} native popup bevel', timeout=8)
+    box = popup_bevel(Image.open(path).convert('RGB'))
+    x, y = box[0] + 30, box[3] - 12
+    vmctl.pointer(VM, x, y)
+    vmctl.pointer(VM, x + 1, y)
+    time.sleep(0.4)
+    shot(OUT / f'{name}-selected.png')
+    image = Image.open(OUT / f'{name}-selected.png').convert('RGB')
+    assert image.getpixel((box[2] - 14, y)) == BLUE, f'{name}: popup row did not select'
+    (OUT / f'{name}-popup.json').write_text(json.dumps({'box': box, 'selectedY': y}))
+    return box
+
+
+def assert_disabled_shortcut(image):
+    pixels = image.load()
+    ink = [(x, y) for y in range(image.height - 1) for x in range(image.width - 1) if pixels[x, y] == GRAY]
+    assert ink, 'disabled shortcut has no GrayText ink'
+    exposed = [(x + 1, y + 1) for x, y in ink if pixels[x + 1, y + 1] != GRAY]
+    assert exposed and all(pixels[x, y] == WHITE for x, y in exposed), 'disabled shortcut has no offset white emboss'
+
+
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     vmctl.start(VM)
@@ -27,7 +74,7 @@ def main():
     toggle('windows')
     vmctl.transfer(VM, 'put', str(ROOT / 'tests/fixture_menus.py'), '/tmp/fixture_menus.py')
     vmctl.run(VM, 'chmod 644 /tmp/fixture_menus.py', 10)
-    user('rm -f /tmp/fixture-menu.json /tmp/fixture-menu-triggered /tmp/fixture-submenu.png; '
+    user('rm -f /tmp/fixture-menu.json /tmp/fixture-menu-triggered /tmp/fixture-submenu.png /tmp/fixture-submenu.json /tmp/fixture-view.png; '
          'systemd-run --user --collect -q python3 /tmp/fixture_menus.py')
     wait_for(lambda: 'python3' in windows(), 'menu fixture')
     kwin_script('for (const w of workspace.windowList()) if(w.caption=="Classic menu fixture") '
@@ -78,12 +125,24 @@ def main():
     vmctl.transfer(VM, 'get', str(OUT / 'submenu-widget.png'), '/tmp/fixture-submenu.png')
     sub = Image.open(OUT / 'submenu-widget.png').convert('RGB')
     # Also cover the shortcut-bearing submenu, which is not present in the native shell capture.
-    radio = sub.crop((3, 3, 21, 20))
-    tick = sub.crop((3, 37, 21, 54))
+    radio = sub.crop((3, 3, 18, 20))
+    tick = sub.crop((3, 37, 18, 54))
     assert sum(c == (0, 0, 0) for c in radio.get_flattened_data()) == 32, 'native menu bullet is not a 6px raster'
     assert sum(c == (0, 0, 0) for c in tick.get_flattened_data()) == 21, 'DFC_MENU check is not a 7px raster'
     assert radio.tobytes() != tick.tobytes(), 'exclusive and checked actions use the same mark'
-    assert any(min(c) > 225 for c in sub.get_flattened_data()), 'disabled shortcut emboss absent'
+    shortcut_box = json.loads(user('cat /tmp/fixture-submenu.json'))['shortcutBox']
+    shortcut = sub.crop(shortcut_box)
+    shortcut.save(OUT / 'disabled-shortcut.png')
+    assert_disabled_shortcut(shortcut)
+    no_emboss = shortcut.copy()
+    no_emboss.putdata([FACE if color == WHITE else color for color in shortcut.get_flattened_data()])
+    no_emboss.save(OUT / 'disabled-shortcut-no-emboss.png')
+    try:
+        assert_disabled_shortcut(no_emboss)
+    except AssertionError:
+        print('negative control: removing the disabled shortcut emboss is detected')
+    else:
+        raise AssertionError('disabled shortcut assertion accepted missing emboss')
     vmctl.keys(VM, 'KEY_ESC')
     vmctl.pointer(VM, x + 55, y + 256, 'left')
     wait_for(lambda: user('cat /tmp/fixture-menu-triggered 2>/dev/null', check=False) == 'Close', 'menu action triggered')
@@ -131,17 +190,24 @@ def main():
         if resource == 'org.win7classic.explorer':
             vmctl.pointer(VM, 293, 194, 'left')
         elif resource == 'org.kde.dolphin':
-            vmctl.pointer(VM, 850, 550, 'right')
+            if '--suppress-dolphin-popup' not in sys.argv:
+                vmctl.pointer(VM, 850, 550, 'right')
         else:
             vmctl.keys(VM, 'KEY_LEFTALT', 'KEY_F')
         vmctl.pointer(VM, 100, 400)
-        time.sleep(0.8)
-        shot(OUT / f'{resource}-menu.png')
-        vmctl.keys(VM, 'KEY_ESC')
+        assert_live_popup(resource)
+        if resource == 'org.kde.dolphin':
+            vmctl.keys(VM, 'KEY_END')
+            vmctl.keys(VM, 'KEY_ENTER')
+            wait_for(lambda: any('Properties' in row[0] for row in kwin_query(
+                'for(const w of workspace.windowList()) emit(w.caption);')), 'Dolphin Properties action')
+            shot(OUT / 'dolphin-properties.png')
+            vmctl.keys(VM, 'KEY_ESC')
+        else:
+            vmctl.keys(VM, 'KEY_ESC')
     vmctl.pointer(VM, 1100, 650, 'right')
     vmctl.pointer(VM, 100, 400)
-    time.sleep(1)
-    shot(OUT / 'plasma-desktop-menu.png')
+    assert_live_popup('plasma-desktop')
     vmctl.keys(VM, 'KEY_ESC')
     toggle('current')
     print('ALL MENU CHECKS PASSED; artifacts in', OUT)

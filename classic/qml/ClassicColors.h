@@ -2,6 +2,7 @@
 #include <QObject>
 #include "ClassicPrimitives.h"
 
+namespace ClassicV2 {
 class ClassicColors : public QObject {
     Q_OBJECT
     Q_PROPERTY(QColor face READ face CONSTANT)
@@ -34,3 +35,4 @@ public:
     QColor activeCaptionGradient() const { return Classic::ActiveCaptionGradient; }
     QColor inactiveCaptionGradient() const { return Classic::InactiveCaptionGradient; }
 };
+}

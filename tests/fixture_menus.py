@@ -4,6 +4,14 @@ import json
 from pathlib import Path
 from PySide6 import QtCore, QtGui, QtWidgets
 
+class Menu(QtWidgets.QMenu):
+    def shortcut_box(self, action):
+        option = QtWidgets.QStyleOptionMenuItem()
+        self.initStyleOption(option, action)
+        r = self.actionGeometry(action)
+        return [r.right() - option.reservedShortcutWidth - 11, r.y(), r.right() - 11, r.y() + r.height()]
+
+
 app = QtWidgets.QApplication([])
 window = QtWidgets.QWidget()
 window.setWindowTitle('Classic menu fixture')
@@ -28,7 +36,12 @@ for label, enabled, has_icon in [
         menu.addSeparator()
         continue
     if label == 'Layout':
-        sub = menu.addMenu(icon, label)
+        sub = Menu(label, menu)
+        sub.setIcon(icon)
+        menu.addMenu(sub)
+        font = sub.font()
+        font.setStyleStrategy(QtGui.QFont.NoAntialias)
+        sub.setFont(font)
         group = QtGui.QActionGroup(sub)
         group.setExclusive(True)
         for name in ('Icons', 'Details'):
@@ -41,7 +54,10 @@ for label, enabled, has_icon in [
         checked.setChecked(True)
         disabled = sub.addAction('Disabled\tCtrl+D')
         disabled.setEnabled(False)
-        sub.aboutToShow.connect(lambda: QtCore.QTimer.singleShot(150, lambda: sub.grab().save('/tmp/fixture-submenu.png')))
+        def submenu_report():
+            sub.grab().save('/tmp/fixture-submenu.png')
+            Path('/tmp/fixture-submenu.json').write_text(json.dumps({'shortcutBox': sub.shortcut_box(disabled)}))
+        sub.aboutToShow.connect(lambda: QtCore.QTimer.singleShot(150, submenu_report))
         continue
     action = menu.addAction(icon, label) if has_icon else menu.addAction(label)
     action.setEnabled(enabled)

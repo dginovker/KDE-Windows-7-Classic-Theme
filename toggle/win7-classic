@@ -132,6 +132,11 @@ switch_to() {
     from=$(mode)
     [[ $target != windows ]] || preflight_windows
     [[ $target != "$from" ]] || { log "already in $target mode"; return 0; }
+    local decoration_cursor=""
+    if [[ $target == windows ]]; then
+        decoration_cursor=$(journalctl --user -b -u plasma-kwin_wayland -n0 --show-cursor --no-pager | sed -n 's/^-- cursor: //p')
+        [[ -n $decoration_cursor ]] || die "cannot read KWin's journal cursor; decoration activation cannot be verified"
+    fi
     log "switching $from -> $target"
     stop_shell
     rm -rf "$state/profiles/$from.new" && mkdir "$state/profiles/$from.new"
@@ -170,6 +175,21 @@ switch_to() {
     fi
     if [[ -z $problem && $target == windows ]]; then
         systemd-run --user --wait --pipe --collect -q "$probe" >> "$state/switch.log" || problem="effective Win7Classic style/palette check failed (see switch.log)"
+        # KWin reports the requested theme even when its QML fails and a substitute is drawn.
+        local decoration errors
+        if errors=$(journalctl --user -b -u plasma-kwin_wayland --after-cursor "$decoration_cursor" --no-pager -o cat) &&
+                ! grep -Fq 'Failed to initialize decoration theme' <<< "$errors"; then :
+        else
+            log "decoration activation errors: $errors"
+            problem="KWin rejected the Classic decoration (see switch.log and journalctl --user -u plasma-kwin_wayland)"
+        fi
+        if decoration=$(qdbus6 org.kde.KWin /KWin supportInformation | sed -n '/^Decoration$/,/^Output backend$/p') &&
+                grep -qx 'Plugin: org.kde.kwin.aurorae' <<< "$decoration" && grep -qx 'Theme: win7classic2' <<< "$decoration"; then
+            log "effective decoration: org.kde.kwin.aurorae / win7classic2"
+        else
+            log "rejected decoration: $decoration"
+            problem="KWin rejected the Classic decoration (see switch.log and journalctl --user -u plasma-kwin_wayland)"
+        fi
     fi
     if [[ -n $problem ]]; then
         log "rolling back to $from: $problem"

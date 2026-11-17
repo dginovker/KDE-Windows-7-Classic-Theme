@@ -1,5 +1,5 @@
 import QtQuick
-import "../../../../../win7-classic/primitives" as Classic
+import "../../../../../win7-classic/primitives2" as Classic
 import org.kde.kwin.decoration
 
 // DrawFrameControl caption button: 16x14 bevel, sunken with the glyph shifted 1px while pressed.

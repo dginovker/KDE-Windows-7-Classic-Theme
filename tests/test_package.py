@@ -8,6 +8,7 @@ may change, and the user's current-mode configuration must be byte-identical to 
 import io
 from pathlib import Path
 import sys
+import subprocess
 import tarfile
 import time
 
@@ -35,19 +36,20 @@ def remove_user_install():
     """The per-user development install would shadow the packaged files, so it is removed for this test."""
     root('if ! pacman -Qo /usr/lib/qt6/plugins/styles/libwin7classicstyle.so >/dev/null 2>&1; then rm -f /usr/lib/qt6/plugins/styles/libwin7classicstyle.so; fi')
     user('rm -rf ~/.local/share/plasma/plasmoids/org.win7classic.* ~/.local/share/plasma/desktoptheme/win7-classic '
-         '~/.local/share/kwin/decorations/win7classic ~/.local/share/themes/Win7-Classic ~/.local/share/win7-classic '
+         '~/.local/share/kwin/decorations/win7classic{,2} ~/.local/share/themes/Win7-Classic ~/.local/share/win7-classic '
          '~/.local/share/icons/Win7-Classic ~/.local/share/icons/Win7-Classic-Cursors '
          '~/.local/share/fonts/win7-classic ~/.local/bin/win7-classic ~/.config/fontconfig/conf.d/70-win7-classic-tahoma.conf '
          '~/.local/state/win7-classic; fc-cache ~/.local/share/fonts 2>/dev/null; true')
 
 
-def build_package():
+def build_package(commit=None):
     """Builds the Arch package from this checkout inside the VM; returns its path there."""
     buffer = io.BytesIO()
     with tarfile.open(fileobj=buffer, mode='w:gz') as tar:
         for name in ('install.sh', 'LICENSE', 'classic', 'explorer', 'fonts', 'packaging', 'plasma', 'toggle'):
             tar.add(ROOT / name, arcname=name, filter=lambda t: None if '__pycache__' in t.name or t.name.endswith('.pkg.tar.zst') else t)
-    Path('/tmp/win7-src.tgz').write_bytes(buffer.getvalue())
+    archive = subprocess.check_output(['git', '-C', str(ROOT), 'archive', '--format=tar.gz', commit]) if commit else buffer.getvalue()
+    Path('/tmp/win7-src.tgz').write_bytes(archive)
     vmctl.transfer(VM, 'put', '/tmp/win7-src.tgz', '/tmp/win7-src.tgz')
     root('chmod 644 /tmp/win7-src.tgz')
     user('rm -rf /tmp/win7-build && mkdir /tmp/win7-build && tar -xzf /tmp/win7-src.tgz -C /tmp/win7-build && cd /tmp/win7-build/packaging && makepkg -f --nodeps >/tmp/makepkg.log 2>&1 || { cat /tmp/makepkg.log; exit 1; }', timeout=600)
@@ -64,7 +66,7 @@ from pathlib import Path
 home = Path.home()
 patterns = (
     '.local/share/plasma/plasmoids/org.win7classic.*', '.local/share/plasma/desktoptheme/win7-classic',
-    '.local/share/kwin/decorations/win7classic', '.local/share/themes/Win7-Classic',
+    '.local/share/kwin/decorations/win7classic', '.local/share/kwin/decorations/win7classic2', '.local/share/themes/Win7-Classic',
     '.local/share/icons/Win7-Classic*', '.local/share/win7-classic', '.local/share/fonts/win7-classic',
     '.local/share/color-schemes/Win7Classic.colors', '.local/bin/win7-*',
     '.local/share/applications/org.win7classic.explorer.desktop',
@@ -138,7 +140,7 @@ def main():
     assert '/usr/share/icons/Win7-Classic-Cursors/cursors/default' in owned, 'cursor theme not packaged'
     assert root('readlink /usr/share/icons/Win7-Classic-Cursors/cursors/xterm') == 'text'
     assert '/usr/lib/qt6/plugins/styles/libwin7classicstyle.so' in owned
-    assert '/usr/share/win7-classic/primitives/libwin7classicqml.so' in owned
+    assert '/usr/share/win7-classic/primitives2/libwin7classicqml2.so' in owned
     assert '/usr/bin/win7-classic-probe' in owned
     assert '/usr/bin/win7-classic' in owned and root('readlink -f /usr/bin/win7-classic') == '/usr/share/win7-classic/win7-classic'
     assert root('test -L /etc/fonts/conf.d/70-win7-classic-tahoma.conf && echo linked') == 'linked', 'fontconfig rule not enabled'

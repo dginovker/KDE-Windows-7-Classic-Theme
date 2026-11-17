@@ -5,6 +5,7 @@
 #include <QHoverEvent>
 #include "ClassicPrimitives.h"
 
+namespace ClassicV2 {
 class ClassicItem : public QQuickPaintedItem {
     Q_OBJECT
     Q_PROPERTY(QObject *eventSource READ eventSource WRITE setEventSource)
@@ -83,3 +84,4 @@ private:
     QColor m_fill,m_glyphColor=Classic::Text;
     QPoint m_origin;
 };
+}

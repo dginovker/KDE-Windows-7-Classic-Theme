@@ -1,5 +1,5 @@
 import QtQuick
-import "../../../../../win7-classic/primitives" as Classic
+import "../../../../../win7-classic/primitives2" as Classic
 
 Classic.Raster {
     property bool sunken: false

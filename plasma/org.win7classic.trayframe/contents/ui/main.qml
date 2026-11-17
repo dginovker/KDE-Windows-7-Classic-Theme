@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Window
-import "../../../../../win7-classic/primitives" as Classic
+import "../../../../../win7-classic/primitives2" as Classic
 import QtQuick.Layouts
 import org.kde.plasma.plasmoid
 import org.kde.plasma.core as PlasmaCore

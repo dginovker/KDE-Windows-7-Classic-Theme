@@ -1,5 +1,5 @@
 import QtQuick
-import "../../../../../win7-classic/primitives" as Classic
+import "../../../../../win7-classic/primitives2" as Classic
 import org.kde.kwin.decoration
 
 // Windows 7 Classic frame, measured from reference/screenshots/w7-{taskbar,inactive,maximized}.png:
