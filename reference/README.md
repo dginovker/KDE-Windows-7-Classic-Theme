@@ -12,6 +12,8 @@ Scenes need `D:\native-bench.exe`: `reference/tools/make-tools-cd.sh` builds it 
 
 Menu-state scenes `desktop-view-submenu`, `explorer-view-submenu`, `desktop-view-checked-hover` and `explorer-view-radio-hover` capture genuine radio/check rasters, checked-row hover, submenu selection and disabled embossed text. All four were captured and passed `--check` twice each for #17/#18; `menu` and `taskbar` also passed unchanged. Their cleanup dismisses both menu levels even if the screenshot fails. The existing `explorer --check` 60px Start focus-cue limitation described above remains; it does not affect menu or frame comparisons.
 
+`shutdown-menu` is the original issue #29 target (683165a). `shutdown-menu-selected` captures Restart selected by keyboard, with the pointer off the popup; both reproduce with `--check`. The owned popup is 109×142 at (340,607), with 20px rows and two 8px separator blocks. Tests exclude text (Wine Tahoma), the original pointer and the external compositor shadow (#30), not the frame or separator pixels.
+
 ## Native fixture
 
 Windows 7 Ultimate SP1 x64, Classic, 1280×800, 96 DPI, Never combine, large icons:

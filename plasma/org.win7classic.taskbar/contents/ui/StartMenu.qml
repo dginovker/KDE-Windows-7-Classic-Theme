@@ -7,6 +7,7 @@ import org.kde.kirigami as Kirigami
 import org.kde.coreaddons as KCoreAddons
 import org.kde.plasma.private.kicker as Kicker
 import org.kde.plasma.workspace.dbus as DBus
+import org.kde.plasma.private.sessions as Sessions
 
 // The Windows 7 Classic Start menu. Coordinates are menu pixels measured from reference/screenshots/w7-menu*.png
 // (menu origin = screen 0,295), so they can be compared one-to-one with the reference.
@@ -28,7 +29,7 @@ PlasmaCore.Dialog {
     type: PlasmaCore.Dialog.PopupMenu
     backgroundHints: PlasmaCore.Dialog.NoBackground
     flags: Qt.WindowStaysOnTopHint
-    hideOnWindowDeactivate: true
+    hideOnWindowDeactivate: !shutdownMenu.visible
     location: PlasmaCore.Types.Floating
     // Windows anchors the menu to the screen's bottom-left corner, directly above the taskbar.
     x: applet.Window.window ? applet.Window.window.x : 0
@@ -44,7 +45,14 @@ PlasmaCore.Dialog {
         requestActivate();
         search.forceActiveFocus();
     }
-    function close() { visible = false; }
+    function close() { shutdownMenu.visible = false; visible = false; }
+
+    function powerAction(member, label) {
+        // KDE's suspend/hibernate helpers discard D-Bus failures; surface logind's actual error instead.
+        DBus.SystemBus.asyncCall({ service: "org.freedesktop.login1", path: "/org/freedesktop/login1",
+            iface: "org.freedesktop.login1.Manager", member: member, arguments: [new DBus.bool(true)], signature: "(b)" },
+            () => {}, reply => sessionError.show(label, reply.error, member));
+    }
     function runCommand(service, path, iface, member, args, signature) {
         DBus.SessionBus.asyncCall({ service: service, path: path, iface: iface, member: member, arguments: args, signature: signature });
     }
@@ -63,6 +71,33 @@ PlasmaCore.Dialog {
         Keys.onEscapePressed: menu.close()
         QtObject { id: favoritesHover; property int count: 0 }
         QtObject { id: placesHover; property int count: 0 }
+
+        SessionError { id: sessionError }
+        Sessions.SessionManagement { id: session }
+        Sessions.SessionsModel { id: sessions }
+        ShutdownMenu {
+            id: shutdownMenu
+            anchor: shutdownArrow
+            session: session
+            ready: session.state === Sessions.SessionManagement.Ready
+            switchUserSupported: sessions.canSwitchUser && sessions.canStartNewSession
+            onDismissed: returnToStart => {
+                if (returnToStart) { menu.requestActivate(); shutdownArrow.forceActiveFocus(); }
+                else menu.close();
+            }
+            onChosen: index => {
+                menu.close();
+                // ForcePrompt ignores the user's no-confirmation preference and preserves KDE's session save/veto flow.
+                switch (index) {
+                case 0: sessions.startNewSession(true); break;
+                case 1: session.requestLogout(Sessions.SessionManagement.ForcePrompt); break;
+                case 2: session.lock(); break;
+                case 3: session.requestReboot(Sessions.SessionManagement.ForcePrompt); break;
+                case 4: menu.powerAction("Suspend", "Sleep"); break;
+                case 5: menu.powerAction("Hibernate", "Hibernate"); break;
+                }
+            }
+        }
 
         Kicker.SimpleFavoritesModel {
             id: favorites
@@ -337,10 +372,12 @@ PlasmaCore.Dialog {
                 x: 72; width: 14; height: 23
                 hoverEnabled: true
                 activeFocusOnTab: true
-                function confirm() { menu.close(); menu.runCommand("org.kde.LogoutPrompt", "/LogoutPrompt", "org.kde.LogoutPrompt", "promptAll", [], "()"); }
-                onClicked: confirm()
-                Keys.onReturnPressed: confirm()
-                Keys.onSpacePressed: confirm()
+                function openMenu() { shutdownMenu.visible ? shutdownMenu.back() : shutdownMenu.open(); }
+                onClicked: openMenu()
+                Keys.onReturnPressed: openMenu()
+                Keys.onSpacePressed: openMenu()
+                Keys.onRightPressed: openMenu()
+                Keys.onDownPressed: openMenu()
             }
         }
     }

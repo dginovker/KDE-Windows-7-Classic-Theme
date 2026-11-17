@@ -162,6 +162,14 @@ def shutdown_button(arrow=False):
     time.sleep(2)
 
 
+def shutdown_menu_selected():
+    shutdown_button(arrow=True)
+    vmctl.pointer(VM, 640, 790)
+    for _ in range(4):
+        vmctl.keys(VM, 'KEY_DOWN')
+    time.sleep(0.5)
+
+
 SCENES = {
     # w7-explorer.png also shows Start's keyboard-focus rectangle; recaptures lack it (60 pixels).
     'explorer': lambda: (fixture((849, 419)), vmctl.pointer(VM, 849, 419, 'left')),
@@ -208,6 +216,7 @@ SCENES = {
     'explorer-view-radio-hover': lambda: view_submenu(checked_hover=True),
     'shutdown-hover': shutdown_button,
     'shutdown-menu': lambda: shutdown_button(arrow=True),
+    'shutdown-menu-selected': shutdown_menu_selected,
     'notification-area': lambda: (active_explorer(), vmctl.pointer(VM, 640, 600)),
 }
 
@@ -242,7 +251,7 @@ def main():
             vmctl.pointer(VM, 1014, 62, 'left')  # the menu opens aligned to the current (Details) entry
         if a.scene in ('desktop-view-submenu', 'explorer-view-submenu', 'desktop-view-checked-hover', 'explorer-view-radio-hover'):
             vmctl.keys(VM, 'KEY_ESC')
-        if a.scene == 'shutdown-menu':
+        if a.scene.startswith('shutdown-menu'):
             vmctl.keys(VM, 'KEY_ESC')
         if a.scene == 'explorer-file-context':
             run_dialog('cmd /c del "%USERPROFILE%\\Classic-demo\\capture-reference.txt"')
