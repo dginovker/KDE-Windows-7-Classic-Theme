@@ -1230,7 +1230,7 @@ private:
     QLabel *empty;
     QUrl listedUrl;
     QActionGroup *views = new QActionGroup(this);
-    QAction *backgroundList;
+    QActionGroup *backgroundViews = new QActionGroup(this);
     QMenuBar *fileMenuBar = new QMenuBar;
     QAction *detailsPaneAction;
     bool thumbnails;
@@ -1365,10 +1365,13 @@ private:
             if (i >= Small && i < Content)
                 viewMenu->addSeparator();
         }
-        // The separate folder-background chooser retains its existing action model and artwork.
-        backgroundList = new QAction(assetIcon(QStringLiteral("view-list")), QStringLiteral("List"), this);
-        backgroundList->setCheckable(true);
-        connect(backgroundList, &QAction::triggered, this, [this] { chooseView(List); });
+        // The background chooser keeps its six modes and its own List artwork.
+        for (int i = ExtraLarge; i <= Details; ++i) {
+            auto *a = backgroundViews->addAction(i == List ? assetIcon(QStringLiteral("view-list")) : viewIcon(i),
+                                                 QString::fromLatin1(labels[i]));
+            a->setCheckable(true);
+            connect(a, &QAction::triggered, this, [this, i] { chooseView(i); });
+        }
         auto *fileMenu = fileMenuBar->addMenu(QStringLiteral("&File"));
         fileMenu->addAction(QStringLiteral("New &folder"), files, &KDirOperator::mkdir);
         fileMenu->addSeparator();
@@ -1497,7 +1500,10 @@ private:
         files->view()->setIconSize(QSize(sizes[index], sizes[index]));
         iconSize = index <= Medium ? sizes[index] : 0;
         views->actions()[index]->setChecked(true);
-        backgroundList->setChecked(index == List);
+        if (index <= Details)
+            backgroundViews->actions()[index]->setChecked(true);
+        else if (auto *checked = backgroundViews->checkedAction())
+            checked->setChecked(false);
         bar->right[0].icon = viewIcon(index);
         bar->relayout();
         applyGrid();
@@ -1679,8 +1685,7 @@ private:
         QMenu menu(this);
         if (item.isNull()) {
             auto *view = menu.addMenu(QStringLiteral("&View"));
-            for (int i = ExtraLarge; i <= Details; ++i)
-                view->addAction(i == List ? backgroundList : views->actions()[i]);
+            view->addActions(backgroundViews->actions());
             auto *sort = menu.addMenu(QStringLiteral("Sort &by"));
             sort->addActions({files->action(KDirOperator::SortByName), files->action(KDirOperator::SortByDate),
                              files->action(KDirOperator::SortByType), files->action(KDirOperator::SortBySize)});

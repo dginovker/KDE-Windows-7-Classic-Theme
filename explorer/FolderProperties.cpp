@@ -291,22 +291,24 @@ private:
         return KPropertiesDialog::eventFilter(object, event);
     }
 };
+
+void showProperties(FolderProperties *dialog)
+{
+    dialog->prepare();
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    dialog->setModal(true);
+    dialog->show();
+}
 }
 
 void showExplorerProperties(const KFileItemList &items, QWidget *parent)
 {
     if (items.isEmpty())
         return;
-    auto *dialog = new FolderProperties(items, parent);
-    dialog->prepare();
-    dialog->setAttribute(Qt::WA_DeleteOnClose);
-    dialog->setModal(true);
-    dialog->show();
+    showProperties(new FolderProperties(items, parent));
 }
 
 void showExplorerProperties(const QUrl &url, QWidget *parent)
 {
-    auto *dialog = new FolderProperties(url, parent);
-    dialog->prepare();
-    dialog->exec();
+    showProperties(new FolderProperties(url, parent));
 }
