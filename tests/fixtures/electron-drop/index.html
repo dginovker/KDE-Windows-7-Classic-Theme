@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'">
+<title>Offline file drop probe</title>
+<style>
+  body { margin: 0; display: grid; grid-template-rows: 70vh 30vh; font: 18px sans-serif; }
+  div { display: grid; place-items: center; background: #dcecff; }
+  aside { display: grid; place-items: center; background: #ddd; }
+</style>
+<div id="accept">Drop a synthetic file here</div>
+<aside>Reject drop</aside>
+<script>
+const zone = document.querySelector('#accept');
+function log(phase, data, extra) {
+  console.log('DROP ' + JSON.stringify({phase, types: [...data.types], effect: data.effectAllowed, action: data.dropEffect, ...extra}));
+}
+let over = false;
+zone.addEventListener('dragenter', event => {
+  over = false;
+  event.preventDefault();
+  log('enter', event.dataTransfer);
+});
+zone.addEventListener('dragover', event => {
+  event.preventDefault();
+  event.dataTransfer.dropEffect = 'copy';
+  if (!over) log('over', event.dataTransfer);
+  over = true;
+});
+zone.addEventListener('drop', async event => {
+  event.preventDefault();
+  const data = event.dataTransfer;
+  log('drop', data, { names: [...data.files].map(file => file.name) });
+  try {
+    const files = await Promise.all([...data.files].map(async file => ({
+      name: file.name, size: file.size,
+      bytes: Array.from(new Uint8Array(await file.arrayBuffer()))
+    })));
+    console.log('DROP ' + JSON.stringify({ phase: 'read', files }));
+    zone.textContent = files.map(file => file.name).join(', ');
+  } catch (error) {
+    console.log('DROP ' + JSON.stringify({ phase: 'error', error: String(error) }));
+  }
+});
+</script>

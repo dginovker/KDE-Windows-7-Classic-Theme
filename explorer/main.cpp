@@ -27,6 +27,7 @@
 #include <QCommandLineParser>
 #include <QCryptographicHash>
 #include <QDir>
+#include <QDragEnterEvent>
 #include <QHeaderView>
 #include <QLabel>
 #include <QLineEdit>
@@ -99,6 +100,18 @@ public:
     std::function<void(const KFileItem &, const QPoint &)> onMenu;
 
 protected:
+    bool eventFilter(QObject *watched, QEvent *event) override
+    {
+        if (view() && (watched == view()->viewport() || watched == view())
+            && (event->type() == QEvent::DragEnter || event->type() == QEvent::DragMove || event->type() == QEvent::Drop)
+            && static_cast<QDropEvent *>(event)->source() == view()) {
+            // Wayland enters the origin before crossing windows; reject this target, not the entire drag.
+            event->ignore();
+            return true;
+        }
+        return KDirOperator::eventFilter(watched, event);
+    }
+
     void activatedMenu(const KFileItem &item, const QPoint &pos) override
     {
         // KDirModel returns the directory itself for an invalid (background) index, not a null item.
