@@ -263,7 +263,12 @@ def exercise(out, scale, root):
             snapshot('rename-source', lambda image: ink(image.crop((666, 225, 762, 326))))
             click(point(x + 455, y + 150))
             key('KEY_F2')
+            wait_for(lambda: kwin_query('emit(workspace.activeWindow.caption);') == [['Rename Item']],
+                     'F2 opened the active Rename Item editor')
+            snapshot('rename-editor')
+            key('KEY_LEFTCTRL', 'KEY_A')
             vmctl.type_text(VM, 'Renamed')
+            snapshot('rename-edited')
             key('KEY_ENTER')
             wait_for(lambda: guest_file(f'{root}/identity/Renamed/Sample.txt'),
                      'second Explorer renamed the displayed root')
