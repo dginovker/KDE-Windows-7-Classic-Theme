@@ -75,13 +75,12 @@ PY''')
         with Image.open(path) as image:
             image.crop((422, 209, 565, 299)).resize((572, 360)).save(crop)
             if date_order:
-                arrow = image.crop((791, 220, 807, 231)).convert('L').point(lambda pixel: 255 if pixel < 180 else 0)
-                bounds = arrow.getbbox()
-                assert bounds, f'{name}: no arrow in Date column'
-                arrow = arrow.crop(bounds)
-                top = sum(arrow.crop((0, 0, arrow.width, 1)).get_flattened_data())
-                bottom = sum(arrow.crop((0, arrow.height - 1, arrow.width, arrow.height)).get_flattened_data())
-                assert (top < bottom if date_order == 'ascending' else top > bottom), f'{name}: wrong Date arrow'
+                # The native triangle follows the label rather than hugging the right divider.
+                match = [x for x in range(755, 799) if all(
+                    image.getpixel((x + offset, y)) == (128, 128, 128)
+                    for y, length in zip(range(219, 222), (1, 3, 5) if date_order == 'ascending' else (5, 3, 1))
+                    for offset in range((5 - length) // 2, (5 + length) // 2))]
+                assert match, f'{name}: no {date_order} arrow in Date column'
         text = subprocess.check_output(['tesseract', str(crop), 'stdout', '--psm', '6'], text=True)
         assert 'Name' in text and 0 <= text.find(first) < text.find(last), f'{name}: {text!r}'
 

@@ -7,7 +7,9 @@
 #include <KDirModel>
 #include <KDirOperator>
 #include <KFileItemActions>
+#include <KFileItemDelegate>
 #include <KFileItemListProperties>
+#include <KIO/UDSEntry>
 #include <KIO/FileUndoManager>
 #include <KIO/Global>
 #include <KIO/JobUiDelegateFactory>
@@ -26,6 +28,7 @@
 #include <QClipboard>
 #include <QCommandLineParser>
 #include <QCryptographicHash>
+#include <QDateTime>
 #include <QDir>
 #include <QDragEnterEvent>
 #include <QHeaderView>
@@ -37,11 +40,13 @@
 #include <QMimeData>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QRegularExpression>
 #include <QSortFilterProxyModel>
 #include <QScrollBar>
 #include <QSignalBlocker>
 #include <QSplitter>
 #include <QStandardPaths>
+#include <QStyledItemDelegate>
 #include <QTimer>
 #include <QTreeView>
 #include <QVBoxLayout>
@@ -92,6 +97,111 @@ static void edge(QPainter &p, const QRect &r, const QColor &topLeft, const QColo
         qFatal("unsupported Explorer edge color pair");
 }
 
+class DetailsHeader : public QHeaderView
+{
+public:
+    explicit DetailsHeader(QWidget *parent) : QHeaderView(Qt::Horizontal, parent) {}
+
+protected:
+    QString label(int column) const
+    {
+        return column == KDirModel::ModifiedTime ? tr("Date modified")
+            : model()->headerData(column, Qt::Horizontal).toString();
+    }
+
+    QSize sectionSizeFromContents(int column) const override
+    {
+        // Auto-fit must leave space for the triangle next to the label.
+        return QSize(fontMetrics().horizontalAdvance(label(column)) + (column == KDirModel::Name ? 28 : 17),
+                     qMax(23, fontMetrics().height() + 8));
+    }
+
+    void paintSection(QPainter *p, const QRect &rect, int column) const override
+    {
+        if (!rect.isValid())
+            return;
+        QStyleOptionHeader option;
+        initStyleOption(&option);
+        initStyleOptionForIndex(&option, column);
+        const bool pressed = option.state & QStyle::State_Sunken;
+        p->save();
+        p->setClipRect(rect, Qt::IntersectClip);
+        Classic::drawButton(*p, rect, pressed);
+        const auto visual = [this, &rect](const QRect &r) { return QStyle::visualRect(layoutDirection(), rect, r); };
+        auto textBox = rect.adjusted((column == KDirModel::Name ? 15 : 4) + pressed, pressed, -4, 0);
+        const bool sorted = option.sortIndicator != QStyleOptionHeader::None;
+        const auto text = fontMetrics().elidedText(label(column), Qt::ElideRight, textBox.width() - (sorted ? 9 : 0));
+        p->setPen(classic::text);
+        p->drawText(visual(textBox), Qt::AlignLeading | Qt::AlignVCenter | Qt::TextSingleLine, text);
+        if (sorted && !text.isEmpty()) {
+            const bool ascending = option.sortIndicator == QStyleOptionHeader::SortDown;
+            const int x = textBox.x() + fontMetrics().horizontalAdvance(text) + 4;
+            for (int row = 0; row < 3; ++row) {
+                const int inset = ascending ? 2 - row : row;
+                p->fillRect(visual(QRect(x + inset, textBox.center().y() - 2 + row, 5 - 2 * inset, 1)), classic::shadow);
+            }
+        }
+        p->restore();
+    }
+};
+
+class DetailsNameDelegate : public KFileItemDelegate
+{
+public:
+    using KFileItemDelegate::KFileItemDelegate;
+
+    QSize sizeHint(const QStyleOptionViewItem &option, const QModelIndex &index) const override
+    {
+        auto size = KFileItemDelegate::sizeHint(option, index);
+        return QSize(size.width() + 14, qMax(22, size.height()));
+    }
+
+    void paint(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &index) const override
+    {
+        auto cell = option;
+        cell.rect = QStyle::visualRect(option.direction, option.rect, option.rect.adjusted(14, 0, 0, 0));
+        KFileItemDelegate::paint(painter, cell, index);
+    }
+};
+
+// Keep KIO's model and proxy untouched: translated text must not become the comparison key.
+class DetailsMetadataDelegate : public QStyledItemDelegate
+{
+public:
+    using QStyledItemDelegate::QStyledItemDelegate;
+
+protected:
+    void initStyleOption(QStyleOptionViewItem *option, const QModelIndex &index) const override
+    {
+        QStyledItemDelegate::initStyleOption(option, index);
+        const auto item = index.data(KDirModel::FileItemRole).value<KFileItem>();
+        switch (index.column()) {
+        case KDirModel::Size:
+            if (item.isDir())
+                option->text.clear();
+            break;
+        case KDirModel::Type:
+            if (item.isDir())
+                option->text = tr("File folder");
+            break;
+        case KDirModel::ModifiedTime: {
+            const auto &entry = item.entry();
+            option->text.clear();
+            if (!entry.contains(KIO::UDSEntry::UDS_MODIFICATION_TIME))
+                break;
+            const QDateTime modified = QDateTime::fromSecsSinceEpoch(entry.numberValue(KIO::UDSEntry::UDS_MODIFICATION_TIME));
+            // Use the local date order and clock, but not a relative label or a two-digit year.
+            static const QRegularExpression year(QStringLiteral("(?<!y)yy(?!y)"));
+            auto format = option->locale.dateTimeFormat(QLocale::ShortFormat).split(u'\'');
+            for (qsizetype part = 0; part < format.size(); part += 2)
+                format[part].replace(year, QStringLiteral("yyyy"));
+            option->text = option->locale.toString(modified, format.join(u'\''));
+            break;
+        }
+        }
+    }
+};
+
 // KDirOperator's file-dialog menu needs separate Explorer background and item actions.
 class Files : public KDirOperator
 {
@@ -100,6 +210,16 @@ public:
     std::function<void(const KFileItem &, const QPoint &)> onMenu;
 
 protected:
+    QAbstractItemView *createView(QWidget *parent, KFile::FileView viewKind) override
+    {
+        auto *view = KDirOperator::createView(parent, viewKind);
+        if (auto *tree = qobject_cast<QTreeView *>(view)) {
+            // Install before KDirOperator wires its sort synchronization to the header.
+            tree->setHeader(new DetailsHeader(tree));
+        }
+        return view;
+    }
+
     bool eventFilter(QObject *watched, QEvent *event) override
     {
         if (view() && (watched == view()->viewport() || watched == view())
@@ -867,9 +987,13 @@ private:
         }
     }
 
-    // Explorer's Details columns: Name, Date modified, Type, Size.
     static void explorerColumns(QTreeView *tree)
     {
+        tree->setAlternatingRowColors(false);
+        tree->setItemDelegateForColumn(KDirModel::Name, new DetailsNameDelegate(tree));
+        auto *metadata = new DetailsMetadataDelegate(tree);
+        for (int column : {KDirModel::ModifiedTime, KDirModel::Type, KDirModel::Size})
+            tree->setItemDelegateForColumn(column, metadata);
         for (int column : {KDirModel::Permissions, KDirModel::Owner, KDirModel::Group})
             tree->setColumnHidden(column, true);
         tree->setColumnHidden(KDirModel::Type, false);
@@ -877,7 +1001,9 @@ private:
         header->moveSection(header->visualIndex(KDirModel::ModifiedTime), 1);
         header->moveSection(header->visualIndex(KDirModel::Type), 2);
         header->setStretchLastSection(false);
-        for (auto [column, width] : {std::pair{KDirModel::Name, 270}, {KDirModel::ModifiedTime, 120}, {KDirModel::Type, 120}, {KDirModel::Size, 80}}) {
+        header->setHighlightSections(false);
+        // Section widths are logical pixels measured in w7-explorer-details.png at 96 DPI.
+        for (auto [column, width] : {std::pair{KDirModel::Name, 272}, {KDirModel::ModifiedTime, 120}, {KDirModel::Type, 120}, {KDirModel::Size, 80}}) {
             header->setSectionResizeMode(column, QHeaderView::Interactive);
             header->resizeSection(column, width);
         }

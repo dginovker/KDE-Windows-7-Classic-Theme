@@ -162,9 +162,9 @@ def main():
     time.sleep(1)
     vmctl.pointer(VM, 640, 700)
     shot(OUT / '6-details.png')
-    click((520, 264))  # b.txt, the third row in Details view
+    click((520, 288))  # b.txt, the third row in Details view
     key('KEY_LEFTALT', 'KEY_ENTER')
-    wait_for(lambda: any('Properties' in c for c in captions()), 'Alt+Enter shows Properties')
+    wait_for(lambda: any('Properties' in c and 'b.txt' in c for c in captions()), 'Alt+Enter shows the selected file’s Properties')
     shot(OUT / '7-properties.png')
     key('KEY_ESC')
     print('Details view, Properties')
