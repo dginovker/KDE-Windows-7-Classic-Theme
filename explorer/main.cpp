@@ -1288,6 +1288,8 @@ private:
         options.writeEntry("ShowHidden", hidden->isChecked());
         options.writeEntry("Thumbnails", icons->isChecked());
         if (!config.sync()) {
+            // Don't let KConfig retry rejected edits on destruction if writes recover during the warning.
+            config.markAsClean();
             QMessageBox::warning(this, dialog.windowTitle(), tr("Could not save Explorer's folder options."));
             return;
         }
