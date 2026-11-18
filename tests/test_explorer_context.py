@@ -9,7 +9,7 @@ import time
 from PIL import Image, ImageChops
 
 from lab import ROOT, VM, vmctl, install, toggle, user, shot, wait_for, close_test_apps
-from test_explorer import explorer_at, captions, click, double_click, key, exists
+from test_explorer import explorer_at, captions, click, double_click, key, exists, clear_fixture_view
 from test_menus import popup_bevel
 
 OUT = Path(sys.argv[1] if len(sys.argv) > 1 else '/tmp/win7-explorer-context-test')
@@ -92,6 +92,8 @@ def main():
     vmctl.start(VM)
     install()
     toggle('windows')
+    clear_fixture_view('w7context')
+    clear_fixture_view('w7context/sub')
     user('rm -rf ~/w7context; mkdir -p ~/w7context/sub; printf one > ~/w7context/a.txt; '
          'printf bigger-file > ~/w7context/z.txt; printf link-me > ~/w7context/sub/linked.txt')
     explorer_at('~/w7context')

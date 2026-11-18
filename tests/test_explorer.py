@@ -5,6 +5,7 @@ Windows mode turns the pinned Dolphin into Explorer and makes Explorer open fold
 renames, deletes to the trash, undoes, filters, creates folders, opens files and shows properties. Switching back
 to current mode restores Dolphin.
 """
+from hashlib import sha256
 from pathlib import Path
 import sys
 import time
@@ -49,6 +50,12 @@ def key(*codes):
     time.sleep(0.6)
 
 
+def clear_fixture_view(folder):
+    # A repeated VM run should start at the default without clearing any other folder's preferences.
+    group = sha256(f'file:///home/tester/{folder}'.encode()).hexdigest()
+    user(f'for key in View Sort; do kwriteconfig6 --file win7-explorer-viewsrc --group {group} --key "$key" --delete || exit; done')
+
+
 def explorer_at(folder):
     user(f'systemd-run --user --collect -q ~/.local/bin/win7-explorer {folder}')
     wait_for(lambda: Path(folder).name in captions(), f'Explorer at {folder}')
@@ -66,6 +73,8 @@ def main():
         old.unlink()
     vmctl.start(VM)
     install()
+    clear_fixture_view('w7x')
+    clear_fixture_view('w7x/sub')
     user('pkill -f "^/home/tester/.local/bin/win7-explorer"; rm -rf ~/w7x ~/.local/share/Trash; mkdir -p ~/w7x/sub; echo hi > ~/w7x/a.txt')
     user('qdbus6 org.kde.plasmashell /PlasmaShell evaluateScript "for (const w of panels()[0].widgets()) '
          'if (w.type == \\"org.kde.plasma.icontasks\\") { w.currentConfigGroup = [\\"General\\"]; '

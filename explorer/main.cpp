@@ -2,6 +2,8 @@
 // and drawn with Windows' own art (explorer/assets, see reference/tools/extract-assets.py), around KDE's KIO file
 // widgets, which do the actual file management.
 #include "ClassicPrimitives.h"
+#include <KConfig>
+#include <KConfigGroup>
 #include <KDirModel>
 #include <KDirOperator>
 #include <KFileItemActions>
@@ -23,6 +25,7 @@
 #include <QApplication>
 #include <QClipboard>
 #include <QCommandLineParser>
+#include <QCryptographicHash>
 #include <QDir>
 #include <QHeaderView>
 #include <QLabel>
@@ -35,6 +38,7 @@
 #include <QPainter>
 #include <QSortFilterProxyModel>
 #include <QScrollBar>
+#include <QSignalBlocker>
 #include <QSplitter>
 #include <QStandardPaths>
 #include <QTimer>
@@ -603,8 +607,18 @@ public:
                 view->setVerticalScrollBarPolicy(max > 0 ? Qt::ScrollBarAlwaysOn : Qt::ScrollBarAlwaysOff);
             });
             view->installEventFilter(this);
-            if (auto *tree = qobject_cast<QTreeView *>(view))
+            if (auto *tree = qobject_cast<QTreeView *>(view)) {
                 explorerColumns(tree);
+                connect(tree->header(), &QHeaderView::sortIndicatorChanged, this, [this](int column, Qt::SortOrder order) {
+                    auto sort = files->sorting();
+                    // KDirOperator's Reversed flag means oldest-first for dates, unlike the header's order.
+                    if (column == KDirModel::ModifiedTime) {
+                        sort.setFlag(QDir::Reversed, order == Qt::AscendingOrder);
+                        files->setSorting(sort);
+                    }
+                    rememberSort();
+                });
+            }
             connect(view->selectionModel(), &QItemSelectionModel::selectionChanged, this, &Explorer::updateDetails);
             connect(view->selectionModel(), &QItemSelectionModel::selectionChanged, this, &Explorer::updateActions);
         });
@@ -632,8 +646,11 @@ public:
                     files->action(KDirOperator::Properties), files->action(KDirOperator::Up), files->action(KDirOperator::Reload),
                     back, forward, cut, copy, paste, undo, selectAll, close, address, find});
 
-        setView(1);
-        entered(start);
+        for (auto mode : {KDirOperator::SortByName, KDirOperator::SortByDate, KDirOperator::SortByType, KDirOperator::SortBySize,
+                          KDirOperator::SortAscending, KDirOperator::SortDescending}) {
+            connect(files->action(mode), &QAction::triggered, this, [this] { rememberSort(); });
+        }
+        entered(files->url());
         resize(760, 534);
         files->view()->setFocus();  // Windows starts with the keyboard in the file list
     }
@@ -661,6 +678,7 @@ private:
     DetailsPane *details = new DetailsPane;
     QLabel *empty;
     QActionGroup *views = new QActionGroup(this);
+    int viewIndex = -1;
     int iconSize = 96;
     bool keyboardUsed = false;
     QList<QUrl> history;
@@ -731,7 +749,7 @@ private:
                                                           {QStringLiteral("List"), QStringLiteral("view-list")},
                                                           {QStringLiteral("Details"), QStringLiteral("view-details")}};
         for (int i = 0; i < names.size(); ++i) {
-            auto *a = viewMenu->addAction(assetIcon(names[i].second), names[i].first, this, [this, i] { setView(i); });
+            auto *a = viewMenu->addAction(assetIcon(names[i].second), names[i].first, this, [this, i] { chooseView(i); });
             a->setCheckable(true);
             views->addAction(a);
         }
@@ -740,19 +758,86 @@ private:
                      {QStringLiteral("Share with"), {}, share, {}},
                      {QStringLiteral("New folder"), {}, nullptr, [this] { files->mkdir(); }}};
         bar->right = {{QStringLiteral("View"), assetIcon(QStringLiteral("view-large")), viewMenu,
-                       [this] { setView((views->actions().indexOf(views->checkedAction()) + 1) % views->actions().size()); }},
+                       [this] { chooseView((viewIndex + 1) % views->actions().size()); }},
                       {QStringLiteral("Preview pane"), assetIcon(QStringLiteral("preview-pane")), nullptr,
                        [this] { files->action(KDirOperator::ShowPreviewPanel)->trigger(); }},
                       {QStringLiteral("Help"), assetIcon(QStringLiteral("help")), nullptr, [this] { openUrl(QUrl(QStringLiteral("help:/"))); }}};
     }
 
+    KConfigGroup folderView(KConfig &config) const
+    {
+        // Use the URL, not a marker in the folder: non-local and read-only locations work too.
+        const auto current = files->url();
+        const auto url = (current.isLocalFile() ? QUrl::fromLocalFile(QDir::cleanPath(current.toLocalFile())) : current)
+                             .adjusted(QUrl::NormalizePathSegments | QUrl::StripTrailingSlash | QUrl::RemovePassword);
+        return config.group(QCryptographicHash::hash(url.toEncoded(), QCryptographicHash::Sha256).toHex());
+    }
+
+    void rememberViewProperty(const char *key, int value)
+    {
+        KConfig config(QStringLiteral("win7-explorer-viewsrc"), KConfig::SimpleConfig);
+        auto group = folderView(config);
+        if (group.readEntry(key, -1) == value)
+            return;
+        group.writeEntry(key, value);
+        if (!config.sync())
+            qWarning("Explorer: cannot save %s to win7-explorer-viewsrc", key);
+    }
+
+    void chooseView(int index)
+    {
+        setView(index);
+        rememberViewProperty("View", index);
+    }
+
+    void syncSortHeader()
+    {
+        if (auto *tree = qobject_cast<QTreeView *>(files->view())) {
+            const QSignalBlocker block(tree->header());
+            tree->header()->setSortIndicator(proxy()->sortColumn(), proxy()->sortOrder());
+        }
+    }
+
+    void rememberSort()
+    {
+        syncSortHeader();
+        rememberViewProperty("Sort", int(files->sorting()));
+    }
+
+    void restoreFolderView()
+    {
+        constexpr int defaultSort = QDir::Name | QDir::DirsFirst;
+        KConfig config(QStringLiteral("win7-explorer-viewsrc"), KConfig::SimpleConfig);
+        const auto group = folderView(config);
+        bool validView, validSort;
+        int index = group.readEntry("View", QStringLiteral("1")).toInt(&validView);
+        int sort = group.readEntry("Sort", QString::number(defaultSort)).toInt(&validSort);
+        if (!validView || index < 0 || index >= views->actions().size()) {
+            qWarning("Explorer: invalid View in win7-explorer-viewsrc");
+            index = 1;
+        }
+        const int role = sort & ~int(QDir::DirsFirst | QDir::Reversed);
+        if (!validSort || (role != QDir::Name && role != QDir::Time && role != QDir::Size && role != QDir::Type)) {
+            qWarning("Explorer: invalid Sort in win7-explorer-viewsrc");
+            sort = defaultSort;
+        }
+        setView(index);
+        files->setSorting(QDir::SortFlags::fromInt(sort));
+        syncSortHeader();
+    }
+
     void setView(int index)
     {
+        if (viewIndex == index)
+            return;
+        viewIndex = index;
         static const int sizes[] = {256, 96, 48, 16, 16, 16};
         static const char *icons[] = {"view-extra-large", "view-large", "view-medium", "view-small", "view-list", "view-details"};
         const auto mode = index < 3 ? KDirOperator::ViewIconsView : index < 5 ? KDirOperator::ViewCompactView : KDirOperator::ViewDetailsView;
         files->action(mode)->trigger();
         files->setIconSize(sizes[index]);
+        // A new KIO view can start with the preview size despite a matching cached zoom.
+        files->view()->setIconSize(QSize(sizes[index], sizes[index]));
         iconSize = index < 3 ? sizes[index] : 0;
         views->actions()[index]->setChecked(true);
         bar->right[0].icon = assetIcon(QString::fromLatin1(icons[index]));
@@ -787,6 +872,7 @@ private:
 
     void entered(const QUrl &url)
     {
+        restoreFolderView();
         const QString file = url.adjusted(QUrl::StripTrailingSlash).fileName();
         const QString name = url.path() == QLatin1String("/") && url.isLocalFile() ? QStringLiteral("Computer") : file.isEmpty() ? url.toDisplayString() : file;
         setWindowTitle(name);
