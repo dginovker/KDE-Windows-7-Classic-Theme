@@ -66,15 +66,16 @@ public:
         root->addLayout(footer);
         footerLayout = footer;
         viewport = scroll;
-        connect(this, &KPageDialog::currentPageChanged, scroll, [scroll, tabs = QPointer(ui.tabs)] {
-            if (tabs)
-                scroll->ensureWidgetVisible(tabs->tabBar(), 0, 0);
+        installedPage = page;
+        installedButtons = buttons;
+        connect(this, &KPageDialog::currentPageChanged, this, [this, tabs = QPointer(ui.tabs)] {
+            if (viewport && tabs && viewport->isAncestorOf(tabs))
+                viewport->ensureWidgetVisible(tabs->tabBar(), 0, 0);
         });
 
         // Drop KIO's construction-time minimum once. The layout owns the minimum thereafter.
         setMinimumSize(0, 0);
-        syncPresentation();
-        fit(true);
+        refresh(true);
     }
 
 private:
@@ -92,6 +93,8 @@ private:
 
     QPointer<PropertiesViewport> viewport;
     QPointer<QLayout> footerLayout;
+    QPointer<KPageWidget> installedPage;
+    QPointer<QDialogButtonBox> installedButtons;
     QMetaObject::Connection workAreaChanged;
     std::vector<std::function<void()>> undoPresentation;
     QPointer<QWidget> general, identity, storage;
@@ -149,33 +152,33 @@ private:
 
     bool classic() const { return QApplication::style()->name() == QStringLiteral("win7classic"); }
 
+    void restorePresentation()
+    {
+        for (QWidget *w : {general.data(), identity.data(), storage.data()}) {
+            if (w) {
+                w->removeEventFilter(this);
+                w->update();
+            }
+        }
+        for (auto it = undoPresentation.rbegin(); it != undoPresentation.rend(); ++it)
+            (*it)();
+        undoPresentation.clear();
+    }
+
     void syncPresentation()
     {
         if (classic() == !undoPresentation.empty())
             return;
         if (!classic()) {
-            for (QWidget *w : {general.data(), identity.data(), storage.data()}) {
-                if (w) {
-                    w->removeEventFilter(this);
-                    w->update();
-                }
-            }
-            for (auto it = undoPresentation.rbegin(); it != undoPresentation.rend(); ++it)
-                (*it)();
-            undoPresentation.clear();
+            restorePresentation();
             return;
         }
 
         const General ui = generalPage();
-        auto *page = pageWidget();
-        auto *buttons = buttonBox();
         if (!ui.grid)
             return;
-        if (!layout() || !footerLayout || !page->layout() || !buttons || !buttons->layout()
-            || footerLayout->indexOf(buttons) < 0) {
-            incompatible("dialog/footer ownership after style change");
-            return;
-        }
+        auto *page = installedPage.data();
+        auto *buttons = installedButtons.data();
         // Measurements in logical pixels from reference/screenshots/w7-properties.png.
         change(ui.tabs, &QTabWidget::documentMode, &QTabWidget::setDocumentMode, false);
         change(ui.tabs->tabBar(), &QTabBar::expanding, &QTabBar::setExpanding, false);
@@ -242,6 +245,24 @@ private:
             resize(bounded);
     }
 
+    void refresh(bool preferred)
+    {
+        if (!viewport || !footerLayout || !installedPage || !installedButtons || pageWidget() != installedPage
+            || buttonBox() != installedButtons || !layout() || layout()->indexOf(viewport) < 0
+            || layout()->indexOf(footerLayout) < 0 || viewport->widget() != installedPage
+            || installedPage->pageFooter() || !installedPage->layout() || !installedButtons->layout()
+            || footerLayout->indexOf(installedButtons) < 0) {
+            // KPageDialog can reinstall its layout. Don't restyle or fit a tree it no longer owns.
+            viewport.clear();
+            disconnect(workAreaChanged);
+            restorePresentation();
+            incompatible("installed page/footer ownership");
+            return;
+        }
+        syncPresentation();
+        fit(preferred);
+    }
+
     void queueRefresh()
     {
         if (!viewport || queued)
@@ -249,8 +270,7 @@ private:
         queued = true;
         QTimer::singleShot(0, this, [this] {
             queued = false;
-            syncPresentation();
-            fit(firstShow && isVisible());
+            refresh(firstShow && isVisible());
             if (isVisible())
                 firstShow = false;
         });
