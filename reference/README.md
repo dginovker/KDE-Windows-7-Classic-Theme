@@ -16,6 +16,8 @@ Menu-state scenes `desktop-view-submenu`, `explorer-view-submenu`, `desktop-view
 
 For #48, `explorer-jumplist --check` reproduced the 32×32 window icon at (117,763). Classic-demo and its Projects subfolder match `imageres.dll` group 3; Downloads, Computer, Network, Desktop and Libraries use their respective location icons. The closed pin and the jump list's Windows Explorer launch action instead use the blue-stand `explorer.exe` icon (`ICO_MYCOMPUTER`). KWin already gets Explorer's location icon for the window; Plasma 6.8 Wayland TaskManager's `DecorationRole` prefers the desktop-entry icon. The Classic taskbar therefore reads the window icon by compositor UUID only for running Explorer windows, retaining the app icon for launches.
 
+For #41, `w7-explorer-empty-icons.png` and `w7-explorer-empty-details.png` are unchanged crops of the genuine Explorer file pane at (420,210)–(1020,280). Open Classic-demo → Documents (`explorer-back` scene), then use the toolbar View menu to choose Large Icons and Details in turn. At 96 DPI, the first text ink is 17px below the file pane top in Large Icons and 17px below the painted header in Details. A 120px narrower Details window retained the gap and shifted the message 60px left. The 150% Plasma regression checks logical placement, not a native 150% pixel match.
+
 ## Native fixture
 
 Windows 7 Ultimate SP1 x64, Classic, 1280×800, 96 DPI, Never combine, large icons:

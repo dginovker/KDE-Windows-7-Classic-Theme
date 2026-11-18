@@ -752,6 +752,7 @@ public:
         column->addWidget(details);
 
         empty = new QLabel(QStringLiteral("This folder is empty."), files);
+        empty->setAttribute(Qt::WA_TransparentForMouseEvents);
         empty->hide();
 
         connect(files, &KDirOperator::urlEntered, this, &Explorer::entered);
@@ -767,6 +768,7 @@ public:
                 view->setVerticalScrollBarPolicy(max > 0 ? Qt::ScrollBarAlwaysOn : Qt::ScrollBarAlwaysOff);
             });
             view->installEventFilter(this);
+            view->viewport()->installEventFilter(this);
             if (auto *tree = qobject_cast<QTreeView *>(view)) {
                 explorerColumns(tree);
                 connect(tree->header(), &QHeaderView::sortIndicatorChanged, this, [this](int column, Qt::SortOrder order) {
@@ -781,6 +783,12 @@ public:
             }
             connect(view->selectionModel(), &QItemSelectionModel::selectionChanged, this, &Explorer::updateDetails);
             connect(view->selectionModel(), &QItemSelectionModel::selectionChanged, this, &Explorer::updateActions);
+            // Loading and selection alone miss additions/removals in a folder that's already open.
+            constexpr auto connection = Qt::ConnectionType(Qt::QueuedConnection | Qt::UniqueConnection);
+            connect(view->model(), &QAbstractItemModel::rowsInserted, this, &Explorer::updateDetails, connection);
+            connect(view->model(), &QAbstractItemModel::rowsRemoved, this, &Explorer::updateDetails, connection);
+            connect(view->model(), &QAbstractItemModel::modelReset, this, &Explorer::updateDetails, connection);
+            QTimer::singleShot(0, this, &Explorer::updateDetails);
         });
         connect(QApplication::clipboard(), &QClipboard::dataChanged, this, &Explorer::updateActions);
         connect(KIO::FileUndoManager::self(), &KIO::FileUndoManager::undoAvailable, this, &Explorer::updateActions);
@@ -819,7 +827,13 @@ protected:
     // KDirOperator's icon view sizes its grid from the font after every resize; Explorer's grid is reapplied after it.
     bool eventFilter(QObject *watched, QEvent *event) override
     {
-        if (watched != files->view())
+        auto *view = files->view();
+        if (!view)
+            return false;
+        if ((watched == view || watched == view->viewport())
+            && (event->type() == QEvent::Move || event->type() == QEvent::Resize))
+            QTimer::singleShot(0, this, &Explorer::layoutEmptyMessage);
+        if (watched != view)
             return false;
         if (event->type() == QEvent::Resize)
             QTimer::singleShot(0, this, &Explorer::applyGrid);
@@ -1092,12 +1106,25 @@ private:
                                  : QStringLiteral("%1 item%2").arg(total).arg(total == 1 ? "" : "s");
         details->update();
         empty->setVisible(total == 0);
-        if (total == 0) {
-            const int top = qobject_cast<QTreeView *>(files->view()) ? static_cast<QTreeView *>(files->view())->header()->height() : 0;
-            empty->adjustSize();
-            empty->move((files->width() - empty->width()) / 2, top + 16);
-            empty->raise();
+        layoutEmptyMessage();
+    }
+
+    void layoutEmptyMessage()
+    {
+        if (empty->isHidden())
+            return;
+        auto *view = files->view();
+        QPoint top;
+        if (auto *tree = qobject_cast<QTreeView *>(view); tree && !tree->header()->isHidden()) {
+            // The painted header ends before the blank row inset (w7-explorer-empty-details.png).
+            auto *headerFace = tree->header()->viewport();
+            top.setY(headerFace->mapTo(view, QPoint(0, headerFace->height())).y());
         }
+        empty->adjustSize();
+        top.rx() += (view->width() - empty->width()) / 2;
+        top.ry() += 16;
+        empty->move(view->mapTo(files, top));
+        empty->raise();
     }
 
     void updateActions()
