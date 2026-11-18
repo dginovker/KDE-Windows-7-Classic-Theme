@@ -14,6 +14,8 @@ Menu-state scenes `desktop-view-submenu`, `explorer-view-submenu`, `desktop-view
 
 `shutdown-menu` is the original issue #29 target (683165a). `shutdown-menu-selected` captures Restart selected by keyboard, with the pointer off the popup; both reproduce with `--check`. The owned popup is 109×142 at (340,607), with 20px rows and two 8px separator blocks. Tests exclude text (Wine Tahoma), the original pointer and the external compositor shadow (#30), not the frame or separator pixels.
 
+For #48, `explorer-jumplist --check` reproduced the 32×32 window icon at (117,763). Classic-demo and its Projects subfolder match `imageres.dll` group 3; Downloads, Computer, Network, Desktop and Libraries use their respective location icons. The closed pin and the jump list's Windows Explorer launch action instead use the blue-stand `explorer.exe` icon (`ICO_MYCOMPUTER`). KWin already gets Explorer's location icon for the window; Plasma 6.8 Wayland TaskManager's `DecorationRole` prefers the desktop-entry icon. The Classic taskbar therefore reads the window icon by compositor UUID only for running Explorer windows, retaining the app icon for launches.
+
 ## Native fixture
 
 Windows 7 Ultimate SP1 x64, Classic, 1280×800, 96 DPI, Never combine, large icons:

@@ -131,6 +131,13 @@ PlasmoidItem {
                     required property var model
                     required property int index
                     readonly property bool launcher: model.IsLauncher === true
+                    // TaskManager's decoration is the desktop-entry icon even on Explorer windows.
+                    readonly property bool explorerWindow: model.IsWindow === true && model.IsGroupParent !== true
+                        && model.AppId === "org.win7classic.explorer"
+                    Classic.TaskWindowIcon {
+                        id: windowIcon
+                        uuid: task.explorerWindow ? task.model.WinIdList[0] : ""
+                    }
                     readonly property bool active: model.IsActive === true && model.IsMinimized !== true
                     readonly property bool sunken: (active && !launcher) || mouse.pressed || (taskMenu.visible && taskMenu.taskButton === task)
                     readonly property int shift: sunken ? 1 : 0
@@ -155,7 +162,8 @@ PlasmoidItem {
                             x: (task.launcher ? (task.width - 32) / 2 : 3) + task.shift
                             y: 3 + task.shift
                             width: 32; height: 32
-                            source: task.model.decoration
+                            visible: !task.explorerWindow || windowIcon.ready
+                            source: task.explorerWindow ? windowIcon.icon : task.model.decoration
                         }
                         Text {
                             visible: !task.launcher

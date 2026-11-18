@@ -8,8 +8,8 @@ arch=(x86_64)
 url='https://github.com/dginovker/KDE-Windows-7-Classic-Theme'
 # Wine's Tahoma (bundled font) is LGPL; everything else is GPL.
 license=('GPL-3.0-or-later' 'LGPL-2.1-or-later')
-depends=('plasma-workspace>=6.8' 'kwin>=6.8' 'kio' 'python' 'dconf' 'dbus' 'glib2' 'qt6-tools')
-makedepends=('wine' 'cmake' 'extra-cmake-modules')
+depends=('plasma-workspace>=6.8' 'kwin>=6.8' 'kio' 'python' 'dconf' 'dbus' 'glib2' 'qt6-tools' 'qt6-wayland' 'wayland')
+makedepends=('wine' 'cmake' 'extra-cmake-modules' 'plasma-wayland-protocols')
 options=(!debug)
 install=win7-classic.install
 
