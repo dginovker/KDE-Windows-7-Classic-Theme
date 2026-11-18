@@ -70,7 +70,8 @@ def assert_disabled_shortcut(image):
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     vmctl.start(VM)
-    install()
+    if '--installed' not in sys.argv:
+        install()
     toggle('windows')
     vmctl.transfer(VM, 'put', str(ROOT / 'tests/fixture_menus.py'), '/tmp/fixture_menus.py')
     vmctl.run(VM, 'chmod 644 /tmp/fixture_menus.py', 10)
