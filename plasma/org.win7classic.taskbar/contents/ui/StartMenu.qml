@@ -182,9 +182,19 @@ PlasmaCore.Dialog {
                     required property var model
                     required property int index
                     readonly property bool selected: menu.current === index
+                    readonly property bool expandable: menu.programChild(programList.model, index) !== null
                     width: 248; height: 18
                     Rectangle { x: 1; width: 246; height: 18; color: menu.highlight; visible: parent.selected }
-                    Kirigami.Icon { x: 4; y: 1; width: 16; height: 16; source: model.decoration; selected: parent.selected }
+                    Image {
+                        x: 4; y: 1; width: 16; height: 16
+                        visible: parent.expandable
+                        source: "assets/program-group.png"
+                    }
+                    Kirigami.Icon {
+                        x: 4; y: 1; width: 16; height: 16
+                        visible: !parent.expandable
+                        source: model.decoration; selected: parent.selected
+                    }
                     Label { x: 24; width: 220; height: 18; text: model.display; color: parent.selected ? "white" : "black" }
                     MouseArea {
                         anchors.fill: parent; hoverEnabled: true
@@ -462,10 +472,14 @@ PlasmaCore.Dialog {
         }
         current = -1;
     }
+    function programChild(model, row) {
+        const child = model.modelForRow(row);
+        return child && child.count !== undefined ? child : null;
+    }
     function activateProgram(row) {
         const model = programsModel || programs;
-        const child = model.modelForRow(row);
-        if (child && child.count !== undefined) {
+        const child = programChild(model, row);
+        if (child) {
             programsPath = programsPath.concat([child]);
             programsModel = child;
             current = -1;

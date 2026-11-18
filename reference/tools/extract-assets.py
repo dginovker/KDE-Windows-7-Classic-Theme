@@ -156,6 +156,10 @@ def main():
     (ASSETS / 'assets.qrc').write_text('<RCC><qresource prefix="/explorer">\n' + ''.join(
         f'  <file>{p.name}</file>\n' for p in sorted(ASSETS.glob('*.png'))) + '</qresource></RCC>\n')
     taskbar = ROOT / 'plasma/org.win7classic.taskbar/contents/ui'
+    # The 16px folder matches Accessories in w7-programs.png; ship both sizes with the applet
+    # so category artwork doesn't depend on the active icon theme.
+    for size, suffix in ((16, ''), (32, '@2x')):
+        icons['folder'][size].save(taskbar / f'assets/program-group{suffix}.png')
     for name, box in {'pin': (86, 702, 102, 718), 'close': (86, 724, 102, 740)}.items():
         icon = shot('explorer-jumplist').crop(box).convert('RGBA')
         for y in range(icon.height):
@@ -163,7 +167,7 @@ def main():
                 if icon.getpixel((x, y))[:3] == (212, 208, 200):
                     icon.putpixel((x, y), (0, 0, 0, 0))
         icon.save(taskbar / f'jumplist-{name}.png')
-    print(f'{len(list(ASSETS.glob("*.png")))} Explorer assets, {len(list(THEME.rglob("*.png")))} theme icons, 2 jump-list icons')
+    print(f'{len(list(ASSETS.glob("*.png")))} Explorer assets, {len(list(THEME.rglob("*.png")))} theme icons, 4 taskbar assets')
 
 
 if __name__ == '__main__':
