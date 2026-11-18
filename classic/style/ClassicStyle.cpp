@@ -186,7 +186,8 @@ private:
     }
     void addMenuShadow(QObject *object) {
         auto *menu=qobject_cast<QMenu *>(object);
-        if(!menu || menu->testAttribute(Qt::WA_SetStyle) || menu->windowType()!=Qt::Popup
+        // An inherited stylesheet proxy can wrap another style without setting WA_SetStyle.
+        if(!menu || menu->style()!=this || menu->windowType()!=Qt::Popup
            || menu->windowFlags().testFlag(Qt::NoDropShadowWindowHint)
            || !QGuiApplication::platformName().startsWith(QLatin1String("wayland"))) return;
         auto *window=menu->windowHandle();
