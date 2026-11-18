@@ -32,6 +32,7 @@
 #include <QDateTime>
 #include <QDir>
 #include <QDragEnterEvent>
+#include <QEnterEvent>
 #include <QFontMetricsF>
 #include <QHeaderView>
 #include <QLabel>
@@ -43,6 +44,7 @@
 #include <QMouseEvent>
 #include <QPainter>
 #include <QRegularExpression>
+#include <QScreen>
 #include <QSortFilterProxyModel>
 #include <QScrollBar>
 #include <QSignalBlocker>
@@ -342,6 +344,14 @@ protected:
     virtual bool pressOpens(int) const { return false; }
 };
 
+static QString locationName(const QUrl &url)
+{
+    if (url.isLocalFile() && url.path() == QLatin1String("/"))
+        return QStringLiteral("Computer");
+    const QString name = url.adjusted(QUrl::StripTrailingSlash).fileName();
+    return name.isEmpty() ? url.toDisplayString() : name;
+}
+
 // Back/Forward, the breadcrumb address bar with Refresh, and the search box: rows 1-36 of the reference client area.
 class NavigationBand : public Painted
 {
@@ -355,6 +365,20 @@ public:
     NavigationBand()
     {
         setFixedHeight(36);
+        // A separate, input-transparent window can extend past the painted bar without grabbing focus.
+        tip.setTextFormat(Qt::PlainText);
+        tip.setAttribute(Qt::WA_ShowWithoutActivating);
+        QFont tipFont(QStringLiteral("Tahoma"));
+        tipFont.setPixelSize(11);
+        tip.setFont(tipFont);
+        tip.setStyleSheet(QStringLiteral("background: #ffffe1; color: black; border: 1px solid black; padding: 0 1px"));
+        tipDwell.setSingleShot(true);
+        tipExpiry.setSingleShot(true);
+        connect(&tipDwell, &QTimer::timeout, this, [this] {
+            if (window()->isActiveWindow() && partAt(tipPointer) == tipPart)
+                showNavigationTip();
+        });
+        connect(&tipExpiry, &QTimer::timeout, &tip, &QLabel::hide);
         search->setFrame(false);
         search->setTextMargins(5, 0, 0, 0);
         // Windows draws the cue text in the window text color, not greyed.
@@ -370,11 +394,14 @@ public:
         connect(address, &QLineEdit::editingFinished, address, &QWidget::hide);
     }
 
-    void setState(const QUrl &url, bool canBack, bool canForward)
+    void setState(const QUrl &url, const QUrl &backUrl, const QUrl &forwardUrl)
     {
+        clearNavigationTip();
         location = url;
-        backEnabled = canBack;
-        forwardEnabled = canForward;
+        backDestination = backUrl;
+        forwardDestination = forwardUrl;
+        backEnabled = !backUrl.isEmpty();
+        forwardEnabled = !forwardUrl.isEmpty();
         address->hide();
         layoutParts();
     }
@@ -424,6 +451,30 @@ protected:
 
     bool pressOpens(int part) const override { return part >= HistoryPart; }
 
+    void enterEvent(QEnterEvent *event) override { trackNavigationTip(event->position().toPoint()); }
+    void mouseMoveEvent(QMouseEvent *event) override
+    {
+        Painted::mouseMoveEvent(event);
+        if (!event->buttons())
+            trackNavigationTip(event->position().toPoint());
+    }
+    void leaveEvent(QEvent *event) override
+    {
+        clearNavigationTip();
+        Painted::leaveEvent(event);
+    }
+    void mousePressEvent(QMouseEvent *event) override
+    {
+        clearNavigationTip();
+        Painted::mousePressEvent(event);
+    }
+    bool event(QEvent *event) override
+    {
+        if (event->type() == QEvent::WindowDeactivate || event->type() == QEvent::Hide)
+            clearNavigationTip();
+        return Painted::event(event);
+    }
+
 private:
     enum { BackPart, ForwardPart, SearchPart, RefreshPart, EditPart, HistoryPart };  // crumb parts follow HistoryPart
     struct Crumb {
@@ -431,10 +482,51 @@ private:
         QUrl url;
         QRect text, arrow;
     };
-    QUrl location;
+    QUrl location, backDestination, forwardDestination;
     bool backEnabled = false, forwardEnabled = false;
     QList<Crumb> crumbs;
     QLineEdit *address = new QLineEdit(this);
+    QLabel tip{this, Qt::ToolTip | Qt::WindowDoesNotAcceptFocus | Qt::WindowTransparentForInput};
+    QTimer tipDwell, tipExpiry;
+    int tipPart = -1;
+    QPoint tipPointer;
+
+    void clearNavigationTip()
+    {
+        tipDwell.stop();
+        tipExpiry.stop();
+        tip.hide();
+        tipPart = -1;
+    }
+    void trackNavigationTip(const QPoint &position)
+    {
+        const int part = partAt(position);
+        if (part != tipPart) {
+            clearNavigationTip();
+            if (part == BackPart || part == ForwardPart) {
+                tipPart = part;
+                tipDwell.start(700);
+            }
+        }
+        tipPointer = position;
+    }
+    void showNavigationTip()
+    {
+        const QRect screen = this->screen()->geometry();
+        const bool back = tipPart == BackPart;
+        const QUrl &destination = back ? backDestination : forwardDestination;
+        const QString name = locationName(destination.adjusted(QUrl::RemoveUserInfo));
+        const QString label = back ? tr("Back to %1").arg(name) : tr("Forward to %1").arg(name);
+        tip.setText(tip.fontMetrics().elidedText(label, Qt::ElideRight, screen.width() - 4));
+        tip.resize(std::min(screen.width(), tip.sizeHint().width()), 16);
+        QPoint at = mapToGlobal(tipPointer);
+        at.setX(std::clamp(at.x(), screen.left(), screen.right() - tip.width() + 1));
+        // Win32 anchors below the cursor hotspot unless the tip would run off-screen.
+        at.setY(at.y() + 21 + tip.height() <= screen.bottom() + 1 ? at.y() + 21 : at.y() - tip.height());
+        tip.move(at);
+        tip.show();
+        tipExpiry.start(5000);
+    }
 
     QRect addressBox() const { return QRect(74, 7, width() - 324, 22); }
 
@@ -1232,8 +1324,7 @@ private:
     void entered(const QUrl &url)
     {
         restoreFolderView();
-        const QString file = url.adjusted(QUrl::StripTrailingSlash).fileName();
-        const QString name = url.path() == QLatin1String("/") && url.isLocalFile() ? QStringLiteral("Computer") : file.isEmpty() ? url.toDisplayString() : file;
+        const QString name = locationName(url);
         setWindowTitle(name);
         const QIcon icon = QIcon::fromTheme(KIO::iconNameForUrl(url));
         // As pixels: given a theme icon, Qt sends KWin only its name, and KWin looks it up in its own icon theme,
@@ -1250,7 +1341,7 @@ private:
         }
         nav->search->clear();
         nav->search->setPlaceholderText(QStringLiteral("Search ") + name);
-        nav->setState(url, position > 0, position < history.size() - 1);
+        nav->setState(url, history.value(position - 1), history.value(position + 1));
         pane->setLocation(url);
         updateDetails();
     }
