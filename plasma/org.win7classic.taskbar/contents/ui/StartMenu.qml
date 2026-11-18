@@ -1,5 +1,6 @@
 import QtCore
 import QtQuick
+import QtQuick.Window
 import "../../../../../win7-classic/primitives2" as Classic
 import org.kde.plasma.core as PlasmaCore
 import org.kde.plasma.plasmoid
@@ -361,11 +362,67 @@ PlasmaCore.Dialog {
                 x: 0; width: 71; height: 23
                 hoverEnabled: true
                 activeFocusOnTab: true
+                readonly property bool tipHovered: menu.visible && !shutdownMenu.visible && containsMouse && !pressed
+                onTipHoveredChanged: {
+                    if (tipHovered) {
+                        shutdownDwell.restart();
+                    } else {
+                        shutdownDwell.stop();
+                        shutdownExpiry.stop();
+                        shutdownTip.visible = false;
+                    }
+                }
                 // Confirmation protects unsaved work from a misplaced click or key.
                 function confirm() { menu.close(); menu.runCommand("org.kde.LogoutPrompt", "/LogoutPrompt", "org.kde.LogoutPrompt", "promptShutDown", [], "()"); }
                 onClicked: confirm()
                 Keys.onReturnPressed: confirm()
                 Keys.onSpacePressed: confirm()
+            }
+            Timer {
+                id: shutdownDwell
+                interval: 700
+                onTriggered: {
+                    shutdownTip.showAt(shutdownMain.mapToGlobal(shutdownMain.mouseX, shutdownMain.mouseY));
+                    shutdownExpiry.restart();
+                }
+            }
+            Timer {
+                id: shutdownExpiry
+                interval: 5000
+                onTriggered: shutdownTip.visible = false
+            }
+            PlasmaCore.Dialog {
+                id: shutdownTip
+                type: PlasmaCore.Dialog.Tooltip
+                transientParent: menu
+                flags: Qt.ToolTip | Qt.WindowDoesNotAcceptFocus | Qt.WindowTransparentForInput
+                backgroundHints: PlasmaCore.Dialog.NoBackground
+                location: PlasmaCore.Types.Floating
+                function showAt(pointer) {
+                    const left = shutdownMain.Screen.virtualX;
+                    x = Math.max(left, Math.min(pointer.x, left + shutdownMain.Screen.width - body.width));
+                    // Wayland constrains the popup to the work area. Keep it clear of the control
+                    // rather than requesting the Windows position over the taskbar and being slid upwards.
+                    y = shutdownMain.mapToGlobal(0, 0).y - body.height - 3;
+                    visible = true;
+                }
+                mainItem: Classic.Raster {
+                    id: body
+                    width: Math.min(Math.ceil(shutdownTipText.implicitWidth) + 10, shutdownMain.Screen.width)
+                    height: Math.max(24, Math.ceil(shutdownTipText.implicitHeight) + 10)
+                    fill: "#ffffe1"
+                    flatBorder: true
+                    Text {
+                        id: shutdownTipText
+                        x: 5; width: parent.width - 10; height: parent.height
+                        text: qsTr("Closes all open programs, shuts down Windows, and then turns off your computer.")
+                        font: menu.uiFont
+                        color: "black"
+                        wrapMode: Text.WordWrap
+                        verticalAlignment: Text.AlignVCenter
+                        renderType: Text.NativeRendering
+                    }
+                }
             }
             MouseArea {
                 id: shutdownArrow
