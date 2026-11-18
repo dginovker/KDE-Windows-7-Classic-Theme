@@ -56,6 +56,7 @@
 #include <QSignalBlocker>
 #include <QSplitter>
 #include <QStandardPaths>
+#include <QStyle>
 #include <QStyledItemDelegate>
 #include <QTimer>
 #include <QTreeView>
@@ -736,6 +737,7 @@ public:
         QIcon icon;
         QMenu *menu = nullptr;
         std::function<void()> act;
+        QActionGroup *menuAnchorActions = nullptr;
     };
     QList<Command> left, right;
     void setOpen(bool selected, const QString &icon, QMenu *menu)
@@ -852,10 +854,19 @@ private:
     {
         // Keep the main action on the text/icon and the menu on the trailing arrow.
         const QPoint cursor = mapFromGlobal(QCursor::pos());
-        if (command.menu && (!command.act || cursor.x() >= x + width - 21))
-            command.menu->exec(mapToGlobal(QPoint(x, 29)));
-        else
+        if (command.menu && (!command.act || cursor.x() >= x + width - 21)) {
+            auto *menu = command.menu;
+            if (command.menuAnchorActions && menu->style()->name().compare(QStringLiteral("Win7Classic"), Qt::CaseInsensitive) == 0) {
+                // Explorer opens View with the current choice beside the command, subject to popup constraints.
+                auto *selected = command.menuAnchorActions->checkedAction();
+                const int rowHeight = menu->actionGeometry(selected).height();
+                menu->exec(mapToGlobal(QPoint(x, 15 - rowHeight / 2)), selected);
+            } else {
+                menu->exec(mapToGlobal(QPoint(x, 29)));
+            }
+        } else {
             command.act();
+        }
     }
 };
 
@@ -1407,7 +1418,7 @@ private:
                      {QStringLiteral("Share with"), {}, share, {}},
                      {QStringLiteral("New folder"), {}, nullptr, [this] { files->mkdir(); }}};
         bar->right = {{QStringLiteral("View"), assetIcon(QStringLiteral("view-large")), viewMenu,
-                       [this] { chooseView((viewIndex + 1) % views->actions().size()); }},
+                       [this] { chooseView((viewIndex + 1) % views->actions().size()); }, views},
                       {QStringLiteral("Preview pane"), assetIcon(QStringLiteral("preview-pane")), nullptr,
                        [this] { files->action(KDirOperator::ShowPreviewPanel)->trigger(); }},
                       {QStringLiteral("Help"), assetIcon(QStringLiteral("help")), nullptr, [this] { openUrl(QUrl(QStringLiteral("help:/"))); }}};
