@@ -45,9 +45,17 @@ def activate(pid, place=None):
                     const g = w.frameGeometry;
                     emit(g.x, g.y, g.width, g.height);
                 }}''')
-            return len(geometry) == 1 and tuple(map(float, geometry[0])) == place
+            if len(geometry) != 1:
+                return False
+            actual[:] = tuple(map(float, geometry[0]))
+            # KWin rounds the server decoration/frame to physical pixels at fractional scale.
+            return all(abs(a - b) <= 1 for a, b in zip(actual, place))
 
-        wait_for(placed, f'Wayland acknowledges fixture frame {place}')
+        actual = []
+        try:
+            wait_for(placed, f'Wayland acknowledges fixture frame {place}')
+        finally:
+            print(f'Fixture frame: requested {place}, observed {actual}', flush=True)
 
 
 def exercise(out, scale, root, resume):
