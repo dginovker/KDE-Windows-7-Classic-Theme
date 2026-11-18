@@ -120,7 +120,13 @@ remove_lock_overlay() {
     return 0
 }
 
-copy_files() { for f in "${FILES[@]}"; do if [[ -e $1/$f ]]; then cp -p "$1/$f" "$2/$f"; else rm -f "$2/$f"; fi; done; }
+copy_files() {
+    local f
+    for f in "${FILES[@]}"; do
+        if [[ -e $1/$f ]]; then cp -p "$1/$f" "$2/$f" || return "$?"
+        else rm -f "$2/$f" || return "$?"; fi
+    done
+}
 
 preflight_windows() {
     [[ -f /usr/lib/qt6/plugins/styles/libwin7classicstyle.so ]] || die "system-wide Win7Classic Qt style is missing; run: cd packaging && makepkg -si"
@@ -174,10 +180,14 @@ switch_to() {
     rm -rf "$state/profiles/$from" && mv "$state/profiles/$from.new" "$state/profiles/$from"
     log "saved $from: $(digest "$state/profiles/$from") $(cd "$state/profiles/$from" && sha256sum keys.json 2>/dev/null)"
 
-    local problem=""
-    if [[ -d $state/profiles/$target ]]; then
-        copy_files "$state/profiles/$target" "$config"
-        if [[ $target == windows ]]; then
+    local problem="" failure_status=1 appearance_dir=$state/profiles/$target out
+    if [[ -d $appearance_dir ]]; then
+        if out=$(copy_files "$appearance_dir" "$config" 2>&1); then :
+        else
+            failure_status=$?
+            problem="copying saved $target layout failed (exit $failure_status)${out:+: $out}"
+        fi
+        if [[ -z $problem && $target == windows ]]; then
             local migrated backup migration_status
             if migrated=$("$share/windows/migrate-quicklaunch" --check "$config/plasma-org.kde.plasma.desktop-appletsrc" 2>&1); then
                 if [[ -n $migrated ]]; then
@@ -198,20 +208,36 @@ switch_to() {
                 problem="Quick Launch migration check failed (exit $migration_status): $migrated"
             fi
         fi
-        [[ -n $problem ]] || load_appearance $target "$state/profiles/$target"
+        if [[ -z $problem && $target == windows ]]; then
+            local tray_layout
+            if tray_layout=$(python3 "$share/windows/tray_layout.py" "$config/plasma-org.kde.plasma.desktop-appletsrc" 2>&1); then
+                [[ -z $tray_layout ]] || log "$tray_layout"
+            else
+                failure_status=$?
+                problem="System Tray layout migration failed (exit $failure_status)${tray_layout:+: $tray_layout}"
+            fi
+        fi
     else
         # First use of a mode: build it from the layout being left, plus the mode's shipped files (e.g. panel theme).
         for f in "${FILES[@]}"; do [[ ! -e $share/$target/$f ]] || cp "$share/$target/$f" "$config/$f"; done
-        local out
         if out=$("$share/$target/seed" "$config" 2>&1); then log "seeded $target: $(tr '\n' ' ' <<< "$out")"
-        else problem="seeding $target failed: $out"; fi
-        load_appearance "$target" "$share/$target"
+        else
+            failure_status=$?
+            problem="seeding $target failed (exit $failure_status)${out:+: $out}"
+        fi
+        appearance_dir=$share/$target
     fi
+    [[ -n $problem ]] || load_appearance "$target" "$appearance_dir"
     if [[ -n $problem ]]; then :
     elif ! start_shell; then
         problem="plasmashell did not start"
     else
-        local bad; bad=$(unknown_widgets); [[ -z $bad ]] || problem="unknown widgets: $bad"
+        if out=$(unknown_widgets); then
+            [[ -z $out ]] || problem="unknown widgets: $out"
+        else
+            failure_status=$?
+            problem="querying $target panel widgets failed (exit $failure_status)"
+        fi
     fi
     if [[ -z $problem && $target == windows ]]; then
         systemd-run --user --wait --pipe --collect -q "$probe" >> "$state/switch.log" || problem="effective Win7Classic style/palette check failed (see switch.log)"
@@ -234,10 +260,11 @@ switch_to() {
     if [[ -n $problem ]]; then
         log "rolling back to $from: $problem"
         stop_shell
-        copy_files "$state/profiles/$from" "$config"
+        copy_files "$state/profiles/$from" "$config" || die "rollback could not copy the $from layout; run: win7-classic restore"
         load_appearance $from "$state/profiles/$from"
         start_shell || die "rollback could not start plasmashell; run: win7-classic restore"
-        die "switch to $target failed ($problem); still in $from mode"
+        log "ERROR: switch to $target failed ($problem); still in $from mode"
+        return "$failure_status"
     fi
     echo "$target" > "$state/mode"
     log "now in $target mode: $(digest "$config")"
@@ -273,7 +300,7 @@ rebuild() {
 
 case ${1:-} in
     windows|current) switch_to "$1" ;;
-    toggle) [[ $(mode) == current ]] && switch_to windows || switch_to current ;;
+    toggle) if [[ $(mode) == current ]]; then switch_to windows; else switch_to current; fi ;;
     restore) restore ;;
     rebuild) rebuild ;;
     status) mode ;;

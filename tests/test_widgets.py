@@ -103,9 +103,14 @@ def main():
     wait_for(lambda: any('kate' in cls for cls in windows()), 'folded popup launcher opens Kate')
     close_test_apps()
     print('Quick Launch and its popup folded into deduplicated working taskbar pins; Dolphin opens Explorer')
-    for plugin in ('org.kde.plasma.pager', 'local.win7test.note', 'org.kde.plasma.systemtray'):
+    for plugin in ('org.kde.plasma.pager', 'local.win7test.note'):
         assert widget_groups(after, plugin) == widget_groups(before, plugin), f'{plugin} config changed'
-    print('pager, custom widget and tray carried over with byte-identical config, before the notification area')
+    tray = 'org.kde.plasma.systemtray'
+    after_tray = widget_groups(after, tray)
+    for setting in ('reverseIconOrder=true', 'iconSpacing=1'):
+        after_tray['[General]'].remove(setting)
+    assert after_tray == widget_groups(before, tray), 'non-presentation System Tray config changed'
+    print('pager, custom widget and stock tray settings carried over; only the tray presentation defaults changed')
 
     vmctl.pointer(VM, 640, 600)
     time.sleep(1)

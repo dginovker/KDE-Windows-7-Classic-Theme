@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'toggle/windows'))
 migration = SourceFileLoader('quicklaunch_migration', str(ROOT / 'toggle/windows/migrate-quicklaunch')).load_module()
 from launchers import normalize_launchers
+import layout
 
 FIXTURE = ROOT / 'tests/fixtures/legacy-quicklaunch-appletsrc'
 PINS = 'applications:org.kde.konsole.desktop,applications:firefox.desktop,applications:org.win7classic.explorer.desktop'
@@ -86,7 +87,7 @@ class QuickLaunchMigrationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'appletsrc'
             path.write_bytes(FIXTURE.read_bytes())
-            with patch.object(migration.os, 'replace', side_effect=OSError('injected atomic replacement failure')):
+            with patch.object(layout.os, 'replace', side_effect=OSError('injected atomic replacement failure')):
                 with self.assertRaisesRegex(OSError, 'injected'):
                     migration.main(path)
             self.assertEqual(path.read_bytes(), FIXTURE.read_bytes())
