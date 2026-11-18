@@ -25,6 +25,7 @@ def exercise(out, scale, root):
     argv = f'{root}/chooser-argv'
     desktop = f'~/.local/share/applications/{unit}.desktop'
     parent, kate = 0, 0
+    owned_chooser = None
     wide = (40, 40, 768, 440)
     narrow = (40, 40, 265, 440)
     assert not app_windows(), 'requires an unused Explorer/Kate session'
@@ -41,9 +42,15 @@ printf 'owned document\\n' > {folder}/Read.txt
 printf 'owned folder contents\\n' > {folder}/Documents/Keep.txt
 printf '[Desktop Entry]\\nName=Broken entry\\n' > {folder}/Broken.desktop
 cat > {app} <<'EOF'
-#!/bin/sh
-printf '%s\\n' "$@" > {argv}.tmp
-mv {argv}.tmp {argv}
+#!/usr/bin/python
+import json
+from pathlib import Path
+import sys
+
+record = Path('{argv}')
+tmp = record.with_suffix('.tmp')
+tmp.write_text(json.dumps(sys.argv[1:]) + '\\n')
+tmp.replace(record)
 EOF
 chmod u+x {app}
 test ! -e {desktop} && cat > {desktop} <<'EOF'
@@ -82,9 +89,14 @@ file --mime-type {folder}/RefusalMarker''')
         return read_text(snap(tag), out, tag + '-ocr', box or (0, 0, 1280, 760), psm)
 
     def active_owned_dialog(pid, caption=None):
-        rows = kwin_query('const w = workspace.activeWindow; if (w) emit(w.pid, w.caption, w.modal);')
-        return len(rows) == 1 and rows[0][0] == str(pid) and rows[0][2] == 'true' and (
-            caption is None or caption in rows[0][1])
+        rows = kwin_query('''const w = workspace.activeWindow;
+            if (w && w.modal) {
+                const g = w.frameGeometry;
+                emit(w.pid, w.caption, g.x, g.y, g.width, g.height);
+            }''')
+        if len(rows) == 1 and rows[0][0] == str(pid) and (caption is None or caption in rows[0][1]):
+            return tuple(map(float, rows[0][2:]))
+        return None
 
     def clear_dialog(caption):
         key('KEY_ESC')
@@ -95,9 +107,20 @@ file --mime-type {folder}/RefusalMarker''')
         pane = (*point(69, 392), *point(360, 411))
         wait_for(lambda: name in text('selected-' + Path(name).stem, pane, 7), f'selected {name}')
 
-    def chooser_active():
-        return kwin_query('const w = workspace.activeWindow; if (w) emit(w.resourceClass, w.caption);') == [
-            ['org.freedesktop.impl.portal.desktop.kde', 'Choose Application']]
+    def chooser_windows():
+        rows = kwin_query('''for (const w of workspace.windowList())
+            if (w.resourceClass == "org.freedesktop.impl.portal.desktop.kde" && w.caption == "Choose Application")
+                emit(w.internalId, workspace.activeWindow == w);''')
+        windows = {wid: active == 'true' for wid, active in rows}
+        assert len(windows) == len(rows) and all(windows), rows
+        return windows
+
+    def chooser_closed(wid):
+        # Do not count a caption or focus change as closing the window.
+        return [wid] not in kwin_query('for (const w of workspace.windowList()) emit(w.internalId);')
+
+    def recorder_exists():
+        return user(f'if test -e {argv}; then echo present; fi') == 'present'
 
     def chooser_label(tag, label):
         path = out / f'{tag}.png'
@@ -113,9 +136,25 @@ file --mime-type {folder}/RefusalMarker''')
         left, top, width, height = (int(matches[0][field]) for field in ('left', 'top', 'width', 'height'))
         return (left + width // 2) // 3, 100 + (top + height // 2) // 3
 
-    def choose(tag):
-        wait_for(chooser_active, f'{tag} invoked the KDE application chooser')
+    def choose(tag, existing):
+        nonlocal owned_chooser
         target = None
+
+        def new_chooser_active():
+            nonlocal owned_chooser
+            windows = chooser_windows()
+            new = windows.keys() - existing.keys()
+            assert len(new) <= 1, (tag, existing, windows)
+            if new:
+                (wid,) = new
+                if windows[wid]:
+                    owned_chooser = wid
+                    return True
+            return False
+
+        wait_for(new_chooser_active, f'{tag} opened a new foreground KDE application chooser')
+        opened = owned_chooser
+        print(f'{scale:g}x {tag}: existing choosers {existing}; foreground chooser {opened}', flush=True)
 
         def app_visible():
             nonlocal target
@@ -123,12 +162,16 @@ file --mime-type {folder}/RefusalMarker''')
             return target
 
         wait_for(app_visible, 'fixture app is visible in the real chooser')
+        assert chooser_windows().get(opened), f'{tag}: {opened} lost foreground before app selection'
         click(target)
-        wait_for(lambda: user(f'test ! -f {argv} || cat {argv}') == f'{folder}/Read.txt',
-                 f'{tag} delivers only the selected path to the disposable chooser app')
-        (out / f'{tag}-argv.txt').write_text(user(f'cat {argv}') + '\n')
+        wait_for(lambda: chooser_closed(opened), f'{tag} closed chooser {opened}')
+        owned_chooser = None
+        wait_for(recorder_exists, f'{tag} launched the disposable recorder')
+        recorded = user(f'cat {argv}')
+        (out / f'{tag}-argv.json').write_text(recorded + '\n')
+        assert json.loads(recorded) == [f'{folder}/Read.txt'], (tag, recorded)
         user(f'rm {argv}')
-        print(f'{scale:g}x {tag}: chooser ran and recorded the selected path', flush=True)
+        print(f'{scale:g}x {tag}: closed {opened}; recorder argv {recorded}', flush=True)
 
     def open_with(tag, submenu=False):
         # The first KIO choice is the default handler, not the chooser.
@@ -137,8 +180,10 @@ file --mime-type {folder}/RefusalMarker''')
         key('KEY_DOWN')
         key('KEY_RIGHT')
         snap(tag + '-offered-apps')
+        assert not recorder_exists(), f'{tag}: stale recorder file'
+        existing = chooser_windows()
         key('KEY_O')
-        choose(tag)
+        choose(tag, existing)
 
     def overflow():
         click(point(102, 74))
@@ -203,25 +248,33 @@ file --mime-type {folder}/RefusalMarker''')
             starting = windows_digest()
             click(point(122, 74))
             wait_for(lambda: active_owned_dialog(parent, 'Error'), f'visible Open error for {name}')
-            actual = ' '.join(text(f'error-{name}').split())
+            frame = active_owned_dialog(parent, 'Error')
+            assert frame, f'{name}: Error lost foreground before capture'
+            x, y, w, h = frame
+            # OCR only the owned dialog's message, not the files and windows behind it.
+            box = tuple(round(n * scale) for n in (x + 60, y + 26, x + w - 6, y + h - 42))
+            actual = ' '.join(text(f'error-{name}', box, 6).split())
             assert expected in actual, actual
             clear_dialog('Error')
             assert windows_digest() == starting, 'failed Open launched or changed an unrelated window'
-            assert not user(f'test ! -e {argv} || cat {argv}'), 'failed Open ran the chooser app'
+            assert not recorder_exists(), f'{name}: failed Open ran the chooser app'
             print(f'{scale:g}x {name}: {expected}; no unrelated window or helper launch', flush=True)
     except Exception:
         shot(out / 'failure.png')
         (out / 'failure-windows.json').write_text(json.dumps(kwin_query(
-            'for (const w of workspace.windowList()) emit(w.pid, w.resourceClass, w.caption, workspace.activeWindow == w, w.modal);'), indent=2) + '\n')
+            'for (const w of workspace.windowList()) emit(w.internalId, w.pid, w.resourceClass, w.caption, w.active, w.modal);'), indent=2) + '\n')
         raise
     finally:
-        if chooser_active():
+        if owned_chooser is not None and chooser_windows().get(owned_chooser):
             key('KEY_ESC')
+            wait_for(lambda: chooser_closed(owned_chooser), f'closed owned chooser {owned_chooser}')
         for pid, cls, caption in sorted(app_windows(), key=lambda row: row[0] != parent):
             if pid in (parent, kate) or (cls == EXPLORER and caption == 'Documents' and user(
                     f'''tr '\\0' '\\n' </proc/{pid}/cmdline | grep -Fx -e {folder}/Documents -e file://{folder}/Documents''')):
                 if active_owned_dialog(pid):
                     key('KEY_ESC')
+                    if not any(other == pid for other, *_ in app_windows()):
+                        continue
                 activate(pid)
                 if pid == parent:
                     key('KEY_ESC')
