@@ -52,6 +52,7 @@ def exercise(out, scale, root):
         return words(im, pt(left, top) + pt(right, bottom))
 
     def view():
+        vmctl.pointer(VM, *pt(w - 128, 104))
         click(pt(w - 82, 74))
         vmctl.pointer(VM, 1170, 723)
 
@@ -82,7 +83,8 @@ def exercise(out, scale, root):
 
     launch()
     view()
-    labels = text(snap('command-view'), w - 98, 88, w + 47, 285)
+    # The default Large Icons row now opens beside the command, not below it.
+    labels = text(snap('command-view'), w - 98, 36, w + 47, 285)
     expected = ['Extra Large Icons', 'Large Icons', 'Medium Icons', 'Small Icons', 'List', 'Details', 'Tiles', 'Content']
     tail = labels.replace('\n', ' ')
     for label in expected:
