@@ -39,7 +39,15 @@ def activate(pid, place=None):
     }}''')
     assert len(rows) == 1 and rows[0][0] == 'true', (pid, rows)
     if place:
-        assert tuple(float(v) for v in rows[0][1:]) == place, (place, rows)
+        def placed():
+            geometry = kwin_query(f'''for (const w of workspace.windowList())
+                if (w.pid == {pid} && workspace.activeWindow == w) {{
+                    const g = w.frameGeometry;
+                    emit(g.x, g.y, g.width, g.height);
+                }}''')
+            return len(geometry) == 1 and tuple(map(float, geometry[0])) == place
+
+        wait_for(placed, f'Wayland acknowledges fixture frame {place}')
 
 
 def exercise(out, scale, root, resume):
@@ -220,6 +228,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('out', type=Path)
     parser.add_argument('--installed', action='store_true')
+    parser.add_argument('--scales', nargs='+', type=float, choices=(1, 1.5), default=(1, 1.5))
     parser.add_argument('--resume-100', action='store_true',
                         help='skip the already captured 100 percent single-item and multi-file pane checks')
     args = parser.parse_args()
@@ -244,7 +253,7 @@ touch -t 201001041305 {folder}/Downloads
 touch -t 201001021305 {folder}/Alpha.txt
 touch -t 201001031305 {folder}/Beta.txt''')
         checksum = user(f'sha256sum {folder}/*.txt')
-        for scale in (1, 1.5):
+        for scale in args.scales:
             user(f'kscreen-doctor output.{output["name"]}.scale.{scale}; touch -t 201001021305 {folder}/Alpha.txt')
             exercise(args.out / f'scale-{scale:g}', scale, root, args.resume_100 and scale == 1)
         assert user(f'sha256sum {folder}/*.txt') == checksum
@@ -258,7 +267,7 @@ touch -t 201001031305 {folder}/Beta.txt''')
             print(f'Guest fixture retained for diagnosis: {root}', flush=True)
         if initial != 'windows':
             toggle(initial)
-    print('PASS: actual Details and Open for empty, single and multiple selections at 100% and 150%')
+    print('PASS: Explorer selection checks at ' + ', '.join(f'{scale:.0%}' for scale in args.scales))
 
 
 if __name__ == '__main__':
