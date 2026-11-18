@@ -109,7 +109,8 @@ ICONS = {
     ('imageres', 1005): 'library-videos', ('imageres', 109): 'computer', ('imageres', 25): 'network',
     ('imageres', 99): 'help', ('shell32', 16757): 'preview-pane',
     ('shell32', 63001): 'view-extra-large', ('shell32', 63008): 'view-large', ('shell32', 63009): 'view-medium',
-    ('shell32', 63010): 'view-small', ('shell32', 63011): 'view-list', ('shell32', 62998): 'view-details',
+    ('shell32', 63010): 'view-small', ('shell32', 63000): 'view-command-list', ('shell32', 62998): 'view-details',
+    ('shell32', 62999): 'view-tiles', ('shell32', 63011): 'view-list',
 }
 
 # Windows-mode icon theme: freedesktop names -> asset. KDE apps elsewhere keep Breeze for everything else.
