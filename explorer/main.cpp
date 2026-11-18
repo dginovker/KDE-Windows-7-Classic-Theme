@@ -561,18 +561,51 @@ public:
         pressed = -1;
         int x = 2;
         const QFontMetrics metrics(font());
+        // Keep the view controls clickable even when Open makes the left group too wide.
+        const int offsets[] = {115, 64, 36};
+        const int end = width() - offsets[0];
+        QList<std::pair<Command, int>> commands;
+        int fullWidth = x;
         for (qsizetype i = 0; i < left.size(); ++i) {
             if (i == 1 && !showOpen)
                 continue;
             const Command &command = left[i];
             const int width = 21 + metrics.horizontalAdvance(command.text) + (command.menu ? 15 : 0)
                               + (command.icon.isNull() ? 0 : 13);
-            visibleLeft.append(i);
-            parts.append({QRect(x, 2, width, 27), [this, command, x, width] { trigger(command, x, width); }});
-            x += width;
+            commands.append({command, width});
+            fullWidth += width;
         }
+        constexpr int overflowWidth = 36;
+        QList<Command> hidden;
+        auto add = [this, &x](const Command &command, int width) {
+            visibleLeft.append(command);
+            parts.append({QRect(x, 2, width, 27), [this, command, x = x, width] { trigger(command, x, width); }});
+            x += width;
+        };
+        for (const auto &[command, width] : commands) {
+            if (fullWidth > end && (x + width + overflowWidth > end || !hidden.isEmpty()))
+                hidden.append(command);
+            else
+                add(command, width);
+        }
+        if (!hidden.isEmpty())
+            add({QStringLiteral("»"), {}, nullptr, [this, hidden, x] {
+                QMenu menu(this);
+                for (const auto &command : hidden) {
+                    if (command.act)
+                        menu.addAction(command.icon, command.text, this, command.act);
+                    if (command.menu) {
+                        auto *submenu = menu.addMenu(command.act ? QStringLiteral("Open with") : command.text);
+                        connect(submenu, &QMenu::aboutToShow, command.menu, &QMenu::aboutToShow);
+                        connect(submenu, &QMenu::aboutToShow, submenu, [submenu, command] {
+                            submenu->clear();
+                            submenu->addActions(command.menu->actions());
+                        });
+                    }
+                }
+                menu.exec(mapToGlobal(QPoint(x, 29)));
+            }}, overflowWidth);
         // Right-aligned like the reference: view split button, preview pane, help.
-        const int offsets[] = {115, 64, 36};
         for (int i = 0; i < right.size(); ++i) {
             const int x = width() - offsets[i];
             const int width = right[i].menu ? 47 : 26;
@@ -617,8 +650,8 @@ protected:
 private:
     bool showOpen = false;
     QString openIcon;
-    QList<int> visibleLeft;
-    const Command &command(int part) const { return part < visibleLeft.size() ? left[visibleLeft[part]] : right[part - visibleLeft.size()]; }
+    QList<Command> visibleLeft;
+    const Command &command(int part) const { return part < visibleLeft.size() ? visibleLeft[part] : right[part - visibleLeft.size()]; }
     void trigger(const Command &command, int x, int width)
     {
         // Keep the main action on the text/icon and the menu on the trailing arrow.

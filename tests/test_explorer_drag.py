@@ -187,9 +187,28 @@ def main():
             image = args.out / 'kio-other-view.png'
             shot(image)
             with Image.open(image) as frame:
-                frame.crop((804, 535, 1110, 567)).resize((1224, 128)).save(args.out / 'kio-selection.png')
+                frame.crop((805, 538, 908, 553)).resize((412, 60), Image.Resampling.LANCZOS).save(args.out / 'kio-selection.png')
+                assert (10, 36, 106) in frame.convert('RGB').crop((910, 222, 1012, 337)).get_flattened_data(), 'target row not selected'
             selection = subprocess.check_output(['tesseract', str(args.out / 'kio-selection.png'), 'stdout', '--psm', '7'], text=True)
-            assert '1 item selected' in selection, selection
+            assert selection.strip() == FILE, selection
+            # With Open visible in this narrow target, trailing actions must not cover the View area.
+            vmctl.pointer(VM, 1023, 199, 'left')
+            overflow = args.out / 'command-overflow.png'
+            shot(overflow)
+            with Image.open(overflow) as frame:
+                frame.crop((1003, 212, 1195, 295)).resize((768, 332)).save(args.out / 'command-overflow-crop.png')
+            labels = subprocess.check_output(['tesseract', str(args.out / 'command-overflow-crop.png'),
+                                              'stdout', '--psm', '6'], text=True)
+            assert 'Share with' in labels and 'New folder' in labels, labels
+            vmctl.keys(VM, 'KEY_ESC')
+            vmctl.pointer(VM, 1120, 199, 'left')
+            shot(args.out / 'narrow-view-menu.png')
+            with Image.open(args.out / 'narrow-view-menu.png') as frame:
+                frame.crop((1080, 210, 1230, 340)).resize((600, 520)).save(args.out / 'narrow-view-menu-crop.png')
+            labels = subprocess.check_output(['tesseract', str(args.out / 'narrow-view-menu-crop.png'),
+                                              'stdout', '--psm', '6'], text=True)
+            assert 'Details' in labels, labels
+            vmctl.keys(VM, 'KEY_ESC')
             assert user(f'ls -A {root}/{left}') == FILE and not user(f'ls -A {root}/{right}')
             print('Other Explorer view: KIO navigated and selected the file', flush=True)
         finally:
