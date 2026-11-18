@@ -66,6 +66,8 @@ printf '[Theme]\nCurrent=win7-classic\n' | sudo tee /etc/sddm.conf.d/win7-classi
 
 Delete that file to return to your previous login screen. If the theme fails to load, SDDM shows its built-in one.
 
+Both Classic surfaces use Windows 7 Ultimate's genuine 16:10 logon bitmap, account surround, branding and submit button. The SDDM theme also uses the genuine power artwork for its existing single Shut down action. There is no Windows Ease of Access, split power menu or power button on the lock screen. Account pictures and text come from KDE/SDDM and the system font, not Windows. At other aspect ratios the background is cropped to cover the display; control dimensions are logical pixels. If artwork is missing or unreadable, Qt logs the resource error and the password prompt and controls remain usable. The artwork source IDs and extraction tool are in `reference/tools/extract-logon-art.py`.
+
 ## What Windows mode has so far
 
 - Classic window frames (`plasma/decoration/`, a KWin QML decoration): active, inactive, maximized and pressed-button states match the reference pixel-for-pixel, including the integer caption ramp, apart from the app icon and title text. Applies to server-decorated Qt, GTK and Firefox windows; application-owned client-side titlebars remain application-owned (Firefox: enable the Title Bar customization option).

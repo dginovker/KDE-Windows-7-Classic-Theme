@@ -10,7 +10,7 @@ import sys
 import time
 
 from lab import ROOT, VM, vmctl, shot, wait_for, user, assert_portal_display
-from test_lock import PASSWORD, field_band, type_password
+from test_lock import PASSWORD, assert_logon_art, field_band, type_password
 from test_package import build_package, root
 
 OUT = Path(sys.argv[1] if len(sys.argv) > 1 else '/tmp/win7-login-test')
@@ -56,6 +56,7 @@ def main():
         vmctl.pointer(VM, 563, 386, 'left')  # tester's tile; the lab VM also has the older account w
         time.sleep(1)
         shot(OUT / '1-login.png')
+        assert_logon_art(OUT / '1-login.png', REF)
         ours, reference = field_band(OUT / '1-login.png'), field_band(REF)
         assert ours and abs(ours[0] - reference[0]) <= 2 and abs(ours[1] - reference[1]) <= 2, f'password field rows {ours}, Windows {reference}'
         print(f'Windows logon screen: password field where Windows has it (rows {ours}, Windows {reference})')

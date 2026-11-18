@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Templates as T
 
 // Windows 7 logon screen for SDDM. One user goes straight to the password; several are shown as tiles first.
 Item {
@@ -25,7 +26,11 @@ Item {
         onSubmitted: (password) => { busy = true; sddm.login(root.userAt(root.selected, root.nameRole), password, sessionModel.lastIndex); }
         onSwitchUserClicked: root.selected = -1
     }
-    onSelectedChanged: if (selected >= 0) logon.clear()
+    onSelectedChanged: {
+        if (selected >= 0) logon.clear();
+        else if (choices.itemAt(0)) choices.itemAt(0).forceActiveFocus();
+    }
+    Component.onCompleted: if (selected < 0 && choices.itemAt(0)) choices.itemAt(0).forceActiveFocus()
 
     // User tiles, when there is more than one account.
     Row {
@@ -33,35 +38,57 @@ Item {
         visible: root.selected < 0
         spacing: 40
         Repeater {
+            id: choices
             model: userModel
-            delegate: Column {
+            delegate: T.Button {
+                id: choice
                 required property int index
                 required property string realName
                 required property string name
-                spacing: 8
-                Rectangle {
-                    width: 96; height: 96; radius: 6
-                    color: "#bfe2f6"; border.color: "#f4fbff"; border.width: 4
-                    Image { anchors.fill: parent; anchors.margins: 6; source: root.userAt(index, root.iconRole); fillMode: Image.PreserveAspectCrop }
-                    MouseArea { anchors.fill: parent; onClicked: root.selected = index }
+                width: 96; height: 118
+                focusPolicy: Qt.StrongFocus
+                text: realName || name
+                Accessible.name: text
+                onClicked: root.selected = index
+                Keys.onReturnPressed: clicked()
+                Keys.onEnterPressed: clicked()
+                contentItem: Item {
+                    // The chooser has always used smaller tiles than the selected account view.
+                    LogonTile {
+                        scale: 96 / 156
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        y: -42
+                        userName: choice.text
+                        userImage: root.userAt(choice.index, root.iconRole)
+                    }
+                    Text {
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.bottom: parent.bottom
+                        horizontalAlignment: Text.AlignHCenter
+                        elide: Text.ElideRight
+                        text: choice.text
+                        color: "white"; font.pixelSize: 14
+                        style: Text.Outline; styleColor: "#193855"
+                    }
                 }
-                Text { anchors.horizontalCenter: parent.horizontalCenter; text: realName || name; color: "white"; font.pixelSize: 14 }
+                background: Rectangle {
+                    color: "transparent"; border.color: "white"; radius: 3
+                    visible: choice.activeFocus
+                }
             }
         }
     }
 
-    // Shut down, bottom right, like Windows' red power button.
-    Rectangle {
-        anchors.right: parent.right; anchors.bottom: parent.bottom; anchors.rightMargin: 35; anchors.bottomMargin: 35
-        width: 57; height: 27; radius: 3
+    // Keep the existing direct power action; the Windows split menu has no delegate here.
+    LogonButton {
+        anchors.right: parent.right; anchors.bottom: parent.bottom; anchors.rightMargin: 35; anchors.bottomMargin: 34
+        width: 57; height: 28
         visible: sddm.canPowerOff
-        gradient: Gradient {
-            GradientStop { position: 0.0; color: "#e06a5a" }
-            GradientStop { position: 1.0; color: "#a01e10" }
-        }
-        border.color: "#5e0d05"
-        Text { anchors.centerIn: parent; text: "⏻"; color: "white"; font.pixelSize: 14 }
-        MouseArea { anchors.fill: parent; onClicked: sddm.powerOff() }
+        artwork: "power"
+        text: qsTr("Shut down")
+        fallbackLabel: "⏻"
+        onClicked: sddm.powerOff()
     }
 
     Connections {

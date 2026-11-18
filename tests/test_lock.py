@@ -8,7 +8,7 @@ from pathlib import Path
 import sys
 import time
 
-from PIL import Image
+from PIL import Image, ImageChops, ImageStat
 
 from lab import ROOT, VM, vmctl, user, toggle, install, shot, wait_for
 
@@ -39,6 +39,25 @@ def field_band(path):
     return next((b for b in white_bands(path) if b[1] - b[0] >= 15 and b[0] > 485), None)
 
 
+def assert_logon_art(path, reference):
+    """Compare installed 96-DPI chrome, leaving labels and account pixels out."""
+    login = reference.name == 'w7-login.png'
+    frame_y, submit_y = (302, 507) if login else (273, 493)
+    actual, target = (Image.open(p).convert('RGB') for p in (path, reference))
+    assert actual.size == target.size == (1280, 800)
+    for name, box, tolerance in (
+        ('background', (12, 30, 470, 585), 0),
+        ('branding', (518, 738, 757, 770), 0),
+        ('frame', (565, frame_y, 713, frame_y + 8), 1),
+        ('submit', (756, submit_y, 786, submit_y + 30), 0),
+    ):
+        expected = target.crop(box)
+        distance = min(sum(ImageStat.Stat(ImageChops.difference(
+            expected, actual.crop((box[0], box[1] + y, box[2], box[3] + y)))).mean) / 3
+            for y in range(-tolerance, tolerance + 1))
+        assert distance < 3, f'{name} differs from {reference.name}: RGB MAE {distance:.2f}'
+
+
 def lock(name):
     user('qdbus6 org.freedesktop.ScreenSaver /ScreenSaver Lock')
     wait_for(locked, 'screen locked')
@@ -65,8 +84,7 @@ def main():
     lock('1-windows-locked.png')
     ours, reference = field_band(OUT / '1-windows-locked.png'), field_band(REF)
     assert ours and abs(ours[0] - reference[0]) <= 2 and abs(ours[1] - reference[1]) <= 2, f'password field rows {ours}, Windows {reference}'
-    tile = Image.open(OUT / '1-windows-locked.png').convert('RGB').getpixel((636, 276))
-    assert min(tile) > 200, f'no light user-tile frame at the reference position: {tile}'
+    assert_logon_art(OUT / '1-windows-locked.png', REF)
     print(f'Classic lock screen: user tile and password field where Windows has them (field rows {ours}, Windows {reference})')
 
     type_password('wrong-password')
