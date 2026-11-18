@@ -100,9 +100,33 @@ static void edge(QPainter &p, const QRect &r, const QColor &topLeft, const QColo
 class DetailsHeader : public QHeaderView
 {
 public:
-    explicit DetailsHeader(QWidget *parent) : QHeaderView(Qt::Horizontal, parent) {}
+    explicit DetailsHeader(QWidget *parent) : QHeaderView(Qt::Horizontal, parent)
+    {
+        // The top inset belongs between the header's clickable viewport and the tree's first row.
+        setViewportMargins(0, 0, 0, rowInset);
+        setBackgroundRole(QPalette::Base);
+        setAutoFillBackground(true);
+    }
+
+    QSize sizeHint() const override
+    {
+        return QHeaderView::sizeHint() + QSize(0, rowInset);
+    }
 
 protected:
+    void paintEvent(QPaintEvent *event) override
+    {
+        QHeaderView::paintEvent(event);
+        const int used = qBound(0, length() - offset(), viewport()->width());
+        const auto area = viewport()->rect();
+        const auto cap = QStyle::visualRect(layoutDirection(), area, area.adjusted(used, 0, 0, 0));
+        if (!cap.isEmpty()) {
+            QPainter p(viewport());
+            p.fillRect(cap, classic::face);
+            Classic::drawEdge(p, cap, Classic::Raised, Classic::Top | Classic::Bottom | Classic::Soft);
+        }
+    }
+
     QString label(int column) const
     {
         return column == KDirModel::ModifiedTime ? tr("Date modified")
@@ -143,6 +167,9 @@ protected:
         }
         p->restore();
     }
+
+private:
+    static constexpr int rowInset = 7;
 };
 
 class DetailsNameDelegate : public KFileItemDelegate

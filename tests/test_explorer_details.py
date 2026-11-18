@@ -18,6 +18,15 @@ FOLDERS = 'Documents Downloads Music Pictures Projects'.split()
 HEADERS = ('Name', 'Date modified', 'Type', 'Size')
 DIVIDERS = (692, 812, 932, 1012)  # first pixel of each following section
 LISTING = (420, 210, 1020, 365)
+HEADER = (420, 210, 1020, 233)
+
+
+def header_structure(actual, native):
+    diff = ImageChops.difference(actual.crop(HEADER), native.crop(HEADER))
+    # Mask only label ink and the adjacent Name triangle, never the section bevels or end cap.
+    for left, right in [(432, 478), (695, 775), (814, 858), (934, 969)]:
+        diff.paste((0, 0, 0), (left - HEADER[0], 5, right - HEADER[0], 20))
+    return diff
 
 
 def read_text(image, out, tag, box, psm=7):
@@ -59,16 +68,26 @@ def check_listing(out, actual, native):
     names = read_text(actual, out, 'folders', (454, 234, 540, 355), 6).split()
     # The locale can use a narrow no-break space before AM/PM, which OCR may omit.
     dates = read_text(actual, out, 'timestamps', (694, 234, 808, 355), 6).splitlines()
+    types = read_text(actual, out, 'folder-types', (813, 234, 919, 355), 6).splitlines()
+    target_types = read_text(native, out, 'native-folder-types', (813, 234, 919, 355), 6).splitlines()
     expected_dates = ['11/14/20267:39AM'] * len(FOLDERS)
+    structural_diff = header_structure(actual, native)
+    structural_diff.save(out / 'header-structural-diff.png')
+    # Removing the end cap used to pass the divider probes; it must fail the structural oracle.
+    no_cap = actual.copy()
+    no_cap.paste((212, 208, 200), (DIVIDERS[-1], HEADER[1], HEADER[2], HEADER[3]))
+    assert header_structure(no_cap, native).getbbox() == (592, 0, 600, 23)
     print(f'headers={headers} dividers={columns}, white={white}, empty folder sizes={sizes_blank}; '
-          f'names={names}, dates={dates}, text bands={bands} (native {expected_bands})', flush=True)
+          f'names={names}, dates={dates}, types={types}, text bands={bands} (native {expected_bands})', flush=True)
     assert headers == HEADERS, headers
     assert columns == list(DIVIDERS), columns
+    assert structural_diff.getbbox() is None, structural_diff.getbbox()
     assert white and sizes_blank and names == FOLDERS and [d.replace(' ', '') for d in dates] == expected_dates
+    assert types == target_types == ['File folder'] * len(FOLDERS), (types, target_types)
     assert len(bands) == len(expected_bands) == len(FOLDERS), bands
-    # Qt starts rows directly below the header, without the reference's 7px top inset.
-    assert all(abs((a[0] - bands[0][0]) - (b[0] - expected_bands[0][0])) <= 2
-               for a, b in zip(bands, expected_bands)), bands
+    assert all(abs(a[0] - b[0]) <= 2 for a, b in zip(bands, expected_bands)), bands
+    assert all(abs(p[0] - q[0] - 22) <= 1 for p, q in zip(bands[1:], bands)), bands
+    assert actual.crop((420, 233, 1020, 240)).getextrema() == ((255, 255),) * 3, 'top inset is not blank white'
 
 
 def main():
@@ -91,7 +110,7 @@ def main():
 cp "$HOME/.config/kdeglobals" {root}/config/
 # Set local wall times as text, then let the filesystem and KIO carry actual timestamps.
 touch -t 202611140739 {folder}/*
-printf a > {root}/more/Beta.txt
+head -c 999 /dev/zero > {root}/more/Beta.txt
 head -c 10240 /dev/zero > {root}/more/Alpha.txt
 touch -t 202511140901 {root}/more/Alpha.txt
 touch -t 202402010739 {root}/more/Beta.txt
@@ -126,7 +145,11 @@ for n in $(seq -w 36); do mkdir {root}/more/Row$n; done''')
         kwin_script(f'for (const w of workspace.windowList()) if (w.resourceClass == "{EXPLORER}" '
                     f'&& w.caption == "Classic-demo") {{ w.frameGeometry = {GEOMETRY}; workspace.activeWindow = w; }}')
         details()
-        check_listing(args.out, snapshot('ordinary'), Image.open(args.native).convert('RGB'))
+        ordinary = snapshot('ordinary')
+        check_listing(args.out, ordinary, Image.open(args.native).convert('RGB'))
+        click((480, 237))  # The top inset is neither a clickable header nor an item.
+        inset = snapshot('inset-click')
+        assert ImageChops.difference(inset.crop(LISTING), ordinary.crop(LISTING)).getbbox() is None
         click((480, 247))
         selected = snapshot('mouse-selection')
         highlight = (10, 36, 106)
@@ -160,8 +183,13 @@ for n in $(seq -w 36); do mkdir {root}/more/Row$n; done''')
         tail = snapshot('end')
         tail_names = read_text(tail, args.out, 'end-names', (442, 551, 550, 606), 6)
         assert 0 <= tail_names.find('Alpha.txt') < tail_names.find('Beta.txt'), tail_names
-        sizes = read_text(tail, args.out, 'file-sizes', (942, 560, 1002, 606), 6)
-        assert re.search(r'10(?:[.,]0)?\s*K[iI]?B', sizes), f'missing formatted file size: {sizes!r}'
+        large = read_text(tail, args.out, 'file-size-kib', (942, 560, 1002, 584))
+        small = read_text(tail, args.out, 'file-size-bytes', (963, 590, 992, 604))
+        assert re.fullmatch(r'10(?:[.,]0)?\s*KiB', large) and small == '999', (large, small)
+        # Tesseract can read the bare B as 8. The right-aligned unit glyph must match the B in KiB.
+        units = tail.convert('L').point(lambda n: 0 if n < 134 else 255)
+        assert ImageChops.difference(units.crop((993, 570, 1001, 578)), units.crop((993, 592, 1001, 600))).getbbox() is None
+        # Lexical order puts the shown 10 KiB first; the Size header must instead put 999 B first.
         for tag, x, first, second in [('size-ascending', 959, 'Beta.txt', 'Alpha.txt'),
                                        ('date-ascending', 734, 'Beta.txt', 'Alpha.txt'),
                                        ('date-descending', 734, 'Alpha.txt', 'Beta.txt')]:
