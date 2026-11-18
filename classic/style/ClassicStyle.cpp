@@ -214,11 +214,16 @@ private:
                 result->setImage(image);
                 return result;
             };
-            m_shadowTiles={tile(5,10,[&](int x,int y){return cap[y][x];}),
+            // KWin filters across atlas tile boundaries. Continue each straight edge into
+            // the adjoining cap/corner texel so its stretched tile samples a constant profile.
+            m_shadowTiles={tile(5,11,[&](int x,int y){return y==10?edge[x]:cap[y][x];}),
                            tile(5,1,[&](int x,int){return edge[x];}),
-                           tile(5,5,[&](int x,int y){return corner[y][x];}),
+                           tile(6,6,[&](int x,int y){
+                               if(x==0) return y==0?255:edge[y-1];
+                               return y==0?edge[x-1]:corner[y-1][x-1];
+                           }),
                            tile(1,5,[&](int,int y){return edge[y];}),
-                           tile(10,5,[&](int x,int y){return cap[x][y];})};
+                           tile(11,5,[&](int x,int y){return x==10?edge[y]:cap[x][y];})};
         }
         auto shadow=std::make_unique<KWindowShadow>();
         shadow->setWindow(window);
