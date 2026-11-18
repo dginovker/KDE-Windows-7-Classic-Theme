@@ -14,6 +14,23 @@ WHITE = (255, 255, 255)
 NATIVE = ROOT / 'reference/screenshots'
 
 
+def guest_file(path, nonempty=False):
+    flag = '-s' if nonempty else '-f'
+    return user(f'if test {flag} {shlex.quote(path)}; then echo yes; else echo no; fi') == 'yes'
+
+
+def unit_running(unit):
+    service = shlex.quote(unit + '.service')
+    return bool(user('systemctl --user list-units --no-legend --plain '
+                     f'--state=active,activating,deactivating,reloading {service}'))
+
+
+def stop_unit(unit):
+    if unit_running(unit):
+        user(f'systemctl --user stop {shlex.quote(unit)}')
+    assert not unit_running(unit), f'fixture unit is still running: {unit}'
+
+
 def ink(image):
     return image.convert('L').point(lambda n: 255 if n < 140 else 0).getbbox()
 
@@ -177,7 +194,7 @@ def exercise(out, scale, root):
              f'systemd-run --user --collect -q --unit={server} python {root}/dav.py {root}')
 
         def marker(name, event):
-            wait_for(lambda: user(f'test -f {root}/{name}.{event} && echo yes') == 'yes', f'DAV {name} {event}')
+            wait_for(lambda: guest_file(f'{root}/{name}.{event}'), f'DAV {name} {event}')
 
         def release(name):
             user(f'touch {root}/{name}.release')
@@ -197,7 +214,7 @@ def exercise(out, scale, root):
             return image
 
         try:
-            wait_for(lambda: user(f'test -s {root}/port && echo yes') == 'yes', 'loopback DAV ready')
+            wait_for(lambda: guest_file(f'{root}/port', nonempty=True), 'loopback DAV ready')
             port = int(user(f'cat {root}/port'))
             open_dav('Slow')
             no_label('slow-pending')
@@ -228,7 +245,7 @@ def exercise(out, scale, root):
             wait_for(lambda: 'Final' in captions(), 'back to successfully listed empty folder')
             empty('back-to-final-empty', 'icons')
         finally:
-            user(f'systemctl --user stop {server} || true')
+            stop_unit(server)
 
     def root_identity():
         other_unit = f'{unit}-root'
@@ -248,7 +265,7 @@ def exercise(out, scale, root):
             key('KEY_F2')
             vmctl.type_text(VM, 'Renamed')
             key('KEY_ENTER')
-            wait_for(lambda: user(f'test -f {root}/identity/Renamed/Sample.txt && echo yes') == 'yes',
+            wait_for(lambda: guest_file(f'{root}/identity/Renamed/Sample.txt'),
                      'second Explorer renamed the displayed root')
             wait_for(lambda: 'Renamed' in captions(), 'open root received the KIO rename redirect')
             focus('Renamed')
@@ -257,7 +274,10 @@ def exercise(out, scale, root):
             vmctl.type_text(VM, 'not-a-match')
             empty('renamed-root-filtered-empty', 'icons')
         finally:
-            user(f'systemctl --user stop {other_unit} {other_unit}-rename || true')
+            try:
+                stop_unit(other_unit + '-rename')
+            finally:
+                stop_unit(other_unit)
 
     try:
         launch(unit, f'{root}/Classic-demo', 'Classic-demo')
@@ -307,7 +327,7 @@ def exercise(out, scale, root):
             webdav()
             root_identity()
     finally:
-        user(f'systemctl --user stop {unit} || true')
+        stop_unit(unit)
 
 
 def main():
