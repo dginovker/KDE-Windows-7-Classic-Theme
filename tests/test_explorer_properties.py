@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """Drive KDE's folder Properties from Explorer without changing any real files (#38)."""
 import argparse
+import csv
+import io
 import json
 from pathlib import Path
+import subprocess
+import time
 
 from PIL import Image
 
@@ -36,7 +40,7 @@ def active_frame():
     return rows[0][0], tuple(map(float, rows[0][1:]))
 
 
-def exercise(out, scale):
+def exercise(out, scale, output, pressure=False):
     out.mkdir(parents=True, exist_ok=True)
     root = user('mktemp -d /tmp/w7prop.XXXXXXXX')
     unit = Path(root).name
@@ -55,7 +59,9 @@ def exercise(out, scale):
             return active_frame()[1]
 
         def capture(tag):
-            vmctl.pointer(VM, 1220, 700)
+            sw, sh = vmctl.screen_size(VM)
+            vmctl.pointer(VM, sw - 7, sh // 2)
+            time.sleep(.35)
             path = out / f'{tag}-desktop.png'
             shot(path)
             title, (x, y, w, h) = active_frame()
@@ -76,6 +82,90 @@ def exercise(out, scale):
             return user(f'find {folder} -mindepth 1 -printf "%P %m\\n"')
 
         frame = open_properties()
+        if pressure:
+            edit('Pending')
+
+            def find_words(tag, expected, click_word=None):
+                image = capture(tag)
+                rows = {}
+                footer_y = image.height - round(45 * scale)
+                for part, y, psm in [(image.crop((0, 0, image.width, footer_y)), 0, '11'),
+                                     (image.crop((0, footer_y, image.width, image.height)), footer_y, '6')]:
+                    enlarged = out / f'{tag}-ocr-{y}.png'
+                    part.resize((part.width * 3, part.height * 3), Image.Resampling.LANCZOS).save(enlarged)
+                    tsv = subprocess.check_output(['tesseract', str(enlarged), 'stdout', '--psm', psm, 'tsv'],
+                                                  text=True, stderr=subprocess.DEVNULL)
+                    for row in csv.DictReader(io.StringIO(tsv), delimiter='\t', quoting=csv.QUOTE_NONE):
+                        word = row['text'].strip(' |[]\\:‘’()')
+                        if word:
+                            rows[word] = ((int(row['left']) + int(row['width']) / 2) / (3 * scale),
+                                          ((int(row['top']) + int(row['height']) / 2) / 3 + y) / scale)
+                assert expected <= rows.keys(), (tag, expected - rows.keys(), list(rows))
+                if click_word:
+                    at(*rows[click_word])
+
+            def set_mode(mode):
+                user(f'kscreen-doctor output.{output["name"]}.mode.{mode}')
+                time.sleep(1)
+
+            def shrink(tag):
+                kwin_script('const w = workspace.activeWindow; '
+                            'w.frameGeometry = {x: 12, y: 12, width: 480, height: 320};')
+                _, (x, y, w, h) = active_frame()
+                vmctl.pointer(VM, round((x+w-12) * scale), round((y+h-12) * scale))
+                # KWin's default Meta+right drag resizes in both decoration styles.
+                def modifier(down):
+                    event = {'type': 'key', 'data': {'down': down, 'key': {'type': 'qcode', 'data': 'meta_l'}}}
+                    command = {'execute': 'input-send-event', 'arguments': {'events': [event]}}
+                    vmctl.virsh('qemu-monitor-command', VM, json.dumps(command))
+                modifier(True)
+                try:
+                    vmctl.button(VM, 'right', True)
+                    try:
+                        vmctl.pointer(VM, round((x+12) * scale), round((y+12) * scale))
+                    finally:
+                        vmctl.button(VM, 'right', False)
+                finally:
+                    modifier(False)
+                title, actual = active_frame()
+                assert title == 'Properties for Documents', title
+                (row,) = kwin_query('const w = workspace.activeWindow; emit(w.minSize.width, w.minSize.height);')
+                minimum = tuple(map(float, row))
+                assert all(abs(a - b) <= 30 for a, b in zip(actual[2:], minimum)) and actual[2] < w - 80, (actual, minimum)
+                print(f'{scale:g}x {tag}: shrank to advertised floor {minimum}; frame {actual}', flush=True)
+                return actual
+
+            small = next(m['id'] for m in output['modes'] if m['size'] == {'width': 800, 'height': 600})
+            try:
+                set_mode(small)
+                _, (_, _, w, h) = active_frame()
+                assert w * scale <= 801 and h * scale <= 600, (w, h, scale)
+                classic_floor = shrink('Classic')
+                toggle('current')
+                frame = shrink('large-font current')
+                assert frame[2] > classic_floor[2], (frame, classic_floor)
+                find_words('current-minimum', {'General'})
+                toggle('windows')
+                frame = shrink('Classic return')
+                find_words('classic-minimum', {'General'})
+                # Restore enough viewport width to navigate tabs; the constrained height still scrolls.
+                kwin_script('const w = workspace.activeWindow; w.frameGeometry = {x: 5, y: 5, width: 504, height: 300};')
+                frame = active_frame()[1]
+                find_words('permissions-tab', {'General', 'Permissions'}, 'Permissions')
+                find_words('permissions-page', {'Access', 'Permissions'})
+                at(320, 47)
+                find_words('details-page', {'Modified', 'Accessed'})
+                at(50, 47)
+                find_words('pending-before-cancel', {'Pending', 'Cancel'})
+                assert state() == 'Documents 755', state()
+                find_words('click-cancel', {'Cancel'}, 'Cancel')
+                wait_for(lambda: active_frame()[0] == 'Classic-demo', 'Cancel under work-area pressure')
+                assert state() == 'Documents 755', state()
+            finally:
+                set_mode(output['currentModeId'])
+            print(f'{scale:g}x same open dialog retained pending text through resize/style changes; tabs and buttons reachable', flush=True)
+            return
+
         check_general(capture('general'), scale)
         if scale == 1:
             at(107, 37)
@@ -102,6 +192,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('out', type=Path)
     parser.add_argument('--installed', action='store_true')
+    parser.add_argument('--skip-normal', action='store_true', help='only run live small-work-area checks')
     parser.add_argument('--baseline', type=Path, help='apply the same visual checks to a cropped baseline (expected failure)')
     args = parser.parse_args()
     if args.baseline:
@@ -114,12 +205,23 @@ def main():
         install()
         toggle('windows')
     output, = json.loads(user('kscreen-doctor -j'))['outputs']
+    toggle('current')
+    saved = user('mktemp -d /tmp/w7prop-config.XXXXXXXX')
+    user(f'cp -p ~/.config/kdeglobals {saved}/; '
+         "kwriteconfig6 --group General --key font 'Noto Sans,17,-1,5,400,0,0,0,0,0,0,0,0,0,0,1'")
     try:
+        toggle('windows')
         for scale in (1, 1.5):
             user(f'kscreen-doctor output.{output["name"]}.scale.{scale}')
-            exercise(args.out / f'scale-{scale:g}', scale)
+            if not args.skip_normal:
+                exercise(args.out / f'scale-{scale:g}', scale, output)
+            exercise(args.out / f'pressure-{scale:g}', scale, output, pressure=True)
     finally:
-        user(f'kscreen-doctor output.{output["name"]}.scale.{output["scale"]}')
+        user(f'kscreen-doctor output.{output["name"]}.mode.{output["currentModeId"]} '
+             f'output.{output["name"]}.scale.{output["scale"]}')
+        toggle('current')
+        user(f'cp -p {saved}/kdeglobals ~/.config/kdeglobals; rm -r {saved}; '
+             'dbus-send --session --type=signal /KDEPlatformTheme org.kde.KDEPlatformTheme.refreshFonts')
 
 
 if __name__ == '__main__':

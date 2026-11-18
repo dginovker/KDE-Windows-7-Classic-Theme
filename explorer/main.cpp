@@ -20,7 +20,6 @@
 #include <KIO/PasteJob>
 #include <KIO/SimpleJob>
 #include <KIO/CopyJob>
-#include <KPropertiesDialog>
 #include <KUrlMimeData>
 #include <KUser>
 
@@ -711,7 +710,6 @@ class Explorer : public QMainWindow
 public:
     explicit Explorer(const QUrl &start)
     {
-        watchFolderProperties(this);
         auto *central = new QWidget;
         auto *column = new QVBoxLayout(central);
         column->setContentsMargins(0, 0, 0, 0);
@@ -719,6 +717,10 @@ public:
         setCentralWidget(central);
 
         files = new Files(start, this);
+        auto *properties = files->action(KDirOperator::Properties);
+        // Keep KDirOperator's action state and shortcut, but use Explorer's native-dialog subclass.
+        disconnect(properties, &QAction::triggered, files, nullptr);
+        connect(properties, &QAction::triggered, this, [this] { showExplorerProperties(files->selectedItems(), files); });
         files->onMenu = [this](const KFileItem &item, const QPoint &pos) { contextMenu(item, pos); };
         files->setFollowNewDirectories(false);
         files->setInlinePreviewShown(true);  // thumbnails, as Explorer shows by default
@@ -942,7 +944,7 @@ private:
         auto *share = new QMenu(this);
         share->addAction(QStringLiteral("Specific people..."), this, [this] {
             const KFileItemList selection = files->selectedItems();
-            KPropertiesDialog::showDialog(selection.isEmpty() ? files->url() : selection.first().url(), this);
+            showExplorerProperties(selection.isEmpty() ? files->url() : selection.first().url(), this);
         });
 
         auto *viewMenu = new QMenu(this);
@@ -1221,7 +1223,7 @@ private:
             menu.addSeparator();
             menu.addMenu(QStringLiteral("Ne&w"))->addAction(assetIcon(QStringLiteral("folder")), QStringLiteral("&Folder"), files, &KDirOperator::mkdir);
             menu.addSeparator();
-            menu.addAction(QStringLiteral("P&roperties"), this, [this] { KPropertiesDialog::showDialog(files->url(), this); });
+            menu.addAction(QStringLiteral("P&roperties"), this, [this] { showExplorerProperties(files->url(), this); });
         } else {
             const KFileItemList items = files->selectedItems().isEmpty() ? KFileItemList{item} : files->selectedItems();
             auto *openItem = menu.addAction(QStringLiteral("&Open"), this, [this, items] {
