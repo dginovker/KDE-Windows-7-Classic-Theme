@@ -43,6 +43,7 @@ PlasmoidItem {
         onVisibleChanged: if (!visible) root.menuClosedAt = Date.now()
     }
 
+    Classic.TaskWindowIcons { id: taskWindowIcons }
     TaskManager.VirtualDesktopInfo { id: virtualDesktopInfo }
     TaskManager.ActivityInfo { id: activityInfo }
     TaskManager.TasksModel {
@@ -136,6 +137,7 @@ PlasmoidItem {
                         && model.AppId === "org.win7classic.explorer"
                     Classic.TaskWindowIcon {
                         id: windowIcon
+                        registry: taskWindowIcons
                         uuid: task.explorerWindow ? task.model.WinIdList[0] : ""
                     }
                     readonly property bool active: model.IsActive === true && model.IsMinimized !== true

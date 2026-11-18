@@ -1,6 +1,6 @@
-#include <QCoreApplication>
 #include <QDataStream>
 #include <QIcon>
+#include <QPointer>
 #include <QSocketNotifier>
 #include <QTimer>
 #include <QWaylandClientExtension>
@@ -12,26 +12,41 @@
 
 #include "qwayland-plasma-window-management.h"
 
-namespace
+class TaskWindowIcons : public QWaylandClientExtensionTemplate<TaskWindowIcons>, public QtWayland::org_kde_plasma_window_management
 {
-class WindowManagement : public QWaylandClientExtensionTemplate<WindowManagement>, public QtWayland::org_kde_plasma_window_management
-{
+    Q_OBJECT
 public:
-    WindowManagement() : QWaylandClientExtensionTemplate(ORG_KDE_PLASMA_WINDOW_MANAGEMENT_GET_WINDOW_BY_UUID_SINCE_VERSION, QCoreApplication::instance())
+    static constexpr int minimumVersion = ORG_KDE_PLASMA_WINDOW_MANAGEMENT_GET_WINDOW_BY_UUID_SINCE_VERSION;
+    TaskWindowIcons() : QWaylandClientExtensionTemplate(minimumVersion)
     {
+        connect(this, &QWaylandClientExtension::activeChanged, this, [this] {
+            if (!isActive())
+                release();
+        });
         initialize();
     }
-    ~WindowManagement() override
+    ~TaskWindowIcons() override
     {
         if (isActive())
-            wl_proxy_destroy(reinterpret_cast<wl_proxy *>(object()));
+            release();
+    }
+
+Q_SIGNALS:
+    void aboutToRelease();
+
+private:
+    void release()
+    {
+        // Readers and window proxies must go away before this applet's registry binding.
+        Q_EMIT aboutToRelease();
+        wl_proxy_destroy(reinterpret_cast<wl_proxy *>(object()));
     }
 };
-}
 
 class TaskWindowIcon : public QObject, private QtWayland::org_kde_plasma_window
 {
     Q_OBJECT
+    Q_PROPERTY(TaskWindowIcons *registry READ registry WRITE setRegistry NOTIFY registryChanged)
     Q_PROPERTY(QString uuid READ uuid WRITE setUuid NOTIFY uuidChanged)
     Q_PROPERTY(QIcon icon READ icon NOTIFY iconChanged)
     Q_PROPERTY(bool ready READ ready NOTIFY iconChanged)
@@ -46,7 +61,26 @@ public:
     }
     ~TaskWindowIcon() override { release(); }
 
-    static void registerType(const char *uri) { qmlRegisterType<TaskWindowIcon>(uri, 1, 0, "TaskWindowIcon"); }
+    TaskWindowIcons *registry() const { return m_registry; }
+    void setRegistry(TaskWindowIcons *registry)
+    {
+        if (m_registry == registry)
+            return;
+        release();
+        if (m_registry)
+            disconnect(m_registry, nullptr, this, nullptr);
+        m_registry = registry;
+        if (m_registry) {
+            connect(m_registry, &TaskWindowIcons::aboutToRelease, this, &TaskWindowIcon::release);
+            connect(m_registry, &QWaylandClientExtension::activeChanged, this, [this] {
+                if (m_registry->isActive())
+                    lookup();
+            });
+        }
+        Q_EMIT registryChanged();
+        lookup();
+    }
+
     QString uuid() const { return m_uuid; }
     QIcon icon() const { return m_icon; }
     bool ready() const { return !m_icon.isNull(); }
@@ -58,21 +92,26 @@ public:
         release();
         m_uuid = uuid;
         Q_EMIT uuidChanged();
-        if (uuid.isEmpty())
-            return;
-        static auto *management = new WindowManagement;
-        if (!management->isActive() || management->QWaylandClientExtension::version() < ORG_KDE_PLASMA_WINDOW_MANAGEMENT_GET_WINDOW_BY_UUID_SINCE_VERSION) {
-            fail("KWin's plasma-window-management UUID lookup is unavailable");
-            return;
-        }
-        init(management->get_window_by_uuid(uuid));
+        lookup();
     }
 
 Q_SIGNALS:
+    void registryChanged();
     void uuidChanged();
     void iconChanged();
 
 private:
+    void lookup()
+    {
+        if (!m_registry || m_uuid.isEmpty() || isInitialized())
+            return;
+        if (!m_registry->isActive() || m_registry->QWaylandClientExtension::version() < TaskWindowIcons::minimumVersion) {
+            fail("KWin's plasma-window-management UUID lookup is unavailable");
+            return;
+        }
+        init(m_registry->get_window_by_uuid(m_uuid));
+    }
+
     void org_kde_plasma_window_initial_state() override
     {
         if (!m_reader.isEnabled())
@@ -163,6 +202,7 @@ private:
         clearIcon();
     }
 
+    QPointer<TaskWindowIcons> m_registry;
     QString m_uuid;
     QIcon m_icon;
     QSocketNotifier m_reader{QSocketNotifier::Read};
@@ -171,6 +211,10 @@ private:
     bool m_pending = false;
 };
 
-void registerTaskWindowIcon(const char *uri) { TaskWindowIcon::registerType(uri); }
+void registerTaskWindowIcon(const char *uri)
+{
+    qmlRegisterType<TaskWindowIcons>(uri, 1, 0, "TaskWindowIcons");
+    qmlRegisterType<TaskWindowIcon>(uri, 1, 0, "TaskWindowIcon");
+}
 
 #include "TaskWindowIcon.moc"
