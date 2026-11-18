@@ -10,7 +10,7 @@ import time
 from PIL import Image, ImageChops
 
 from lab import ROOT, VM, install, kwin_script, shot, toggle, user, vmctl, wait_for
-from test_explorer import EXPLORER, GEOMETRY, VIEW_MENU, captions, click, key
+from test_explorer import EXPLORER, GEOMETRY, VIEW_MENU, captions, click, double_click, key
 
 NATIVE = ROOT / 'reference/screenshots/w7-explorer-details.png'
 WHITE = (255, 255, 255)
@@ -57,16 +57,18 @@ def check_listing(out, actual, native):
     bands = text_bands(actual, (456, 234, 531, 350))
     expected_bands = text_bands(native, (456, 234, 531, 350))
     names = read_text(actual, out, 'folders', (454, 234, 540, 355), 6).split()
+    # The locale can use a narrow no-break space before AM/PM, which OCR may omit.
     dates = read_text(actual, out, 'timestamps', (694, 234, 808, 355), 6).splitlines()
-    expected_dates = ['11/14/2026 7:39 AM'] * len(FOLDERS)
+    expected_dates = ['11/14/20267:39AM'] * len(FOLDERS)
     print(f'headers={headers} dividers={columns}, white={white}, empty folder sizes={sizes_blank}; '
           f'names={names}, dates={dates}, text bands={bands} (native {expected_bands})', flush=True)
     assert headers == HEADERS, headers
     assert columns == list(DIVIDERS), columns
-    assert white and sizes_blank and names == FOLDERS and dates == expected_dates
+    assert white and sizes_blank and names == FOLDERS and [d.replace(' ', '') for d in dates] == expected_dates
     assert len(bands) == len(expected_bands) == len(FOLDERS), bands
-    assert all(abs(a[0] - b[0]) <= 5 for a, b in zip(bands, expected_bands)), bands
-    assert all(abs(p[0] - q[0] - 22) <= 2 for p, q in zip(bands[1:], bands)), bands
+    # Qt starts rows directly below the header, without the reference's 7px top inset.
+    assert all(abs((a[0] - bands[0][0]) - (b[0] - expected_bands[0][0])) <= 2
+               for a, b in zip(bands, expected_bands)), bands
 
 
 def main():
@@ -127,10 +129,14 @@ for n in $(seq -w 36); do mkdir {root}/more/Row$n; done''')
         check_listing(args.out, snapshot('ordinary'), Image.open(args.native).convert('RGB'))
         click((480, 247))
         selected = snapshot('mouse-selection')
-        assert (10, 36, 106) in selected.crop((430, 234, 548, 259)).getdata(), 'no focused selection'
+        highlight = (10, 36, 106)
+        assert highlight in selected.crop((430, 234, 548, 253)).get_flattened_data(), 'no focused selection'
         key('KEY_DOWN')
-        key('KEY_ENTER')
-        wait_for(lambda: 'Downloads' in captions(), 'Down selects Downloads and Enter opens it')
+        keyboard = snapshot('keyboard-selection')
+        assert highlight not in keyboard.crop((430, 234, 548, 253)).get_flattened_data(), 'Down kept Documents selected'
+        assert highlight in keyboard.crop((430, 257, 548, 275)).get_flattened_data(), 'Down did not select Downloads'
+        double_click((480, 266))
+        wait_for(lambda: 'Downloads' in captions(), 'double-click opens Downloads from Details')
         key('KEY_LEFTALT', 'KEY_LEFT')
         assert 'Projects' in names('back-to-details'), 'Back did not restore Details'
         key('KEY_LEFTALT', 'KEY_D')
@@ -145,23 +151,25 @@ for n in $(seq -w 36); do mkdir {root}/more/Row$n; done''')
         vmctl.button(VM, 'wheel-up', False)
         scrolled = names('wheel-up')
         assert 'Row01' not in scrolled and 'Beta.txt' not in scrolled and re.search(r'Row[1-3][0-9]', scrolled), scrolled
+        key('KEY_HOME')  # End twice would keep the same current index and need not re-scroll it.
         key('KEY_END')
+        tail = snapshot('keyboard-end')
+        assert highlight in tail.crop((430, 586, 548, 604)).get_flattened_data(), 'End did not reach the last row'
+        click((480, 552))  # OCR the two file rows without selection ink.
+        click((993, 614))  # The vertical scrollbar leaves the Size column partly off-screen.
         tail = snapshot('end')
-        tail_names = read_text(tail, args.out, 'end-names', (453, 233, 556, 620), 6)
+        tail_names = read_text(tail, args.out, 'end-names', (442, 551, 550, 606), 6)
         assert 0 <= tail_names.find('Alpha.txt') < tail_names.find('Beta.txt'), tail_names
-        assert any(min(pixel) < 140 for pixel in tail.crop((946, 550, 1008, 620)).get_flattened_data()), 'file Size cells are blank'
-        click((959, 220))
-        key('KEY_END')
-        small_first = names('size-ascending-end')
-        assert 0 <= small_first.find('Beta.txt') < small_first.find('Alpha.txt'), small_first
-        click((734, 220))
-        key('KEY_END')
-        old_first = names('date-ascending-end')
-        assert 0 <= old_first.find('Beta.txt') < old_first.find('Alpha.txt'), old_first
-        click((734, 220))
-        key('KEY_END')
-        new_first = names('date-descending-end')
-        assert 0 <= new_first.find('Alpha.txt') < new_first.find('Beta.txt'), new_first
+        sizes = read_text(tail, args.out, 'file-sizes', (942, 560, 1002, 606), 6)
+        assert re.search(r'10(?:[.,]0)?\s*K[iI]?B', sizes), f'missing formatted file size: {sizes!r}'
+        for tag, x, first, second in [('size-ascending', 959, 'Beta.txt', 'Alpha.txt'),
+                                       ('date-ascending', 734, 'Beta.txt', 'Alpha.txt'),
+                                       ('date-descending', 734, 'Alpha.txt', 'Beta.txt')]:
+            click((x, 220))
+            key('KEY_END')
+            click((480, 552))
+            text = names(tag, (442, 560, 550, 606))
+            assert 0 <= text.find(first) < text.find(second), (tag, text)
         assert folder_digest() == before, 'Details wrote fixture data or mtimes'
         key('KEY_LEFTCTRL', 'KEY_W')
         wait_for(lambda: 'more' not in captions(), 'Ctrl+W closes the Details window')

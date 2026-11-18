@@ -76,10 +76,12 @@ PY''')
             image.crop((422, 209, 565, 299)).resize((572, 360)).save(crop)
             if date_order:
                 # The native triangle follows the label rather than hugging the right divider.
-                match = [x for x in range(755, 799) if all(
-                    image.getpixel((x + offset, y)) == (128, 128, 128)
-                    for y, length in zip(range(219, 222), (1, 3, 5) if date_order == 'ascending' else (5, 3, 1))
-                    for offset in range((5 - length) // 2, (5 + length) // 2))]
+                gray = (128, 128, 128)
+                lengths = (1, 3, 5) if date_order == 'ascending' else (5, 3, 1)
+                match = [(x, top) for x in range(755, 799) for top in range(218, 222) if all(
+                    [i for i in range(5) if image.getpixel((x + i, top + row)) == gray]
+                    == list(range((5 - length) // 2, (5 + length) // 2))
+                    for row, length in enumerate(lengths))]
                 assert match, f'{name}: no {date_order} arrow in Date column'
         text = subprocess.check_output(['tesseract', str(crop), 'stdout', '--psm', '6'], text=True)
         assert 'Name' in text and 0 <= text.find(first) < text.find(last), f'{name}: {text!r}'

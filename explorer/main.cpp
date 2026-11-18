@@ -1048,7 +1048,11 @@ private:
     void hideFocus()
     {
         if (!keyboardUsed)
-            QTimer::singleShot(0, this, [this] { files->view()->selectionModel()->clearCurrentIndex(); });
+            QTimer::singleShot(0, this, [this] {
+                auto *selection = files->view()->selectionModel();
+                if (!keyboardUsed && !selection->hasSelection())
+                    selection->clearCurrentIndex();
+            });
     }
 
     QSortFilterProxyModel *proxy() const { return static_cast<QSortFilterProxyModel *>(files->view()->model()); }
