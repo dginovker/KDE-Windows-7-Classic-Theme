@@ -4,6 +4,7 @@
 #include "ClassicPrimitives.h"
 #include <KConfig>
 #include <KConfigGroup>
+#include <KDirLister>
 #include <KDirModel>
 #include <KDirOperator>
 #include <KFileItemActions>
@@ -759,6 +760,25 @@ public:
         connect(files, &KDirOperator::fileSelected, this, &Explorer::open);
         connect(files, &KDirOperator::finishedLoading, this, &Explorer::updateDetails);
         connect(files, &KDirOperator::finishedLoading, this, &Explorer::hideFocus);
+        // finishedLoading also means canceled or failed, and a reload clears the proxy before any items arrive.
+        auto *lister = files->dirLister();
+        const auto invalidateListing = [this] {
+            listedUrl.clear();
+            empty->hide();
+        };
+        connect(lister, &KDirLister::clear, this, invalidateListing);
+        const auto invalidateCurrent = [this, invalidateListing](const QUrl &url) {
+            if (url.matches(files->url(), QUrl::StripTrailingSlash))
+                invalidateListing();
+        };
+        connect(lister, &KDirLister::started, this, invalidateCurrent);
+        connect(lister, &KDirLister::listingDirCanceled, this, invalidateCurrent);
+        connect(lister, &KDirLister::listingDirCompleted, this, [this](const QUrl &url) {
+            if (url.matches(files->url(), QUrl::StripTrailingSlash)) {
+                listedUrl = url;
+                QMetaObject::invokeMethod(this, &Explorer::updateDetails, Qt::QueuedConnection);
+            }
+        });
         connect(files, &KDirOperator::viewChanged, this, [this](QAbstractItemView *view) {
             view->setFrameShape(QFrame::NoFrame);
             // With the scroll bar "as needed", QListView always reserves its width, which costs Windows' fifth column.
@@ -851,6 +871,7 @@ private:
     NavigationPane *pane = new NavigationPane;
     DetailsPane *details = new DetailsPane;
     QLabel *empty;
+    QUrl listedUrl;
     QActionGroup *views = new QActionGroup(this);
     int viewIndex = -1;
     int iconSize = 96;
@@ -1105,7 +1126,7 @@ private:
         details->text = selected ? QStringLiteral("%1 item%2 selected").arg(selected).arg(selected == 1 ? "" : "s")
                                  : QStringLiteral("%1 item%2").arg(total).arg(total == 1 ? "" : "s");
         details->update();
-        empty->setVisible(total == 0);
+        empty->setVisible(total == 0 && listedUrl.matches(files->url(), QUrl::StripTrailingSlash));
         layoutEmptyMessage();
     }
 
