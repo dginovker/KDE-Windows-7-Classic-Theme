@@ -2,6 +2,7 @@
 // and drawn with Windows' own art (explorer/assets, see reference/tools/extract-assets.py), around KDE's KIO file
 // widgets, which do the actual file management.
 #include "ClassicPrimitives.h"
+#include "FolderProperties.h"
 #include <KConfig>
 #include <KConfigGroup>
 #include <KDirLister>
@@ -710,6 +711,7 @@ class Explorer : public QMainWindow
 public:
     explicit Explorer(const QUrl &start)
     {
+        watchFolderProperties(this);
         auto *central = new QWidget;
         auto *column = new QVBoxLayout(central);
         column->setContentsMargins(0, 0, 0, 0);
