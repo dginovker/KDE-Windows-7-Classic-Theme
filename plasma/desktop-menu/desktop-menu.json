@@ -1,0 +1,9 @@
+{
+    "KPlugin": {
+        "Name": "Windows 7 Classic Desktop Menu",
+        "Description": "Classic desktop commands backed by Plasma's desktop actions",
+        "Icon": "user-desktop",
+        "License": "GPL-3.0-or-later"
+    },
+    "X-Plasma-HasConfigurationInterface": true
+}

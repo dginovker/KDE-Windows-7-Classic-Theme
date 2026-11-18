@@ -30,6 +30,18 @@ Keep unrelated CSS unchanged. Back up the file before editing; Firefox reads use
 
 Dark Reader is separate: **Automation → Use system color scheme**, with behavior **Toggle on/off**, follows the existing live light/dark signal when Firefox follows the system. This is opt-in configuration in Dark Reader; the switcher does not change automation, enabled state, site lists or other extension settings. A manually enabled Dark Reader can still darken web content in Windows mode. Disabling the extension alone can leave injected styles on running pages, so it is not a reliable live substitute. Missing/disabled extensions require no integration. Automatic control of arbitrary Dark Reader settings, with exact per-mode restoration, is not implemented.
 
+## Optional Classic desktop menu
+
+The system package adds **Windows 7 Classic Desktop Menu** to Plasma's Mouse Actions list. Installing it does not change any binding. To use it only in Windows mode:
+
+1. Run `win7-classic windows`. On empty desktop space, open **Desktop and Wallpaper** from the existing menu. With the stock binding you can also use **Ctrl+Shift+D** while the desktop has focus.
+2. Open **Mouse Actions**. Note the current **Right-Button** action (normally **Standard Menu**) and record any settings you rely on using that row’s settings button. Change only that row to **Windows 7 Classic Desktop Menu**, then click **OK**. Leave any other mouse actions and widgets as they are.
+3. Right-click empty desktop space to check the menu. Run `win7-classic current` to save the edited Windows profile and return to your unchanged current-mode bindings. The menu will be there on the next `win7-classic windows`.
+
+**Before uninstalling:** enter Windows mode again, right-click empty desktop space and choose **Personalize → Mouse Actions**. Set **Right-Button** back to the action you noted in step 2. Plasma can reset an action’s options when you change its type; use that row’s settings button to restore the options you noted, then click **OK**. Check that the original menu returns, then run `win7-classic current` to save that reversal to the Windows profile before removing the package. If you separately selected the Classic menu in current mode or on another trigger, undo each of those selections in the mode where you made it. No rebuild or profile reset is needed.
+
+The Classic menu uses real Plasma Folder View and KIO actions for View, Sort by, Refresh, New and Paste. Paste shortcut creates a filesystem link for local file URLs. Screen resolution, Gadgets and Personalize open the KDE settings or widget browser; More icon options, Undo and Edit Mode keep KDE's functionality. Icon and file commands require Folder View. Independent grid snapping and show/hide all desktop icons or gadgets are not provided. Normal file, widget and panel menus are unchanged.
+
 ## Mixed installs and removal
 
 A package plus a development install must both be upgraded: `cd packaging && makepkg -si`, then `./install.sh` as the desktop user. Each cleans its own legacy renderers; install/switch warnings identify legacy copies in the other root. Only the known old Classic decoration identity is migrated in live/saved current settings.

@@ -1,0 +1,5 @@
+<RCC><qresource prefix="/win7-desktop-menu">
+    <file>display.png</file>
+    <file>gadgets.png</file>
+    <file>personalize.png</file>
+</qresource></RCC>

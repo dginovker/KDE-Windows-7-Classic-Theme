@@ -1,0 +1,7 @@
+find_package(Plasma 6.8 REQUIRED)
+set(CMAKE_AUTOMOC ON)
+set(CMAKE_AUTORCC ON)
+add_library(win7desktopmenu MODULE DesktopMenu.cpp icons.qrc)
+set_target_properties(win7desktopmenu PROPERTIES PREFIX "" OUTPUT_NAME org.win7classic.desktopmenu)
+target_link_libraries(win7desktopmenu PRIVATE Qt6::Widgets Plasma::Plasma KF6::KIOFileWidgets KF6::KIOWidgets)
+install(TARGETS win7desktopmenu DESTINATION lib/qt6/plugins/plasma/containmentactions)
