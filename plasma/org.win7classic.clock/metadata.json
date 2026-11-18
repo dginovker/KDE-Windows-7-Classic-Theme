@@ -3,7 +3,7 @@
     "KPlugin": {
         "Authors": [{ "Name": "KDE-Windows-7-Classic-Theme" }],
         "Category": "Windows and Tasks",
-        "Description": "Two-line clock and Show Desktop button",
+        "Description": "Two-line clock with calendar, and Show Desktop button",
         "Icon": "preferences-system-time",
         "Id": "org.win7classic.clock",
         "License": "GPL-3.0-or-later",

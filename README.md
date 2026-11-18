@@ -64,10 +64,13 @@ Delete that file to return to your previous login screen. If the theme fails to 
 - Genuine Windows 7 cursors (`plasma/cursors/Win7-Classic-Cursors/`), including animated wait/working cursors, switch live in KWin and Qt/GTK apps; current mode restores its cursor theme and size. Rebuild with `python reference/tools/extract-cursors.py` (Pillow); source and the monochrome inversion limitation are documented in `reference/cursors/README.md`.
 - Windows art (`explorer/assets/`, `plasma/icons/Win7-Classic/`) is extracted from the reference VM by `reference/tools/extract-assets.py`: icons from imageres/shell32/ExplorerFrame.dll, Back/Forward cropped from reference screenshots because Classic Explorer renders them differently from its bitmaps.
 - Classic taskbar (`plasma/`): Start button, Never-combine task buttons, pinned launchers, notification-area frame around the stock system tray, two-line clock and Show Desktop. Task buttons and pinned items can be dragged into any order. Edges match `reference/screenshots/w7-taskbar.png` pixel-for-pixel; icons and text differ.
+- Click the taskbar time or date (not Show Desktop) to open the Classic calendar above the panel. Use the arrows or Page Up/Down to browse periods, click a day or use the arrow keys to browse days, and click the heading to zoom out to months, years, or decades. The footer opens KDE's Date & Time page; the applet itself never changes the clock. The calendar layout and dial come from `reference/screenshots/w7-calendar.png`; regenerate the dial with `python reference/tools/extract-calendar-dial.py`.
 
 ## Tests
 
-All run from the host against the lab VM and write screenshots to the given directory:
+`bash tests/test_calendar_offscreen.sh` checks QML loading, calendar geometry, Apia’s skipped civil day, midnight rollover, localized labels and advancing seconds without a desktop session or VM (package build dependencies and `en_US.UTF-8` locale).
+
+VM tests run from the host against the lab VM and write screenshots to the given directory:
 
 - `python tests/test_toggle.py [outdir]`: real Kate/Konsole/file-dialog work survives 22 switches, per-mode edits persist, configs return byte-identical, failure and restore paths work.
 - `python tests/test_classic_upgrade.py [outdir]`: old-style Windows activation → current → development/package upgrade → three exact frame round trips, with unchanged KWin PID and both old/new module mappings; an invalid new decoration refuses activation and rolls back. Only test setup restarts the disposable lab session, before measuring each upgrade.
@@ -90,6 +93,7 @@ All run from the host against the lab VM and write screenshots to the given dire
 - `python tests/test_explorer_context.py [outdir]`: actual empty-space/item right-clicks in icon, Details and List views; background pixels against the genuine Windows popup outside text, Sort by, Refresh, New Folder, current-folder Properties, Paste, Paste shortcut (KIO symlinks) and Undo. Group by is omitted because KDirOperator has no grouped-view backend; New exposes only Folder.
 - `python tests/test_taskbar.py [outdir]`: taskbar structure matches the Windows reference outside button faces and tray icons; task buttons minimize/restore, launchers launch, Start and Show Desktop work, it still matches after switching away and back, and dragging a button reorders it and saves the pinned order.
 - `python tests/test_explorer_task_icon.py [outdir]`: genuine 32px Explorer task and jump-list icons, window icon updates through navigation, two independent windows, close/reopen, and the 150% window/launcher icon roles.
+- `python tests/test_calendar.py [outdir]`: lab smoke test at 100% and 150% for popup placement, both clock lines, live hands and digital seconds, previous/next month, pointer and keyboard heading drill-down, Escape/click-away/toggle, and separate Show Desktop.
 - `python tests/test_cursor_assets.py`: reproducible cursor binaries, genuine arrow pixels/hotspot, aliases and 18-frame animations at both sizes.
 - `python tests/test_cursors.py [outdir]`: VM desktop arrow and white/dark text-field pixels, animations and Breeze restoration with unchanged KWin/app PIDs. Temporarily enables a software cursor in the lab (QEMU omits hardware cursors), restarting the lab session only before/after the test, and removes its instrumentation afterward.
 - `python tests/test_icons.py [outdir]`: portal file picker, Dolphin and a Qt/KDE app started before switching render Windows folders only in Windows mode; all three processes survive both directions.

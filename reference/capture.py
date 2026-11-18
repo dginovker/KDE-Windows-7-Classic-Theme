@@ -70,7 +70,16 @@ def tray_popup(x, y=778):
 
 
 # The clock and notification icons change with time and VM state, so they are excluded from comparisons.
-LIVE_REGIONS = {'*': [(1100, 756, 1280, 800)], 'calendar': [(1150, 568, 1248, 704)]}
+LIVE_REGIONS = {
+    '*': [(1100, 756, 1280, 800)],
+    'calendar': [
+        (970, 526, 1260, 544),     # long date
+        (992, 558, 1097, 575),    # month/year (keep both arrow buttons)
+        (964, 600, 1125, 690),    # date cells including the selected day
+        (1146, 568, 1251, 670),   # hands (keep the dial rim)
+        (1134, 686, 1265, 706),   # digital time
+    ],
+}
 
 
 # Keep the notification frame and icons checkable; only its clock text is live.

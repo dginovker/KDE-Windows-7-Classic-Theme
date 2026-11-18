@@ -1,0 +1,6 @@
+cmake_minimum_required(VERSION 3.20)
+project(calendar-quicktest LANGUAGES CXX)
+find_package(Qt6 REQUIRED COMPONENTS Qml QuickTest)
+set(CMAKE_AUTOMOC ON)
+add_executable(calendar-quicktest timezone.cpp)
+target_link_libraries(calendar-quicktest PRIVATE Qt6::Qml Qt6::QuickTest)
