@@ -1,6 +1,9 @@
 #include "ClassicPrimitives.h"
+#include <KWindowShadow>
 #include <QApplication>
 #include <QEvent>
+#include <QHash>
+#include <QMenu>
 #include <QProxyStyle>
 #include <QStyleFactory>
 #include <QStyleOption>
@@ -59,9 +62,13 @@ public:
         m_app=app;
         app->installEventFilter(this);
         enforcePalette();
+        for(auto *widget : QApplication::topLevelWidgets())
+            if(widget->isVisible()) addMenuShadow(widget);
     }
     void unpolish(QApplication *app) override {
         app->removeEventFilter(this);
+        qDeleteAll(m_menuShadows);
+        m_menuShadows.clear();
         m_app=nullptr;
         // KDE emits the destination palette before StyleChanged; keep that palette for the next style.
         app->setPalette(m_externalPalette);
@@ -70,6 +77,7 @@ public:
     bool eventFilter(QObject *watched,QEvent *event) override {
         if(watched==m_app && event->type()==QEvent::ApplicationPaletteChange && !m_applyingPalette)
             enforcePalette();
+        if(event->type()==QEvent::Show) addMenuShadow(watched);
         return QProxyStyle::eventFilter(watched,event);
     }
     void drawPrimitive(PrimitiveElement e,const QStyleOption *o,QPainter *p,const QWidget *w=nullptr) const override {
@@ -159,6 +167,59 @@ public:
         QProxyStyle::drawComplexControl(c,o,p,w);
     }
 private:
+    void addMenuShadow(QObject *object) {
+        auto *menu=qobject_cast<QMenu *>(object);
+        if(!menu || menu->windowType()!=Qt::Popup || menu->windowFlags().testFlag(Qt::NoDropShadowWindowHint)
+           || !QGuiApplication::platformName().startsWith(QLatin1String("wayland"))) return;
+        auto *window=menu->windowHandle();
+        if(!window || m_menuShadows.contains(window)) return;
+        if(!m_shadowTiles[0]) {
+            // Black alpha inferred from the 96-DPI white surround of the genuine Desktop View and Organize captures.
+            // KWin stretches the straight edges and scales the logical-pixel tiles on Wayland.
+            const int edge[]={142,171,212,241,252};
+            const int cap[10][5]={
+                {255,255,255,255,255},{255,255,255,255,255},{255,255,255,255,255},
+                {255,255,255,255,255},{255,255,255,255,255},
+                {242,246,250,253,254},{217,227,241,250,254},{180,199,227,245,253},
+                {155,180,217,242,253},{144,172,213,241,252}
+            };
+            const int corner[5][5]={
+                {155,180,217,242,253},{180,199,227,245,253},{217,227,241,250,254},
+                {242,246,250,253,254},{253,253,254,254,255}
+            };
+            auto tile=[](int width,int height,auto gray) {
+                QImage image(width,height,QImage::Format_ARGB32_Premultiplied);
+                for(int y=0;y<height;++y)
+                    for(int x=0;x<width;++x) image.setPixel(x,y,qRgba(0,0,0,255-gray(x,y)));
+                auto result=KWindowShadowTile::Ptr::create();
+                result->setImage(image);
+                return result;
+            };
+            m_shadowTiles={tile(5,10,[&](int x,int y){return cap[y][x];}),
+                           tile(5,1,[&](int x,int){return edge[x];}),
+                           tile(5,5,[&](int x,int y){return corner[y][x];}),
+                           tile(1,5,[&](int,int y){return edge[y];}),
+                           tile(10,5,[&](int x,int y){return cap[x][y];})};
+        }
+        auto *shadow=new KWindowShadow(this);
+        shadow->setWindow(window);
+        shadow->setTopRightTile(m_shadowTiles[0]);
+        shadow->setRightTile(m_shadowTiles[1]);
+        shadow->setBottomRightTile(m_shadowTiles[2]);
+        shadow->setBottomTile(m_shadowTiles[3]);
+        shadow->setBottomLeftTile(m_shadowTiles[4]);
+        shadow->setPadding(QMargins(0,0,5,5));
+        if(!shadow->create()) {
+            qWarning("Win7Classic: KWindowShadow could not attach a compositor shadow to a QMenu");
+            delete shadow;
+            return;
+        }
+        m_menuShadows.insert(window,shadow);
+        connect(window,&QObject::destroyed,shadow,[this,window,shadow] {
+            m_menuShadows.remove(window);
+            delete shadow;
+        });
+    }
     void drawMenuItem(const QStyleOptionMenuItem &item,QPainter &p,const QWidget *w) const {
         const QRect r=item.rect;
         const bool disabled=!(item.state&State_Enabled), selected=item.state&State_Selected;
@@ -227,6 +288,8 @@ private:
         m_app->setPalette(Classic::palette());
         m_applyingPalette=false;
     }
+    QList<KWindowShadowTile::Ptr> m_shadowTiles;
+    QHash<QWindow *,KWindowShadow *> m_menuShadows;
     QApplication *m_app=nullptr;
     QPalette m_externalPalette;
     bool m_applyingPalette=false;
