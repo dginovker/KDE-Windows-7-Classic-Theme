@@ -157,7 +157,8 @@ def main():
     click(VIEW_MENU)
     time.sleep(1)
     shot(OUT / '5-view-menu.png')
-    key('KEY_UP')  # Details is the last entry
+    for _ in range(3):  # Details, Tiles, Content are the last three entries
+        key('KEY_UP')
     key('KEY_ENTER')
     time.sleep(1)
     vmctl.pointer(VM, 640, 700)

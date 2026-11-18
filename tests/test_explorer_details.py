@@ -125,7 +125,8 @@ for n in $(seq -w 36); do mkdir {root}/more/Row$n; done''')
 
     def details():
         click(VIEW_MENU)
-        key('KEY_UP')
+        for _ in range(3):  # Details, Tiles, Content are the last three entries
+            key('KEY_UP')
         key('KEY_ENTER')
 
     def names(tag, box=(453, 233, 556, 620)):

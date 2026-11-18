@@ -94,7 +94,8 @@ PY''')
 
     def view_menu():
         click((942, 194))
-        key('KEY_UP')
+        for _ in range(3):  # Details, Tiles, Content are the last three entries
+            key('KEY_UP')
         key('KEY_ENTER')
 
     def checked_menu(name, expected, view=False, negative_control=False):
@@ -216,7 +217,7 @@ PY''')
         writer_b = units[-1]
         go('Alpha')
         focus(writer_a)
-        click((917, 194))  # cycle Details to Extra Large Icons
+        click((917, 194))  # cycle Details to Tiles
         focus(writer_b)
         click((735, 224))  # oldest-first, while still in Details in the second process
         go('Gamma')

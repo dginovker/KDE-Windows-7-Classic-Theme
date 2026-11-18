@@ -81,10 +81,9 @@ def exercise(out, scale, root):
     def view(index):
         _, _, width, _ = geometry()
         click(point(x + width - 82, y + 74))
-        # The View popup has six entries. Walk from the top or bottom of the menu.
-        codes = {'details': ('KEY_UP',), 'list': ('KEY_UP', 'KEY_UP'), 'icons': ('KEY_DOWN', 'KEY_DOWN')}
-        for code in codes[index]:
-            key(code)
+        # Use the command-bar order; the separate background submenu below still ends with Details.
+        for _ in range({'details': 6, 'list': 5, 'icons': 2}[index]):
+            key('KEY_DOWN')
         key('KEY_ENTER')
 
     def snapshot(tag, ready=None):
