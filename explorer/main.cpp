@@ -32,6 +32,7 @@
 #include <QDateTime>
 #include <QDir>
 #include <QDragEnterEvent>
+#include <QFontMetricsF>
 #include <QHeaderView>
 #include <QLabel>
 #include <QLineEdit>
@@ -51,6 +52,9 @@
 #include <QTimer>
 #include <QTreeView>
 #include <QVBoxLayout>
+
+#include <algorithm>
+#include <cmath>
 
 namespace classic {
 const auto &face=Classic::Face, &shadow=Classic::Shadow3D, &darkShadow=Classic::DarkShadow3D,
@@ -192,6 +196,16 @@ public:
     }
 };
 
+static QString absoluteDate(const QDateTime &date, const QLocale &locale)
+{
+    // Keep local date order and clock, but not a relative label or a two-digit year.
+    static const QRegularExpression year(QStringLiteral("(?<!y)yy(?!y)"));
+    auto format = locale.dateTimeFormat(QLocale::ShortFormat).split(u'\'');
+    for (qsizetype part = 0; part < format.size(); part += 2)
+        format[part].replace(year, QStringLiteral("yyyy"));
+    return locale.toString(date, format.join(u'\''));
+}
+
 // Keep KIO's model and proxy untouched: translated text must not become the comparison key.
 class DetailsMetadataDelegate : public QStyledItemDelegate
 {
@@ -218,12 +232,7 @@ protected:
             if (!entry.contains(KIO::UDSEntry::UDS_MODIFICATION_TIME))
                 break;
             const QDateTime modified = QDateTime::fromSecsSinceEpoch(entry.numberValue(KIO::UDSEntry::UDS_MODIFICATION_TIME));
-            // Use the local date order and clock, but not a relative label or a two-digit year.
-            static const QRegularExpression year(QStringLiteral("(?<!y)yy(?!y)"));
-            auto format = option->locale.dateTimeFormat(QLocale::ShortFormat).split(u'\'');
-            for (qsizetype part = 0; part < format.size(); part += 2)
-                format[part].replace(year, QStringLiteral("yyyy"));
-            option->text = option->locale.toString(modified, format.join(u'\''));
+            option->text = absoluteDate(modified, option->locale);
             break;
         }
         }
@@ -315,7 +324,8 @@ protected:
         // Menus open on press, as Windows' do.
         if (pressed >= 0 && pressOpens(pressed)) {
             const int part = std::exchange(pressed, -1);
-            parts[part].click();
+            const auto click = parts[part].click;
+            click();
             update();
         }
     }
@@ -323,8 +333,11 @@ protected:
     {
         const int part = std::exchange(pressed, -1);
         update();
-        if (part >= 0 && part == partAt(e->position().toPoint()))
-            parts[part].click();
+        if (part >= 0 && part == partAt(e->position().toPoint())) {
+            // Opening a folder can rebuild the command bar before the callback returns.
+            const auto click = parts[part].click;
+            click();
+        }
     }
     virtual bool pressOpens(int) const { return false; }
 };
@@ -529,24 +542,43 @@ public:
         std::function<void()> act;
     };
     QList<Command> left, right;
+    void setOpen(bool selected, const QString &icon, QMenu *menu)
+    {
+        if (showOpen == selected && openIcon == icon && left[1].menu == menu)
+            return;
+        showOpen = selected;
+        openIcon = icon;
+        left[1].icon = QIcon::fromTheme(icon);
+        left[1].menu = menu;
+        relayout();
+    }
 
     CommandBar() { setFixedHeight(31); }
     void relayout()
     {
         parts.clear();
+        visibleLeft.clear();
+        pressed = -1;
         int x = 2;
         const QFontMetrics metrics(font());
-        for (const Command &command : left) {
-            const int width = 11 + metrics.horizontalAdvance(command.text) + (command.menu ? 15 : 0) + 10;
-            parts.append({QRect(x, 2, width, 27), [this, command, x] { trigger(command, x); }});
+        for (qsizetype i = 0; i < left.size(); ++i) {
+            if (i == 1 && !showOpen)
+                continue;
+            const Command &command = left[i];
+            const int width = 21 + metrics.horizontalAdvance(command.text) + (command.menu ? 15 : 0)
+                              + (command.icon.isNull() ? 0 : 13);
+            visibleLeft.append(i);
+            parts.append({QRect(x, 2, width, 27), [this, command, x, width] { trigger(command, x, width); }});
             x += width;
         }
         // Right-aligned like the reference: view split button, preview pane, help.
         const int offsets[] = {115, 64, 36};
         for (int i = 0; i < right.size(); ++i) {
             const int x = width() - offsets[i];
-            parts.append({QRect(x, 2, right[i].menu ? 47 : 26, 27), [this, i, x] { trigger(right[i], x); }});
+            const int width = right[i].menu ? 47 : 26;
+            parts.append({QRect(x, 2, width, 27), [this, i, x, width] { trigger(right[i], x, width); }});
         }
+        hovered = partAt(mapFromGlobal(QCursor::pos()));
         update();
     }
 
@@ -571,19 +603,27 @@ protected:
                     arrow(p, r.right() - 16, 13, 7);
             } else {
                 p.drawPixmap(r.left() + 5, 7, c.icon.pixmap(16));
-                if (c.menu)
+                if (i < visibleLeft.size()) {
+                    p.drawText(QPoint(r.left() + 24, 19), c.text);
+                    if (c.menu)
+                        arrow(p, r.right() - 16, 13, 7);
+                } else if (c.menu) {
                     arrow(p, r.left() + 34, 13, 7);
+                }
             }
         }
     }
 
 private:
-    const Command &command(int part) const { return part < left.size() ? left[part] : right[part - left.size()]; }
-    void trigger(const Command &command, int x)
+    bool showOpen = false;
+    QString openIcon;
+    QList<int> visibleLeft;
+    const Command &command(int part) const { return part < visibleLeft.size() ? left[visibleLeft[part]] : right[part - visibleLeft.size()]; }
+    void trigger(const Command &command, int x, int width)
     {
-        // A split button (icon and arrow): the icon acts, the arrow opens the menu.
+        // Keep the main action on the text/icon and the menu on the trailing arrow.
         const QPoint cursor = mapFromGlobal(QCursor::pos());
-        if (command.menu && (!command.act || cursor.x() >= x + 26))
+        if (command.menu && (!command.act || cursor.x() >= x + width - 21))
             command.menu->exec(mapToGlobal(QPoint(x, 29)));
         else
             command.act();
@@ -687,21 +727,82 @@ private:
     }
 };
 
-// The item count under the file view, with the folder's own icon: rows 486-533 of the reference client area.
+// Selection fields share the existing 48px strip; see w7-explorer-selection.png.
 class DetailsPane : public QWidget
 {
 public:
-    QString text;
     QIcon icon;
+    QString name, type, modified, size, created;
     DetailsPane() { setFixedHeight(48); }
+
+    void setItems(const KFileItemList &items, bool filesOnly, int total, const QIcon &folderIcon)
+    {
+        const qsizetype count = items.size();
+        const auto item = count ? items.first() : KFileItem();
+        icon = count ? QIcon::fromTheme(item.iconName()) : folderIcon;
+        name = count == 1 ? item.text() : count ? tr("%n items selected", nullptr, count)
+                                               : total == 1 ? tr("1 item") : tr("%n items", nullptr, total);
+        type = count == 1 ? (item.isDir() ? tr("File folder") : item.mimeComment()) : QString();
+        modified = dateProperty(tr("Date modified: %1"), items, KFileItem::ModificationTime);
+        created = filesOnly ? dateProperty(tr("Date created: %1"), items, KFileItem::CreationTime) : QString();
+        size.clear();
+        if (filesOnly) {
+            KIO::filesize_t bytes = 0;
+            bool known = true;
+            for (const auto &file : items) {
+                known &= file.entry().contains(KIO::UDSEntry::UDS_SIZE);
+                bytes += file.size();
+            }
+            if (known)
+                size = tr("Size: %1").arg(locale().formattedDataSize(bytes));
+        }
+        update();
+    }
 
 protected:
     void paintEvent(QPaintEvent *) override
     {
         QPainter p(this);
         p.fillRect(rect(), classic::light);
-        p.drawPixmap(17, -2, icon.pixmap(48));  // Windows lets the top two rows run under the bar above
-        p.drawText(QPoint(79, 16), text);
+        p.setPen(classic::text);
+        p.drawPixmap(17, -2, icon.pixmap(QSize(48, 48), devicePixelRatioF()));
+        const QFontMetricsF metrics(p.font());
+        auto advance = [&metrics](const QString &text) { return int(std::ceil(metrics.horizontalAdvance(text))); };
+        auto draw = [&](int x, int y, const QString &text, int available) {
+            if (!text.isEmpty() && available > 0)
+                p.drawText(QPoint(x, y), advance(text) <= available ? text : metrics.elidedText(text, Qt::ElideRight, available));
+        };
+        const int left = type.isEmpty() ? 79 : 77;
+        const int right = width() - 8;
+        const int first = qMin(qMax(advance(name), advance(type)), qMax(0, (right - left) / 2));
+        draw(left, 16, name, modified.isEmpty() ? right - left : first);
+        draw(left, 34, type, modified.isEmpty() ? right - left : first);
+        const int second = left + first + 4;
+        const int third = second + qMax(210, advance(modified) + 12);
+        draw(second, 16, modified, right - second);
+        const int sizeLeft = second + qMax(0, advance(tr("Date modified:")) - advance(tr("Size:")));
+        draw(sizeLeft, 34, size, right - sizeLeft);
+        draw(third, 16, created, right - third);
+    }
+
+private:
+    QString dateProperty(const QString &label, const KFileItemList &items, KFileItem::FileTimes field) const
+    {
+        QDateTime first, last;
+        for (const auto &item : items) {
+            const auto date = item.time(field);
+            if (!date.isValid())
+                return {};
+            if (!first.isValid() || date < first)
+                first = date;
+            if (!last.isValid() || last < date)
+                last = date;
+        }
+        if (!first.isValid())
+            return {};
+        const auto from = absoluteDate(first, locale());
+        const auto to = absoluteDate(last, locale());
+        return label.arg(from == to ? from : from + QStringLiteral(" - ") + to);
     }
 };
 
@@ -722,6 +823,7 @@ public:
         disconnect(properties, &QAction::triggered, files, nullptr);
         connect(properties, &QAction::triggered, this, [this] { showExplorerProperties(files->selectedItems(), files); });
         files->onMenu = [this](const KFileItem &item, const QPoint &pos) { contextMenu(item, pos); };
+        files->setMode(KFile::Files);
         files->setFollowNewDirectories(false);
         files->setInlinePreviewShown(true);  // thumbnails, as Explorer shows by default
         // KDirOperator remembers its preview panel from file dialogs; Explorer starts without one.
@@ -813,12 +915,12 @@ public:
                 });
             }
             connect(view->selectionModel(), &QItemSelectionModel::selectionChanged, this, &Explorer::updateDetails);
-            connect(view->selectionModel(), &QItemSelectionModel::selectionChanged, this, &Explorer::updateActions);
             // Loading and selection alone miss additions/removals in a folder that's already open.
             constexpr auto connection = Qt::ConnectionType(Qt::QueuedConnection | Qt::UniqueConnection);
             connect(view->model(), &QAbstractItemModel::rowsInserted, this, &Explorer::updateDetails, connection);
             connect(view->model(), &QAbstractItemModel::rowsRemoved, this, &Explorer::updateDetails, connection);
             connect(view->model(), &QAbstractItemModel::modelReset, this, &Explorer::updateDetails, connection);
+            connect(view->model(), &QAbstractItemModel::dataChanged, this, &Explorer::updateDetails, connection);
             QTimer::singleShot(0, this, &Explorer::updateDetails);
         });
         connect(QApplication::clipboard(), &QClipboard::dataChanged, this, &Explorer::updateActions);
@@ -881,6 +983,8 @@ private:
     CommandBar *bar = new CommandBar;
     NavigationPane *pane = new NavigationPane;
     DetailsPane *details = new DetailsPane;
+    QIcon folderIcon;
+    QMenu *openMenu = new QMenu(this);
     QLabel *empty;
     QUrl listedUrl;
     QActionGroup *views = new QActionGroup(this);
@@ -959,7 +1063,17 @@ private:
             a->setCheckable(true);
             views->addAction(a);
         }
+        connect(openMenu, &QMenu::aboutToShow, this, [this] {
+            openMenu->clear();
+            const auto items = files->selectedItems();
+            if (items.size() != 1 || items.first().isDir())
+                return;
+            openWith.setItemListProperties(KFileItemListProperties(items));
+            openWith.setParentWidget(this);
+            openWith.insertOpenWithActionsTo(nullptr, openMenu, {});
+        });
         bar->left = {{QStringLiteral("Organize"), {}, organize, {}},
+                     {QStringLiteral("Open"), {}, nullptr, [this] { openItems(files->selectedItems()); }},
                      {QStringLiteral("Include in library"), {}, library, {}},
                      {QStringLiteral("Share with"), {}, share, {}},
                      {QStringLiteral("New folder"), {}, nullptr, [this] { files->mkdir(); }}};
@@ -1095,7 +1209,7 @@ private:
         for (int size : {16, 22, 32, 48})
             pixels.addPixmap(icon.pixmap(size));
         setWindowIcon(pixels);
-        details->icon = icon;
+        folderIcon = icon;
         if (!std::exchange(stepping, false)) {
             history.resize(position + 1);
             history.append(url);
@@ -1105,6 +1219,7 @@ private:
         nav->search->setPlaceholderText(QStringLiteral("Search ") + name);
         nav->setState(url, position > 0, position < history.size() - 1);
         pane->setLocation(url);
+        updateDetails();
     }
 
     void step(int by)
@@ -1139,11 +1254,13 @@ private:
 
     void updateDetails()
     {
-        const int selected = files->selectedItems().size();
+        const KFileItemList items = files->selectedItems();
         const int total = proxy()->rowCount();
-        details->text = selected ? QStringLiteral("%1 item%2 selected").arg(selected).arg(selected == 1 ? "" : "s")
-                                 : QStringLiteral("%1 item%2").arg(total).arg(total == 1 ? "" : "s");
-        details->update();
+        const bool filesOnly = !items.isEmpty() && std::ranges::all_of(items, &KFileItem::isFile);
+        details->setItems(items, filesOnly, total, folderIcon);
+        bar->setOpen(!items.isEmpty(), filesOnly ? items.first().iconName() : QStringLiteral("org.win7classic.explorer"),
+                     items.size() == 1 && filesOnly ? openMenu : nullptr);
+        updateActions();
         empty->setVisible(total == 0 && listedUrl == listingRoot(files->url()));
         layoutEmptyMessage();
     }
@@ -1184,6 +1301,17 @@ private:
     }
 
     void open(const KFileItem &item) { openUrl(item.targetUrl(), item.mimetype()); }
+
+    void openItems(const KFileItemList &items)
+    {
+        // One folder opens here; multiple selections must not replace each other in this view.
+        if (items.size() == 1 && items.first().isDir()) {
+            files->setUrl(items.first().targetUrl(), true);
+            return;
+        }
+        for (const auto &item : items)
+            open(item);
+    }
 
     void toClipboard(bool cutting)
     {
@@ -1226,10 +1354,7 @@ private:
             menu.addAction(QStringLiteral("P&roperties"), this, [this] { showExplorerProperties(files->url(), this); });
         } else {
             const KFileItemList items = files->selectedItems().isEmpty() ? KFileItemList{item} : files->selectedItems();
-            auto *openItem = menu.addAction(QStringLiteral("&Open"), this, [this, items] {
-                for (const KFileItem &i : items)
-                    i.isDir() ? files->setUrl(i.url(), true) : open(i);
-            });
+            auto *openItem = menu.addAction(QStringLiteral("&Open"), this, [this, items] { openItems(items); });
             menu.setDefaultAction(openItem);
             openWith.setItemListProperties(KFileItemListProperties(items));
             openWith.setParentWidget(this);
