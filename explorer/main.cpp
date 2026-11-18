@@ -768,15 +768,22 @@ public:
         };
         connect(lister, &KDirLister::clear, this, invalidateListing);
         const auto invalidateCurrent = [this, invalidateListing](const QUrl &url) {
-            if (url.matches(files->url(), QUrl::StripTrailingSlash))
+            if (listingRoot(url) == listingRoot(files->url()))
                 invalidateListing();
         };
         connect(lister, &KDirLister::started, this, invalidateCurrent);
         connect(lister, &KDirLister::listingDirCanceled, this, invalidateCurrent);
         connect(lister, &KDirLister::listingDirCompleted, this, [this](const QUrl &url) {
-            if (url.matches(files->url(), QUrl::StripTrailingSlash)) {
-                listedUrl = url;
+            if (listingRoot(url) == listingRoot(files->url())) {
+                listedUrl = listingRoot(url);
                 QMetaObject::invokeMethod(this, &Explorer::updateDetails, Qt::QueuedConnection);
+            }
+        });
+        connect(lister, &KDirLister::redirection, this, [this](const QUrl &oldUrl, const QUrl &newUrl) {
+            // A root rename keeps the rows and does not list again; other root redirects emit clear first.
+            if (listedUrl == listingRoot(oldUrl) && listingRoot(newUrl) == listingRoot(files->url())) {
+                listedUrl = listingRoot(newUrl);
+                updateDetails();
             }
         });
         connect(files, &KDirOperator::viewChanged, this, [this](QAbstractItemView *view) {
@@ -1119,6 +1126,13 @@ private:
 
     QSortFilterProxyModel *proxy() const { return static_cast<QSortFilterProxyModel *>(files->view()->model()); }
 
+    static QUrl listingRoot(QUrl url)
+    {
+        // KDirLister cleans paths even when KDirOperator's startup URL still contains dot segments.
+        url.setPath(QDir::cleanPath(url.path()));
+        return url.adjusted(QUrl::StripTrailingSlash);
+    }
+
     void updateDetails()
     {
         const int selected = files->selectedItems().size();
@@ -1126,7 +1140,7 @@ private:
         details->text = selected ? QStringLiteral("%1 item%2 selected").arg(selected).arg(selected == 1 ? "" : "s")
                                  : QStringLiteral("%1 item%2").arg(total).arg(total == 1 ? "" : "s");
         details->update();
-        empty->setVisible(total == 0 && listedUrl.matches(files->url(), QUrl::StripTrailingSlash));
+        empty->setVisible(total == 0 && listedUrl == listingRoot(files->url()));
         layoutEmptyMessage();
     }
 

@@ -4,7 +4,6 @@ import argparse
 import json
 from pathlib import Path
 import shlex
-import time
 
 from PIL import Image
 
@@ -32,11 +31,8 @@ def position(image, left, top, right, scale):
 def exercise(out, scale, root):
     out.mkdir(parents=True, exist_ok=True)
     unit = f'{Path(root).name}-{round(scale * 100)}'
-    exe = '~/.local/bin/win7-explorer'
     user(f'mkdir -p {root}/Classic-demo/Documents {root}/config-{scale}; '
-         f'cp ~/.config/kdeglobals {root}/config-{scale}/; '
-         f'systemd-run --user --collect -q --unit={unit} --setenv=XDG_CONFIG_HOME={root}/config-{scale} '
-         f'{exe} {root}/Classic-demo')
+         f'cp ~/.config/kdeglobals {root}/config-{scale}/')
     place = (256, 120, 768, 560) if scale == 1 else (42, 45, 730, 405)
     x, y, w, h = place
     match = f'for (const w of workspace.windowList()) if (w.resourceClass == "{EXPLORER}")'
@@ -44,9 +40,26 @@ def exercise(out, scale, root):
     def point(x, y):
         return round(x * scale), round(y * scale)
 
+    def launch(unit, url, caption):
+        user(f'systemd-run --user --collect -q --unit={unit} --setenv=XDG_CONFIG_HOME={root}/config-{scale} '
+             f'~/.local/bin/win7-explorer {shlex.quote(url)}')
+        wait_for(lambda: caption in captions(), f'Explorer at {caption}')
+        focus(caption)
+        assert geometry() == place
+
+    def focus(caption):
+        kwin_script(match + f' if (w.caption == {json.dumps(caption)}) {{ '
+                    f'w.frameGeometry = {{x:{x}, y:{y}, width:{w}, height:{h}}}; workspace.activeWindow = w; }}')
+
     def geometry():
-        (row,) = kwin_query(match + ' { const g = w.frameGeometry; emit(g.x, g.y, g.width, g.height); }')
+        (row,) = kwin_query(match + ' if (workspace.activeWindow == w) { '
+                            'const g = w.frameGeometry; emit(g.x, g.y, g.width, g.height); }')
         return tuple(int(float(n)) for n in row)
+
+    def go(url, caption):
+        key('KEY_LEFTALT', 'KEY_D')
+        vmctl.type_text(VM, url + '\n')
+        wait_for(lambda: caption in captions(), f'navigated to {caption}')
 
     def view(index):
         _, _, width, _ = geometry()
@@ -57,33 +70,53 @@ def exercise(out, scale, root):
             key(code)
         key('KEY_ENTER')
 
-    def snapshot(tag):
+    def snapshot(tag, ready=None):
         vmctl.pointer(VM, 1180, 710)
-        time.sleep(.6)
         path = out / f'{tag}.png'
-        shot(path)
-        with Image.open(path) as image:
-            assert image.size == (1280, 800), image.size
-            return image.convert('RGB')
+        image = None
 
-    def content(image, mode):
-        _, _, width, _ = geometry()
+        def capture():
+            nonlocal image
+            shot(path)
+            with Image.open(path) as frame:
+                assert frame.size == (1280, 800), frame.size
+                image = frame.convert('RGB')
+            return ready is None or ready(image)
+
+        wait_for(capture, f'observable {tag} (last frame: {path})')
+        return image
+
+    def content(image, mode, width):
         left, y0 = point(x + 164, y + 90)
         right = point(x + width - 4, 0)[0]
         # Probe blank space in a column heading, not any text, divider or item.
         probe = point(x + 164 + 175, y + 102)
-        assert (image.getpixel(probe) == WHITE) == (mode != 'details'), f'expected {mode}: {probe}'
+        if (image.getpixel(probe) == WHITE) != (mode != 'details'):
+            return None
         if mode == 'details':
-            top = next(row for row in range(probe[1], y0 + round(28 * scale))
-                       if image.getpixel((probe[0], row)) == WHITE)
+            top = next((row for row in range(probe[1], y0 + round(28 * scale))
+                        if image.getpixel((probe[0], row)) == WHITE), None)
+            if top is None:
+                return None
             assert abs((top - y0) / scale - 23) <= 1, (y0, top)
         else:
             top = y0
         return left, top, right
 
     def empty(tag, mode):
-        image = snapshot(tag)
-        left, top, right = content(image, mode)
+        _, _, width, _ = geometry()
+
+        def label_visible(image):
+            bounds = content(image, mode, width)
+            if bounds:
+                left, top, right = bounds
+                center = (left + right) // 2
+                return ink(image.crop((center - round(75 * scale), top,
+                                       center + round(75 * scale), top + round(45 * scale))))
+            return False
+
+        image = snapshot(tag, label_visible)
+        left, top, right = content(image, mode, width)
         actual = position(image, left, top, right, scale)
         oracle = 'details' if mode == 'details' else 'icons'
         with Image.open(NATIVE / f'w7-explorer-empty-{oracle}.png') as native:
@@ -102,15 +135,25 @@ def exercise(out, scale, root):
         raise AssertionError(f'{tag}: missing foreground ink')
 
     def populated(tag):
-        image = snapshot(tag)
-        left, top, right = content(image, 'details')
+        _, _, width, _ = geometry()
+
+        def first_row(image):
+            bounds = content(image, 'details', width)
+            if bounds is None:
+                return None
+            left, top, _ = bounds
+            return image.crop((left, top, left + round(130 * scale), top + round(46 * scale)))
+
+        image = snapshot(tag, lambda image: (rows := first_row(image)) is not None and ink(rows))
+        left, top, right = content(image, 'details', width)
         middle = (left + right) // 2
         # Sample the start of the message, clear of the file name and Date modified cell.
         message_start = (middle - round(52 * scale), top, min(middle, left + round(272 * scale)), top + round(45 * scale))
         assert not ink(image.crop(message_start)), 'empty label survived'
-        rows = image.crop((left, top, left + round(130 * scale), top + round(46 * scale)))
-        assert ink(rows), 'populated Details lost its first row'
-        return rows.tobytes()
+        return first_row(image).tobytes()
+
+    def icon_ink(image):
+        return ink(image.crop((*point(x + 175, y + 105), *point(x + 269, y + 206))))
 
     def resize(dx, dy):
         _, _, width, height = geometry()
@@ -118,11 +161,14 @@ def exercise(out, scale, root):
         vmctl.button(VM, 'left', True)
         try:
             vmctl.pointer(VM, *point(x + width - 2 + dx, y + height - 2 + dy))
-            time.sleep(.6)
         finally:
             vmctl.button(VM, 'left', False)
-        _, _, new_width, new_height = geometry()
-        assert abs(new_width - width - dx) <= 2 and abs(new_height - height - dy) <= 2, (new_width, new_height)
+
+        def resized():
+            _, _, new_width, new_height = geometry()
+            return abs(new_width - width - dx) <= 2 and abs(new_height - height - dy) <= 2
+
+        wait_for(resized, f'drag resize {width}x{height} by ({dx},{dy})')
 
     def webdav():
         server = f'{unit}-dav'
@@ -138,14 +184,12 @@ def exercise(out, scale, root):
             marker(name, 'responded')
 
         def open_dav(name):
-            key('KEY_LEFTALT', 'KEY_D')
-            vmctl.type_text(VM, f'webdav://127.0.0.1:{port}/{name}/\n')
-            wait_for(lambda: name in captions(), f'navigated to DAV {name}')
+            go(f'webdav://127.0.0.1:{port}/{name}/', name)
             marker(name, 'requested')
 
-        def no_label(tag):
-            image = snapshot(tag)
-            left, top, right = content(image, 'icons')
+        def no_label(tag, ready=None):
+            image = snapshot(tag, ready)
+            left, top, right = content(image, 'icons', w)
             center = (left + right) // 2
             box = ink(image.crop((center - 62, top, center + 62, top + 42)))
             print(f'1x {tag}: label ink={box}', flush=True)
@@ -158,14 +202,13 @@ def exercise(out, scale, root):
             open_dav('Slow')
             no_label('slow-pending')
             release('Slow')
-            image = no_label('slow-populated')
-            assert ink(image.crop((435, 225, 525, 326))), 'delayed listing did not populate'
+            no_label('slow-populated', icon_ink)
             user(f'rm {root}/Slow.{{requested,release,responded}}')
             key('KEY_F5')
             marker('Slow', 'requested')
             no_label('relist-pending')
             release('Slow')
-            assert ink(no_label('relist-populated').crop((435, 225, 525, 326)))
+            no_label('relist-populated', icon_ink)
             open_dav('Superseded')
             no_label('superseded-pending')
             open_dav('Final')
@@ -187,10 +230,38 @@ def exercise(out, scale, root):
         finally:
             user(f'systemctl --user stop {server} || true')
 
+    def root_identity():
+        other_unit = f'{unit}-root'
+        user(f'mkdir -p {root}/identity/{{existing,Direct,Open}}; : > {root}/identity/Open/Sample.txt')
+        try:
+            launch(other_unit, f'file://{root}/identity/existing/../Direct/', 'Direct')
+            empty('direct-dot-segment-root', 'icons')
+            key('KEY_LEFTCTRL', 'KEY_W')
+            wait_for(lambda: 'Direct' not in captions(), 'closed direct-launch window')
+            launch(other_unit + '-rename', f'{root}/identity/Open', 'Open')
+            snapshot('open-root-populated', icon_ink)
+            focus('Final')
+            go(f'{root}/identity', 'identity')
+            # Direct, existing and Open are the three visible icon cells, in name order.
+            snapshot('rename-source', lambda image: ink(image.crop((666, 225, 762, 326))))
+            click(point(x + 455, y + 150))
+            key('KEY_F2')
+            vmctl.type_text(VM, 'Renamed')
+            key('KEY_ENTER')
+            wait_for(lambda: user(f'test -f {root}/identity/Renamed/Sample.txt && echo yes') == 'yes',
+                     'second Explorer renamed the displayed root')
+            wait_for(lambda: 'Renamed' in captions(), 'open root received the KIO rename redirect')
+            focus('Renamed')
+            snapshot('renamed-root-kept-row', icon_ink)
+            key('KEY_LEFTCTRL', 'KEY_E')
+            vmctl.type_text(VM, 'not-a-match')
+            empty('renamed-root-filtered-empty', 'icons')
+        finally:
+            user(f'systemctl --user stop {other_unit} {other_unit}-rename || true')
+
     try:
-        wait_for(lambda: 'Classic-demo' in captions(), 'production Explorer at Classic-demo')
-        kwin_script(match + f' {{ w.frameGeometry = {{x:{x}, y:{y}, width:{w}, height:{h}}}; workspace.activeWindow = w; }}')
-        assert geometry() == place
+        launch(unit, f'{root}/Classic-demo', 'Classic-demo')
+        snapshot('parent-populated', icon_ink)
         click(point(x + 220, y + 150))
         key('KEY_ENTER')
         wait_for(lambda: 'Documents' in captions(), 'opened empty Documents from the icon view')
@@ -207,7 +278,6 @@ def exercise(out, scale, root):
         empty('back-to-details', 'details')
         # Keep the test file's contents and inode through live model changes; never touch user data.
         user(f'printf "fixture\\n" > {root}/Sample.txt; mv {root}/Sample.txt {root}/Classic-demo/Documents/')
-        time.sleep(1.5)
         rows = populated('populated-in-place')
         key('KEY_LEFTCTRL', 'KEY_E')
         vmctl.type_text(VM, 'not-a-match')
@@ -216,7 +286,6 @@ def exercise(out, scale, root):
         key('KEY_BACKSPACE')
         assert rows == populated('filter-cleared'), 'filter changed populated Details geometry'
         user(f'mv {root}/Classic-demo/Documents/Sample.txt {root}/')
-        time.sleep(1.5)
         empty('last-file-removed', 'details')
         key('KEY_LEFTALT', 'KEY_LEFT')
         wait_for(lambda: 'Classic-demo' in captions(), 'Back to populated icon view')
@@ -236,6 +305,7 @@ def exercise(out, scale, root):
         if scale == 1:
             resize(120, 40)
             webdav()
+            root_identity()
     finally:
         user(f'systemctl --user stop {unit} || true')
 
@@ -263,7 +333,7 @@ def main():
     finally:
         user(f'kscreen-doctor output.{output["name"]}.scale.{output["scale"]}; rm -r {root}')
         toggle(initial_mode)
-    print('PASS: empty view changes, content/header spacing, resizing, live file changes, filters and history')
+    print('PASS: empty view changes, resizing, live file changes, filters and history; listing and root identity at 100%')
 
 
 if __name__ == '__main__':
