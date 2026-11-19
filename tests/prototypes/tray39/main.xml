@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kcfg xmlns="http://www.kde.org/standards/kcfg/1.0">
+  <kcfgfile name=""/>
+  <group name="General">
+    <entry name="extraItems" type="StringList"><default></default></entry>
+    <entry name="knownItems" type="StringList"><default></default></entry>
+    <entry name="hiddenItems" type="StringList"><default></default></entry>
+    <entry name="shownItems" type="StringList"><default></default></entry>
+    <entry name="disabledStatusNotifiers" type="StringList"><default></default></entry>
+    <entry name="pin" type="Bool"><default>false</default></entry>
+    <entry name="showAllItems" type="Bool"><default>false</default></entry>
+  </group>
+</kcfg>

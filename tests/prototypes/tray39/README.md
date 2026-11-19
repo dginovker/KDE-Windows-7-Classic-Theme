@@ -1,0 +1,7 @@
+# Source-only probe for issue #39
+
+This CMake project is separate from the installed product. It must not be copied to a live Plasma plugin path or used to switch profiles as-is. It tests a fresh embedded containment with stock applet representations, scoped Classic panel artwork, and direct SNI/DBusMenu handling. It contains no Plasma QML copies and neither edits nor installs any settings. Native applet popups continue to come from each applet and the Plasma shell.
+
+Build with `cmake -S tests/prototypes/tray39 -B <scratch>` and `cmake --build <scratch>`. The built plugin is in `<scratch>/plugins/plasma/applets/`. `migrate.py` reads a named staged Classic layout and writes a byte-exact before/after receipt without touching the input. Run `python tests/prototypes/tray39/test_migrate.py` for the saved layout contract. Run `python tests/prototypes/tray39/reference_art.py /tmp/w7issues/backlog-39-tray <scratch>/art` to verify and regenerate the four genuine art files from the hash-checked 96-DPI captures. `sni-probe` is a future lab diagnostic for an external named-icon fixture that has registered with the real notifier watcher; it exercises real methods and is not run against the operator's session.
+
+A live tray upgrade still needs review of identity, account policy, stock popup reachability, lossless startup and rollback, and real SNI/DBusMenu matrix validation. The source probe is not a supported package or a closure claim.
