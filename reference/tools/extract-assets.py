@@ -107,6 +107,7 @@ ICONS = {
     ('imageres', 184): 'downloads', ('imageres', 117): 'recent-places', ('imageres', 1023): 'libraries',
     ('imageres', 1002): 'library-documents', ('imageres', 1004): 'library-music', ('imageres', 1003): 'library-pictures',
     ('imageres', 1005): 'library-videos', ('imageres', 109): 'computer', ('imageres', 25): 'network',
+    ('imageres', 32): 'drive', ('imageres', 36): 'drive-system',
     ('imageres', 99): 'help', ('shell32', 16757): 'preview-pane',
     ('shell32', 63001): 'view-extra-large', ('shell32', 63008): 'view-large', ('shell32', 63009): 'view-medium',
     ('shell32', 63010): 'view-small', ('shell32', 63000): 'view-command-list', ('shell32', 62998): 'view-details',

@@ -310,7 +310,7 @@ PlasmaCore.Dialog {
                     { label: "Pictures", y: 146, url: StandardPaths.writableLocation(StandardPaths.PicturesLocation) },
                     { label: "Music", y: 180, url: StandardPaths.writableLocation(StandardPaths.MusicLocation) },
                     { label: "Games", y: 217, run: "games" },
-                    { label: "Computer", y: 251, url: "file:///" },
+                    { label: "Computer", y: 251, url: "win7-explorer:/computer" },
                     { label: "Control Panel", y: 288, run: "systemsettings" },
                     { label: "Devices and Printers", y: 322, run: "kcm_printer_manager" },
                     { label: "Default Programs", y: 356, run: "kcm_componentchooser" },

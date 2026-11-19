@@ -21,6 +21,17 @@
   <file>downloads-32.png</file>
   <file>downloads-48.png</file>
   <file>downloads-96.png</file>
+  <file>drive-16.png</file>
+  <file>drive-256.png</file>
+  <file>drive-32.png</file>
+  <file>drive-48.png</file>
+  <file>drive-64.png</file>
+  <file>drive-96.png</file>
+  <file>drive-system-16.png</file>
+  <file>drive-system-256.png</file>
+  <file>drive-system-32.png</file>
+  <file>drive-system-48.png</file>
+  <file>drive-system-96.png</file>
   <file>explorer-128.png</file>
   <file>explorer-16.png</file>
   <file>explorer-24.png</file>
@@ -106,6 +117,10 @@
   <file>refresh.png</file>
   <file>search-hot.png</file>
   <file>search-normal.png</file>
+  <file>view-command-list-16.png</file>
+  <file>view-command-list-20.png</file>
+  <file>view-command-list-24.png</file>
+  <file>view-command-list-32.png</file>
   <file>view-details-16.png</file>
   <file>view-details-20.png</file>
   <file>view-details-24.png</file>
@@ -122,14 +137,6 @@
   <file>view-list-20.png</file>
   <file>view-list-24.png</file>
   <file>view-list-32.png</file>
-  <file>view-tiles-16.png</file>
-  <file>view-tiles-20.png</file>
-  <file>view-tiles-24.png</file>
-  <file>view-tiles-32.png</file>
-  <file>view-command-list-16.png</file>
-  <file>view-command-list-20.png</file>
-  <file>view-command-list-24.png</file>
-  <file>view-command-list-32.png</file>
   <file>view-medium-16.png</file>
   <file>view-medium-20.png</file>
   <file>view-medium-24.png</file>
@@ -138,4 +145,8 @@
   <file>view-small-20.png</file>
   <file>view-small-24.png</file>
   <file>view-small-32.png</file>
+  <file>view-tiles-16.png</file>
+  <file>view-tiles-20.png</file>
+  <file>view-tiles-24.png</file>
+  <file>view-tiles-32.png</file>
 </qresource></RCC>

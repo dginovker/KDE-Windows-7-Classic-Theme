@@ -46,6 +46,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QListView>
+#include <QListWidget>
 #include <QMainWindow>
 #include <QMenu>
 #include <QMenuBar>
@@ -57,11 +58,15 @@
 #include <QPrinter>
 #include <QRegularExpression>
 #include <QScreen>
+#include <QScopedValueRollback>
 #include <QSortFilterProxyModel>
 #include <QScrollBar>
 #include <QSignalBlocker>
+#include <QSet>
 #include <QSplitter>
+#include <QStackedWidget>
 #include <QStandardPaths>
+#include <QStorageInfo>
 #include <QStyle>
 #include <QStyledItemDelegate>
 #include <QStringDecoder>
@@ -457,10 +462,124 @@ protected:
     virtual bool pressOpens(int) const { return false; }
 };
 
+static const QUrl computerUrl(QStringLiteral("win7-explorer:/computer"));
+
+class OverviewTiles : public QStyledItemDelegate
+{
+public:
+    using QStyledItemDelegate::QStyledItemDelegate;
+    enum Role { Target = Qt::UserRole, CapacityText, UsedPercent };
+
+    void paint(QPainter *p, const QStyleOptionViewItem &option, const QModelIndex &item) const override
+    {
+        const bool selected = option.state.testFlag(QStyle::State_Selected);
+        const QRect r = option.rect.adjusted(3, 2, -3, -2);
+        p->save();
+        p->setClipRect(r);
+        if (selected)
+            p->fillRect(r, classic::highlight);
+        p->setPen(selected ? classic::light : classic::text);
+        qvariant_cast<QIcon>(item.data(Qt::DecorationRole)).paint(p, QRect(r.topLeft() + QPoint(4, 2), QSize(48, 48)));
+        const QString usage = item.data(CapacityText).toString();
+        const int left = r.left() + 56, w = r.right() - left - 3;
+        const QFontMetrics metrics(option.font);
+        const int line = metrics.height();
+        const int top = usage.isEmpty() ? r.center().y() - line / 2 : r.center().y() - line - 5;
+        const auto text = [&](int y, const QString &value) {
+            p->drawText(QRect(left, y, w, line), Qt::AlignVCenter, metrics.elidedText(value, Qt::ElideRight, w));
+        };
+        text(top, item.data().toString());
+        if (!usage.isEmpty()) {
+            const QRect meter(left, top + line + 1, w, 11);
+            p->fillRect(meter, classic::light);
+            p->setPen(classic::highlight);
+            p->drawRect(meter.adjusted(0, 0, -1, -1));
+            p->fillRect(meter.left() + 1, meter.top() + 1, (w - 2) * item.data(UsedPercent).toInt() / 100,
+                        meter.height() - 2, classic::highlight);
+            p->setPen(selected ? classic::light : classic::text);
+            text(meter.bottom() + 1, usage);
+        }
+        p->restore();
+    }
+};
+
+class Overview : public QWidget
+{
+public:
+    QListWidget *tiles = new QListWidget;
+    QLabel *heading = new QLabel;
+    Overview()
+    {
+        setAutoFillBackground(true);
+        auto colors = palette();
+        colors.setColor(QPalette::Window, classic::light);
+        colors.setColor(QPalette::Base, classic::light);
+        colors.setColor(QPalette::WindowText, classic::text);
+        setPalette(colors);
+        auto *layout = new QVBoxLayout(this);
+        layout->setContentsMargins(14, 8, 4, 0);
+        layout->setSpacing(4);
+        heading->setTextFormat(Qt::PlainText);
+        layout->addWidget(heading);
+        tiles->setFrameShape(QFrame::NoFrame);
+        tiles->setViewMode(QListView::IconMode);
+        tiles->setMovement(QListView::Static);
+        tiles->setFlow(QListView::LeftToRight);
+        tiles->setResizeMode(QListView::Adjust);
+        tiles->setDragDropMode(QAbstractItemView::NoDragDrop);
+        tiles->setGridSize(QSize(254, qMax(56, fontMetrics().height() * 2 + 18)));
+        tiles->setItemDelegate(new OverviewTiles(tiles));
+        layout->addWidget(tiles, 1);
+    }
+
+    void setComputer()
+    {
+        tiles->clear();
+        QSet<QString> seen;
+        for (const auto &volume : QStorageInfo::mountedVolumes()) {
+            const QString path = volume.rootPath();
+            if (!volume.isValid() || path.isEmpty() || !QFileInfo(path).isDir() || seen.contains(path))
+                continue;
+            seen.insert(path);
+            const auto name = volume.name();
+            const QString label = name.isEmpty() || name == path ? path : tr("%1 (%2)").arg(name, path);
+            auto *item = add(label, assetIcon(path == QLatin1String("/") ? QStringLiteral("drive-system") : QStringLiteral("drive")),
+                             QUrl::fromLocalFile(path));
+            const qint64 free = volume.bytesAvailable(), total = volume.bytesTotal();
+            if (volume.isReady() && total > 0 && free >= 0 && free <= total) {
+                item->setData(OverviewTiles::CapacityText,
+                              tr("%1 free of %2").arg(locale().formattedDataSize(free), locale().formattedDataSize(total)));
+                item->setData(OverviewTiles::UsedPercent, qRound(100.0 * (total - free) / total));
+            }
+        }
+        heading->setText(tr("Storage volumes (%1)").arg(tiles->count()));
+    }
+
+    void filter(const QString &text)
+    {
+        for (int i = 0; i < tiles->count(); ++i) {
+            auto *item = tiles->item(i);
+            item->setHidden(!item->text().contains(text, Qt::CaseInsensitive));
+        }
+    }
+
+private:
+    QListWidgetItem *add(const QString &name, const QIcon &icon, const QUrl &url)
+    {
+        auto *item = new QListWidgetItem(icon, name, tiles);
+        item->setSizeHint(tiles->gridSize());
+        item->setData(OverviewTiles::Target, url);
+        item->setToolTip(url.toLocalFile());
+        return item;
+    }
+};
+
 static QString locationName(const QUrl &url)
 {
-    if (url.isLocalFile() && url.path() == QLatin1String("/"))
+    if (url == computerUrl)
         return QStringLiteral("Computer");
+    if (url.isLocalFile() && url.path() == QLatin1String("/"))
+        return QStringLiteral("File System");
     const QString name = url.adjusted(QUrl::StripTrailingSlash).fileName();
     return name.isEmpty() ? url.toDisplayString() : name;
 }
@@ -657,7 +776,8 @@ private:
     {
         QList<Crumb> list;
         if (!url.isLocalFile()) {
-            list.append({url.toDisplayString(), url, {}, {}});
+            if (!url.isEmpty())
+                list.append({locationName(url), url, {}, {}});
             return list;
         }
         const QString path = QDir::cleanPath(url.toLocalFile());
@@ -668,7 +788,7 @@ private:
             list.append({name.isEmpty() ? user.loginName() : name, QUrl::fromLocalFile(base), {}, {}});
         } else {
             base = QStringLiteral("/");
-            list.append({QStringLiteral("Computer"), QUrl::fromLocalFile(base), {}, {}});
+            list.append({locationName(QUrl::fromLocalFile(base)), QUrl::fromLocalFile(base), {}, {}});
         }
         QString built = base;
         for (const QString &part : QStringView(path).mid(base.size()).toString().split(QLatin1Char('/'), Qt::SkipEmptyParts)) {
@@ -764,11 +884,18 @@ public:
         relayout();
     }
 
+    void setOverview(bool value)
+    {
+        overview = value;
+        relayout();
+    }
+
     CommandBar() { setFixedHeight(31); }
     void relayout()
     {
         parts.clear();
         visibleLeft.clear();
+        visibleRight.clear();
         pressed = -1;
         int x = 2;
         const QFontMetrics metrics(font());
@@ -778,7 +905,7 @@ public:
         QList<std::pair<Command, int>> commands;
         int fullWidth = x;
         for (qsizetype i = 0; i < left.size(); ++i) {
-            if ((i == 1 && !showOpen) || (i == 2 && !showLibrary) || (i == 4 && !showPrint))
+            if ((overview && i != 0) || (i == 1 && !showOpen) || (i == 2 && !showLibrary) || (i == 4 && !showPrint))
                 continue;
             const Command &command = left[i];
             const int width = 21 + metrics.horizontalAdvance(command.text) + (command.menu ? 15 : 0)
@@ -820,9 +947,13 @@ public:
             }}, overflowWidth);
         // Right-aligned like the reference: view split button, preview pane, help.
         for (int i = 0; i < right.size(); ++i) {
+            if (overview && i != 2)
+                continue;
+            const auto &command = right[i];
+            visibleRight.append(command);
             const int x = width() - offsets[i];
-            const int width = right[i].menu ? 47 : 26;
-            parts.append({QRect(x, 2, width, 27), [this, i, x, width] { trigger(right[i], x, width); }});
+            const int width = command.menu ? 47 : 26;
+            parts.append({QRect(x, 2, width, 27), [this, command, x, width] { trigger(command, x, width); }});
         }
         hovered = partAt(mapFromGlobal(QCursor::pos()));
         update();
@@ -861,10 +992,11 @@ protected:
     }
 
 private:
+    bool overview = false;
     bool showOpen = false, showLibrary = true, showPrint = false;
     QString openIcon;
-    QList<Command> visibleLeft;
-    const Command &command(int part) const { return part < visibleLeft.size() ? visibleLeft[part] : right[part - visibleLeft.size()]; }
+    QList<Command> visibleLeft, visibleRight;
+    const Command &command(int part) const { return part < visibleLeft.size() ? visibleLeft[part] : visibleRight[part - visibleLeft.size()]; }
     void trigger(const Command &command, int x, int width)
     {
         // Keep the main action on the text/icon and the menu on the trailing arrow.
@@ -913,7 +1045,7 @@ public:
             {QStringLiteral("Pictures"), QStringLiteral("library-pictures"), path(QStandardPaths::PicturesLocation), true},
             {QStringLiteral("Videos"), QStringLiteral("library-videos"), path(QStandardPaths::MoviesLocation), true},
             {},
-            {QStringLiteral("Computer"), QStringLiteral("computer"), QUrl::fromLocalFile(QStringLiteral("/"))},
+            {QStringLiteral("Computer"), QStringLiteral("computer"), computerUrl},
             {},
             {QStringLiteral("Network"), QStringLiteral("network"), QUrl(QStringLiteral("remote:/"))},
         };
@@ -1079,7 +1211,7 @@ public:
         column->setSpacing(0);
         setCentralWidget(central);
 
-        files = new Files(start, this);
+        files = new Files(start == computerUrl ? QUrl::fromLocalFile(QDir::homePath()) : start, this);
         auto *properties = files->action(KDirOperator::Properties);
         // Keep KDirOperator's action state and shortcut, but use Explorer's native-dialog subclass.
         disconnect(properties, &QAction::triggered, files, nullptr);
@@ -1097,10 +1229,10 @@ public:
         if (files->action(KDirOperator::ShowPreviewPanel)->isChecked())
             files->action(KDirOperator::ShowPreviewPanel)->trigger();
 
-        nav->go = [this](const QUrl &url) { files->setUrl(url, true); };
+        nav->go = [this](const QUrl &url) { navigate(url); };
         nav->back = [this] { step(-1); };
         nav->forward = [this] { step(1); };
-        nav->refresh = [this] { files->action(KDirOperator::Reload)->trigger(); };
+        nav->refresh = [this] { refresh(); };
         nav->history = [this] { return QList<QUrl>(history.rbegin(), history.rend()); };
         nav->places = [this] { return pane->places(); };
         column->addWidget(nav);
@@ -1108,12 +1240,17 @@ public:
         column->addWidget(fileMenuBar);
         column->addWidget(bar);
 
-        pane->go = [this](const QUrl &url) { files->setUrl(url, true); };
+        pane->go = nav->go;
         auto *splitter = new QSplitter;
         splitter->setHandleWidth(3);
         splitter->setStyleSheet(QStringLiteral("QSplitter::handle { background: rgb(212, 208, 200); }"));
         splitter->addWidget(pane);
-        splitter->addWidget(files);
+        pages->addWidget(files);
+        pages->addWidget(overview);
+        splitter->addWidget(pages);
+        connect(overview->tiles, &QListWidget::itemActivated, this, [this](QListWidgetItem *item) {
+            navigate(item->data(OverviewTiles::Target).toUrl());
+        });
         splitter->setStretchFactor(1, 1);
         splitter->setSizes({157, 600});
         column->addWidget(splitter, 1);
@@ -1131,7 +1268,11 @@ public:
         empty->setAttribute(Qt::WA_TransparentForMouseEvents);
         empty->hide();
 
-        connect(files, &KDirOperator::urlEntered, this, &Explorer::entered);
+        connect(files, &KDirOperator::urlEntered, this, [this](const QUrl &url) {
+            // The hidden KDirOperator can still receive a watched-folder rename.
+            if (!inOverview() || openingFolder)
+                entered(url);
+        });
         connect(files, &KDirOperator::fileSelected, this, &Explorer::open);
         connect(files, &KDirOperator::finishedLoading, this, &Explorer::updateDetails);
         connect(files, &KDirOperator::finishedLoading, this, &Explorer::hideFocus);
@@ -1203,6 +1344,10 @@ public:
         connect(KIO::FileUndoManager::self(), &KIO::FileUndoManager::redoAvailable, this, &Explorer::updateActions);
         // Filtering the view's model rather than KDirLister's name filter, which always shows folders.
         connect(nav->search, &QLineEdit::textChanged, this, [this](const QString &text) {
+            if (inOverview()) {
+                overview->filter(text);
+                return;
+            }
             proxy()->setFilterCaseSensitivity(Qt::CaseInsensitive);
             proxy()->setFilterFixedString(text);
             updateDetails();
@@ -1210,7 +1355,8 @@ public:
         // Explorer's Delete moves to the Recycle Bin; Shift+Delete deletes.
         files->action(KDirOperator::Trash)->setShortcut(QKeySequence::Delete);
         files->action(KDirOperator::Delete)->setShortcut(Qt::SHIFT | Qt::Key_Delete);
-        files->action(KDirOperator::Reload)->setShortcut(Qt::Key_F5);
+        files->action(KDirOperator::Reload)->setShortcut({});
+        auto *reload = action(tr("Refresh"), Qt::Key_F5, {}, [this] { refresh(); });
         auto *address = action(QStringLiteral("Address"), QKeySequence(Qt::ALT | Qt::Key_D), QString(), [this] { nav->editAddress(); });
         auto *find = action(QStringLiteral("Search"), QKeySequence(Qt::CTRL | Qt::Key_E), QString(), [this] { nav->search->setFocus(); });
         // KDirOperator's Back/Forward report enabled with no history, so Explorer keeps its own (as Windows' recent pages).
@@ -1218,17 +1364,19 @@ public:
         files->action(KDirOperator::Forward)->setShortcut({});
         auto *back = action(QStringLiteral("Back"), QKeySequence(Qt::ALT | Qt::Key_Left), QString(), [this] { step(-1); });
         auto *forward = action(QStringLiteral("Forward"), QKeySequence(Qt::ALT | Qt::Key_Right), QString(), [this] { step(1); });
-        addActions({files->action(KDirOperator::Trash), files->action(KDirOperator::Delete), files->action(KDirOperator::Rename),
-                    files->action(KDirOperator::Properties), files->action(KDirOperator::Up), files->action(KDirOperator::Reload),
-                    back, forward, cut, copy, paste, undo, redo, selectAll, closeWindow, address, find});
+        folderShortcuts = {files->action(KDirOperator::Trash), files->action(KDirOperator::Delete), files->action(KDirOperator::Rename),
+                           files->action(KDirOperator::Properties), files->action(KDirOperator::Up), cut, copy, paste, selectAll};
+        addActions(folderShortcuts);
+        addActions({back, forward, reload, undo, redo, closeWindow, address, find});
 
         for (auto mode : {KDirOperator::SortByName, KDirOperator::SortByDate, KDirOperator::SortByType, KDirOperator::SortBySize,
                           KDirOperator::SortAscending, KDirOperator::SortDescending}) {
             connect(files->action(mode), &QAction::triggered, this, [this] { rememberSort(); });
         }
-        entered(files->url());
+        entered(start == computerUrl ? start : files->url());
         resize(760, 534);
-        files->view()->setFocus();  // Windows starts with the keyboard in the file list
+        if (!inOverview())
+            files->view()->setFocus();  // Windows starts with the keyboard in the file list
     }
 
 protected:
@@ -1254,6 +1402,33 @@ protected:
 
 private:
     Files *files;
+    QStackedWidget *pages = new QStackedWidget;
+    Overview *overview = new Overview;
+    QList<QAction *> folderShortcuts, folderCommands;
+    bool openingFolder = false;
+
+    bool inOverview() const { return pages->currentWidget() == overview; }
+
+    void navigate(const QUrl &url)
+    {
+        if (url == computerUrl || (inOverview() && url.matches(files->url(), QUrl::StripTrailingSlash))) {
+            entered(url);
+        } else {
+            QScopedValueRollback opening(openingFolder, true);
+            files->setUrl(url, true);
+        }
+    }
+
+    void refresh()
+    {
+        if (inOverview()) {
+            overview->setComputer();
+            overview->filter(nav->search->text());
+            updateDetails();
+        } else {
+            files->rereadDir();
+        }
+    }
     NavigationBand *nav = new NavigationBand;
     CommandBar *bar = new CommandBar;
     NavigationPane *pane = new NavigationPane;
@@ -1413,7 +1588,7 @@ private:
             connect(a, &QAction::triggered, this, [this, i] { chooseView(i); });
         }
         auto *fileMenu = fileMenuBar->addMenu(QStringLiteral("&File"));
-        fileMenu->addAction(QStringLiteral("New &folder"), files, &KDirOperator::mkdir);
+        auto *newFolder = fileMenu->addAction(QStringLiteral("New &folder"), files, &KDirOperator::mkdir);
         fileMenu->addSeparator();
         fileMenu->addActions({trash, rename, properties});
         fileMenu->addSeparator();
@@ -1425,11 +1600,13 @@ private:
         auto *menuView = fileMenuBar->addMenu(QStringLiteral("&View"));
         menuView->addActions(viewMenu->actions());
         menuView->addSeparator();
-        menuView->addAction(files->action(KDirOperator::Reload));
+        menuView->addAction(tr("Refresh"), this, &Explorer::refresh);
         fileMenuBar->addMenu(QStringLiteral("&Tools"))->addAction(options);
         fileMenuBar->addMenu(QStringLiteral("&Help"))->addAction(QStringLiteral("&Help"), this, [this] { openUrl(QUrl(QStringLiteral("help:/"))); });
         for (auto *menu : {fileMenu, editMenu})
             connect(menu, &QMenu::aboutToShow, this, &Explorer::updateActions);
+        folderCommands = {cut, copy, paste, selectAll, trash, rename, properties, preview, newFolder};
+        folderCommands.append(views->actions());
         connect(openMenu, &QMenu::aboutToShow, this, [this] {
             openMenu->clear();
             const auto items = files->selectedItems();
@@ -1590,10 +1767,28 @@ private:
 
     void entered(const QUrl &url)
     {
-        restoreFolderView();
+        const bool computer = url == computerUrl;
+        if (computer != inOverview()) {
+            for (auto *a : folderCommands)
+                a->setVisible(!computer);
+            for (auto *a : folderShortcuts) {
+                if (computer)
+                    removeAction(a);
+                else
+                    addAction(a);
+            }
+            pages->setCurrentWidget(computer ? static_cast<QWidget *>(overview) : files);
+            bar->setOverview(computer);
+        }
+        if (computer) {
+            overview->setComputer();
+            overview->tiles->setFocus();
+        } else {
+            restoreFolderView();
+        }
         const QString name = locationName(url);
         setWindowTitle(name);
-        const QIcon icon = QIcon::fromTheme(KIO::iconNameForUrl(url));
+        const QIcon icon = computer ? assetIcon(QStringLiteral("computer")) : QIcon::fromTheme(KIO::iconNameForUrl(url));
         // As pixels: given a theme icon, Qt sends KWin only its name, and KWin looks it up in its own icon theme,
         // which doesn't follow the live switch to Windows mode's icons.
         QIcon pixels;
@@ -1619,7 +1814,9 @@ private:
             return;
         position += by;
         stepping = true;
-        files->setUrl(history[position], true);
+        navigate(history[position]);
+        if (std::exchange(stepping, false))
+            position -= by;
     }
 
     // Windows draws no focus rectangle until the keyboard is used, but loading and focusing the view make the first
@@ -1645,6 +1842,10 @@ private:
 
     void updateDetails()
     {
+        if (inOverview()) {
+            details->setItems({}, false, overview->tiles->count(), folderIcon);
+            return;
+        }
         const KFileItemList items = files->selectedItems();
         const int total = proxy()->rowCount();
         const bool filesOnly = !items.isEmpty() && std::ranges::all_of(items, &KFileItem::isFile);
@@ -1682,7 +1883,7 @@ private:
         const bool any = !files->selectedItems().isEmpty();
         cut->setEnabled(any);
         copy->setEnabled(any);
-        paste->setEnabled(KUrlMimeData::urlsFromMimeData(QApplication::clipboard()->mimeData()).size() > 0);
+        paste->setEnabled(!inOverview() && KUrlMimeData::urlsFromMimeData(QApplication::clipboard()->mimeData()).size() > 0);
         undo->setEnabled(KIO::FileUndoManager::self()->isUndoAvailable());
         redo->setEnabled(KIO::FileUndoManager::self()->isRedoAvailable());
     }
