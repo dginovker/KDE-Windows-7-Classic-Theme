@@ -97,6 +97,63 @@ TestCase {
         compare(highlighted(), [2046])
         verify(overview.activeFocus)
     }
+    function test_weekdayHeadings() {
+        popup.open()
+        const headings = findChild(popup.mainItem, "weekdayHeadings")
+        const grid = findChild(popup.mainItem, "calendarDays")
+        function checkHeadings(expected, first) {
+            const firstCell = grid.children.find(c => c.index === 0)
+            compare(new Date(firstCell.day).getUTCDay(), first % 7)
+            for (let i = 0; i < 7; ++i) {
+                const item = headings.itemAt(i)
+                verify(item.visible)
+                compare(item.text, expected[i])
+                compare([item.x, item.y, item.width, item.height], [15 + i * 23, 69, 23, 16])
+            }
+        }
+        compare(popup.locale.name, "en_US")
+        checkHeadings(["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"], Qt.Sunday)
+        // Test a Monday-first locale with ambiguous narrow labels, and keep its full short names.
+        popup.locale = Qt.locale("de_DE")
+        checkHeadings(Array.from({length: 7}, (_, i) => popup.locale.standaloneDayName(i + 1, Locale.ShortFormat)), Qt.Monday)
+    }
+    function test_dayFocus() {
+        popup.open()
+        const grid = findChild(popup.mainItem, "calendarDays")
+        const days = grid.children.filter(c => c.dayNumber !== undefined)
+        const today = days.find(c => c.isToday)
+        const previous = days[days.indexOf(today) - 1]
+        function checkCue(cell, visible) {
+            const image = grabImage(popup.mainItem)
+            const cx = grid.x + cell.x, cy = grid.y + cell.y
+            for (let y = 0; y < cell.height; ++y) {
+                for (let x = 0; x < cell.width; ++x) {
+                    const edge = (x >= 1 && x <= 21 && (y === 1 || y === 13))
+                              || (y >= 1 && y <= 13 && (x === 1 || x === 21))
+                    const dot = edge && ((popup.x + cx + x + popup.y + cy + y) & 1) === 1
+                    const color = image.pixel(cx + x, cy + y)
+                    compare(color.toString() === "#f5db95", visible && dot, `day ${cell.dayNumber} cue at ${x},${y}: ${color}`)
+                }
+            }
+        }
+        tryVerify(() => grid.activeFocus)
+        compare(today.y, previous.y)
+        compare(today.x - previous.x, 23)
+        checkCue(today, true)
+        keyClick(Qt.Key_Left)
+        compare(popup.selectedDay, 30)
+        checkCue(previous, true)
+        checkCue(today, false)
+        compare(today.border.width, 1)
+        keyClick(Qt.Key_Tab)
+        verify(!grid.activeFocus)
+        verify(previous.isSelected)
+        compare(previous.color.toString(), "#0a246a")
+        checkCue(previous, false)
+        keyClick(Qt.Key_Backtab)
+        verify(grid.activeFocus)
+        checkCue(previous, true)
+    }
     function test_localizedWeekdaysAndBounds() {
         popup.locale = Qt.locale("ar_SA")
         compare(new Set(popup.weekdays).size, 7)

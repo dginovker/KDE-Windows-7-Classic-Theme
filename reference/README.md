@@ -29,6 +29,7 @@ Windows 7 Ultimate SP1 x64, Classic, 1280×800, 96 DPI, Never combine, large ico
 - Caption: 19px; frame: 4px; caption buttons: 18×18; favorite icons: 32px.
 - ButtonFace: RGB 212,208,200; calendar/volume bodies: white.
 - Native/B calendar: 331×243, rectangle (949,513)–(1280,756).
+- Calendar focus oracle: `screenshots/w7-calendar-focus-even.png` is the unscaled `(1056,645)–(1079,660)` selected-day crop from genuine Windows 7 Classic at 96 DPI, opened on November 19, 2026. The adjacent November 18 cell produced the opposite phase, also present at `(1102,630)–(1125,645)` in `screenshots/w7-calendar.png`. The native dots have odd desktop `x + y` in both captures.
 
 Control fixture mean absolute RGB difference, including text; lower is closer, not a fidelity percentage:
 

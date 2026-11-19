@@ -1,19 +1,22 @@
 #!/usr/bin/env python3
-"""Issue #33 smoke test for the disposable Plasma lab VM; never opens the time KCM."""
+"""Exercise the Classic calendar (#33, #56) in the lab without opening the time KCM."""
 from pathlib import Path
 import json
 import sys
 import time
 
-from PIL import Image
+from PIL import Image, ImageChops
 
-from lab import VM, install, shot, toggle, user, vmctl, wait_for
+from lab import ROOT, VM, install, shot, toggle, user, vmctl, wait_for
 
 OUT = Path(sys.argv[1] if len(sys.argv) > 1 else '/tmp/win7-calendar-test')
 BLACK = (0, 0, 0)
 FACE = (212, 208, 200)
 WHITE = (255, 255, 255)
 BLUE = (10, 36, 106)
+FOCUS = (245, 219, 149)
+REFERENCE = ROOT / 'reference/screenshots/w7-calendar.png'
+EVEN_FOCUS_REFERENCE = REFERENCE.with_name('w7-calendar-focus-even.png')
 
 
 def snapshot(name):
@@ -39,6 +42,96 @@ def is_open(image, scale):
             and image.getpixel((x + round(5 * scale), image.height - round(47 * scale))) == FACE)
 
 
+def points(image, matches):
+    return {(x, y) for y in range(image.height) for x in range(image.width)
+            if matches(image.getpixel((x, y)))}
+
+
+def check_days(scale, opened, snap, click):
+    x, y = geometry(opened, scale)
+
+    def point(dx, dy):
+        return x + round(dx * scale), y + round(dy * scale)
+
+    def cell_origin(index):
+        return 15 + index % 7 * 23, 87 + index // 7 * 15
+
+    def selected(image):
+        cells = []
+        for i in range(42):
+            cx, cy = cell_origin(i)
+            if image.getpixel(point(cx + 3, cy + 4)) == BLUE:
+                cells.append(i)
+        assert len(cells) == 1, f'{scale:g}x: expected one navy day, got {cells}'
+        return cells[0]
+
+    def cell(image, index):
+        cx, cy = cell_origin(index)
+        return image.crop((*point(cx, cy), *point(cx + 23, cy + 15)))
+
+    with Image.open(REFERENCE) as ref:
+        ref = ref.convert('RGB')
+    def ink_box(image):
+        return ImageChops.difference(image, Image.new('RGB', image.size, WHITE)).getbbox()
+
+    for i in range(7):
+        column = 964 + i * 23
+        native = ink_box(ref.crop((column, 582, column + 23, 598)))
+        lab = ink_box(opened.crop((*point(15 + i * 23, 69), *point(15 + (i + 1) * 23, 85))))
+        assert native and lab, f'weekday column {i} has no label'
+        for lo, hi in ((0, 2), (1, 3)):
+            # Compare logical ink spans, allowing Wine Tahoma's glyph metrics and scale rounding.
+            assert abs((lab[hi] - lab[lo]) / scale - (native[hi] - native[lo])) <= 3, (i, native, lab)
+            assert abs((lab[lo] + lab[hi]) / scale - (native[lo] + native[hi])) <= 5, (i, native, lab)
+    with Image.open(EVEN_FOCUS_REFERENCE) as even:
+        native_cues = [points(ref.crop((1102, 630, 1125, 645)), lambda rgb: rgb == FOCUS),
+                       points(even.convert('RGB'), lambda rgb: rgb == FOCUS)]
+    assert all(len(cue) == 32 for cue in native_cues) and not native_cues[0] & native_cues[1]
+
+    def check_cue(image, index, focused):
+        crop = cell(image, index)
+        if scale == 1:
+            mask = points(crop, lambda rgb: rgb == FOCUS)
+            px, py = point(*cell_origin(index))
+            phase = (px + py) % 2
+            expected = native_cues[phase] if focused else set()
+            assert mask == expected, (index, (px, py), focused, len(mask), len(mask & expected))
+        else:
+            # Allow fractional compositor resampling. Require the colored spans to stay inset
+            # against both horizontal edges of the selected cell, not exact native pixels.
+            mask = points(crop, lambda rgb: rgb[0] - rgb[2] > 35 and rgb[1] - rgb[2] > 25)
+            for top in (True, False):
+                xs = [x for x, y in mask if (y < 4 if top else y >= crop.height - 4)]
+                if focused:
+                    assert xs and min(xs) <= 5 and max(xs) >= crop.width - 6, (index, crop.size, top)
+                else:
+                    assert not xs, 'scaled focus cue remained after Tab'
+
+    today = selected(opened)
+    check_cue(opened, today, True)
+    step = 1 if int(user('date +%d')) == 1 else -1
+    vmctl.keys(VM, 'KEY_RIGHT' if step > 0 else 'KEY_LEFT')
+    moved = snap('day-arrow-key')
+    assert selected(moved) == today + step, 'arrow key did not select the neighboring day'
+    check_cue(moved, today + step, True)
+    # The separate Today outline is still visible after moving away from today's date.
+    today_edge = cell(moved, today).crop((4, 0, 8, 1 if scale == 1 else 3))
+    assert any(color == BLUE for _, color in today_edge.getcolors()), 'Today outline disappeared'
+    vmctl.keys(VM, 'KEY_TAB')
+    blurred = snap('day-grid-blurred')
+    assert selected(blurred) == today + step, 'Tab changed the selection'
+    check_cue(blurred, today + step, False)
+    vmctl.keys(VM, 'KEY_LEFTSHIFT', 'KEY_TAB')
+    refocused = snap('day-grid-refocused')
+    assert selected(refocused) == today + step, 'Shift+Tab changed the selection'
+    check_cue(refocused, today + step, True)
+    cx, cy = cell_origin(today)
+    click(cx + 11, cy + 7)
+    clicked = snap('day-pointer')
+    assert selected(clicked) == today, 'click did not select today again'
+    check_cue(clicked, today, True)
+
+
 def check_popup(scale):
     tag = f'{scale:g}x'
     before = snapshot(f'{tag}-closed')
@@ -56,6 +149,7 @@ def check_popup(scale):
 
     click_clock()
     opened = wait_state(True, 'opened-from-time')
+    check_days(scale, opened, lambda name: wait_state(True, name), click)
     month = (x + round(44 * scale), y + round(46 * scale), x + round(147 * scale), y + round(62 * scale))
     seconds = (x + round(188 * scale), y + round(178 * scale), x + round(311 * scale), y + round(189 * scale))
     hands = (x + round(198 * scale), y + round(54 * scale), x + round(301 * scale), y + round(157 * scale))
@@ -148,6 +242,15 @@ def main():
     OUT.mkdir(parents=True, exist_ok=True)
     vmctl.start(VM)
     install()
+    current_clock = 'plugin=org.kde.plasma.digitalclock'
+    classic_clock = 'plugin=org.win7classic.clock'
+
+    def clocks():
+        return user('grep -E "^plugin=(org.kde.plasma.digitalclock|org.win7classic.clock)$" '
+                    '~/.config/plasma-org.kde.plasma.desktop-appletsrc').splitlines()
+
+    current_clocks = clocks()
+    assert current_clock in current_clocks and classic_clock not in current_clocks, current_clocks
     toggle('windows')
     output = json.loads(user('kscreen-doctor -j'))['outputs'][0]
     name, original_scale = output['name'], output['scale']
@@ -159,7 +262,8 @@ def main():
     finally:
         user(f'kscreen-doctor output.{name}.scale.{original_scale}')
         toggle('current')
-    print(f'Calendar popup smoke checks passed; screenshots: {OUT}')
+    assert clocks() == current_clocks, 'current-mode clock applets changed'
+    print(f'Calendar popup checks passed; screenshots: {OUT}')
 
 
 if __name__ == '__main__':

@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 
 import QtQuick
+import QtQuick.Window
 import QtQuick.Templates as T
 import "../../../../../win7-classic/primitives2" as Classic
 import org.kde.plasma.core as PlasmaCore
@@ -23,6 +24,8 @@ PlasmaCore.Dialog {
     readonly property int selectedDay: new Date(selected).getUTCDate()
     property bool followingToday: false
     onTodayChanged: if (followingToday) showToday()
+    readonly property bool usWeekdays: locale.name === "en_US"
+    readonly property int firstDayOfWeek: usWeekdays ? Qt.Sunday : locale.firstDayOfWeek
     readonly property var weekdays: weekdayNames()
     // The native heading zooms out from days to months, years and decades.
     property int overview: 0
@@ -49,9 +52,11 @@ PlasmaCore.Dialog {
     }
 
     function weekdayNames(): var {
-        const order = Array.from({length: 7}, (_, i) => (locale.firstDayOfWeek - 1 + i) % 7 + 1);
+        if (usWeekdays)
+            return ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
+        const order = Array.from({length: 7}, (_, i) => (firstDayOfWeek - 1 + i) % 7 + 1);
         const narrow = order.map(day => locale.standaloneDayName(day, Locale.NarrowFormat));
-        // Some locales (including en_US) reuse narrow labels for different days.
+        // Some locales reuse narrow labels for different days.
         return new Set(narrow).size === 7 ? narrow : order.map(day => locale.standaloneDayName(day, Locale.ShortFormat));
     }
 
@@ -164,7 +169,7 @@ PlasmaCore.Dialog {
     readonly property PlasmaCalendar.Calendar calendar: PlasmaCalendar.Calendar {
         days: 7
         weeks: 6
-        firstDayOfWeek: popup.locale.firstDayOfWeek
+        firstDayOfWeek: popup.firstDayOfWeek
     }
 
     // Pixel geometry from reference/screenshots/w7-calendar.png (origin 949,513).
@@ -243,6 +248,7 @@ PlasmaCore.Dialog {
         }
 
         Repeater {
+            objectName: "weekdayHeadings"
             model: 7
             CalendarText {
                 required property int index
@@ -301,12 +307,27 @@ PlasmaCore.Dialog {
                         color: cell.isSelected ? Classic.Palette.selectionText
                              : cell.isCurrent ? Classic.Palette.text : Classic.Palette.grayText
                     }
-                    Rectangle {
-                        anchors.fill: parent
-                        anchors.margins: 2
-                        visible: cell.isSelected && grid.activeFocus
-                        color: "transparent"
-                        border.color: "#f5db95"
+                    // Native dots lie on odd desktop pixels, not on a fixed cell-relative phase.
+                    // Use scene-graph rectangles so fractional scaling cannot filter a focus texture.
+                    Repeater {
+                        id: cue
+                        readonly property real scale: body.Screen.devicePixelRatio
+                        readonly property int px: Math.round((popup.x + grid.x + cell.x) * scale)
+                        readonly property int py: Math.round((popup.y + grid.y + cell.y) * scale)
+                        readonly property int phase: (px + py) & 1
+                        readonly property int rowDots: 10 + phase
+                        readonly property int sideDots: 6 - phase
+                        model: cell.isSelected && grid.activeFocus ? 32 : 0
+                        Rectangle {
+                            required property int index
+                            readonly property int sideIndex: index - 2 * cue.rowDots
+                            x: sideIndex < 0 ? 2 - cue.phase + index % cue.rowDots * 2
+                                            : sideIndex < cue.sideDots ? 1 : 21
+                            y: sideIndex < 0 ? (index < cue.rowDots ? 1 : 13)
+                                            : 2 + cue.phase + sideIndex % cue.sideDots * 2
+                            width: 1; height: 1
+                            color: "#f5db95"
+                        }
                     }
                     TapHandler {
                         onTapped: {

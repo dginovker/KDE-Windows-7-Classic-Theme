@@ -100,7 +100,7 @@ Both Classic surfaces use Windows 7 Ultimate's genuine 16:10 logon bitmap, accou
 
 ## Tests
 
-`bash tests/test_calendar_offscreen.sh` checks QML loading, calendar geometry, Apia’s skipped civil day, midnight rollover, localized labels and advancing seconds without a desktop session or VM (package build dependencies and `en_US.UTF-8` locale).
+`bash tests/test_calendar_offscreen.sh` checks QML loading, calendar geometry, Apia’s skipped civil day, midnight rollover, English and localized weekday labels, the rasterized day focus cue, and advancing seconds without a desktop session or VM (package build dependencies and `en_US.UTF-8` locale).
 
 `python tests/test_tahoma_bold.py /path/to/extracted-package/usr/share/fonts/win7-classic` checks that HarfBuzz shapes `fi` and `fl` as separate bold letters at their unligated positions (requires Wine, `python-fonttools` and `uharfbuzz`; no VM).
 
@@ -136,7 +136,7 @@ VM tests run from the host against the lab VM and write screenshots to the given
 - `python tests/test_taskbar.py [outdir]`: taskbar structure matches the Windows reference outside button faces and tray icons; task buttons minimize/restore, launchers launch, Start and Show Desktop work, it still matches after switching away and back, and dragging a button reorders it and saves the pinned order.
 - `python tests/test_explorer_task_icon.py [outdir]`: genuine 32px Explorer task and jump-list icons, window icon updates through navigation, two independent windows, close/reopen, and the 150% window/launcher icon roles.
 - `python tests/test_tray_layout.py` checks first-use/upgrade edits, explicit choices and idempotence. `python tests/test_tray.py outdir` uses the installed candidate in the lab at current/100%: it verifies the stock tray artwork, Small spacing, real expand/collapse, context and volume controls, and the calendar anchor at 150%. `python tests/test_tray_rollback.py outdir` injects failures before and after the atomic migration and after the first seed; it checks exact profile bytes, stock panel controls and that target appearance was never applied.
-- `python tests/test_calendar.py [outdir]`: lab smoke test at 100% and 150% for popup placement, both clock lines, live hands and digital seconds, previous/next month, pointer and keyboard heading drill-down, Escape/click-away/toggle, and separate Show Desktop.
+- `python tests/test_calendar.py [outdir]`: lab test at 100% and 150% for popup placement, weekday headings, day focus and selection, both clock lines, live hands and digital seconds, previous/next month, pointer and keyboard heading drill-down, Escape/click-away/toggle, separate Show Desktop, and the current-mode stock clock. Compares the 100% day focus pixels to the genuine Windows 7 screenshot.
 - `python tests/test_cursor_assets.py`: reproducible cursor binaries, genuine arrow pixels/hotspot, aliases and 18-frame animations at both sizes.
 - `python tests/test_cursors.py [outdir]`: VM desktop arrow and white/dark text-field pixels, animations and Breeze restoration with unchanged KWin/app PIDs. Temporarily enables a software cursor in the lab (QEMU omits hardware cursors), restarting the lab session only before/after the test, and removes its instrumentation afterward.
 - `python tests/test_icons.py [outdir]`: portal file picker, Dolphin and a Qt/KDE app started before switching render Windows folders only in Windows mode; all three processes survive both directions.
