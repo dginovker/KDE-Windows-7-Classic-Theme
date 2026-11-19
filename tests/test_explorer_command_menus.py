@@ -131,7 +131,10 @@ def exercise(out, scale, root, explorer='~/.local/bin/win7-explorer'):
 
     # Empty selection: Properties works on the current folder, not on a phantom selection.
     organize()
-    order = text(snap('organize'), 24, 90, 177, 336)
+    menu_image = snap('organize')
+    rename_label = text(menu_image, 27, 277, 124, 293).strip()
+    assert rename_label == 'Rename', f'Organize Rename row: {rename_label!r}'
+    order = text(menu_image, 26, 89, 209, 331)
     for label in ['Cut', 'Copy', 'Paste', 'Undo', 'Redo', 'Select all', 'Layout', 'Folder and search options',
                   'Delete', 'Rename', 'Properties', 'Close']:
         _, marker, order = order.partition(label)
@@ -185,7 +188,7 @@ def exercise(out, scale, root, explorer='~/.local/bin/win7-explorer'):
     time.sleep(.5)
     click(pt(245, 115))
     organize()
-    click(pt(53, 117))  # Copy
+    click(pt(53, 117))  # Copy shares a mnemonic with Cut and Close.
     go(beta, 'Beta')
     organize()
     click(pt(53, 134))  # Paste
@@ -193,11 +196,11 @@ def exercise(out, scale, root, explorer='~/.local/bin/win7-explorer'):
     wait_for(lambda: exists(target), 'Organize Paste creates copy')
     assert user(f'cmp {alpha}/Sample.txt {target} && echo exact') == 'exact'
     organize()
-    click(pt(53, 153))  # Undo
+    key('KEY_U')  # Undo
     wait_for(lambda: not exists(target), 'Organize Undo removes copy')
     organize()
     snap('redo-available')
-    click(pt(53, 169))  # Redo
+    click(pt(53, 169))  # Redo shares a mnemonic with Properties.
     wait_for(lambda: exists(target), 'Organize Redo recreates copy')
     assert user(f'cmp {alpha}/Sample.txt {target} && echo exact') == 'exact'
 
@@ -213,11 +216,12 @@ def exercise(out, scale, root, explorer='~/.local/bin/win7-explorer'):
         key('KEY_F')
         wait_for(lambda: 'Folder Options' in captions(), 'Organize → Folder and search options')
         key('KEY_LEFTALT', choice)
+        key('KEY_SPACE')  # The mnemonic focuses the radio; Space checks it.
         snap(f'browse-folders-{choice}-{confirmation}')
         key(confirmation)
         wait_for(lambda: 'Folder Options' not in captions(), 'Folder Options dismissed')
 
-    folder = pt(250, 118)  # first Content row, filtered to Documents
+    folder = pt(193, 118)  # first Content row, filtered to Documents
     browse_options('KEY_O', 'KEY_ESC')
     assert user(f'sha256sum {options_file}') == before
     double_click(folder)
@@ -235,10 +239,18 @@ def exercise(out, scale, root, explorer='~/.local/bin/win7-explorer'):
     snap('browse-folders-two-windows')
     key('KEY_LEFTCTRL', 'KEY_W')
     wait_for(lambda: captions() == ['Alpha'], 'closing the child leaves the original window open')
-    assert 'Documents' in text(snap('browse-folders-parent-retained'), w - 231, 26, w - 28, 58)
+    assert 'Documents' in text(snap('browse-folders-parent-retained'), w - 244, 31, w - 117, 50)
     key('KEY_LEFTCTRL', 'KEY_W')
     wait_for(lambda: not captions(), 'last Explorer window closed before relaunch')
     launch()
+    # Select an unambiguous item while the restored listing settles into its saved sort order.
+    key('KEY_LEFTCTRL', 'KEY_E')
+    vmctl.type_text(VM, 'Documents')
+    wait_for(lambda: text(snap('browse-folders-relaunched-filter'), 72, 509, 316, 542).strip().replace(' ', '') == '1item',
+             'relaunched listing filtered to the folder item')
+    # The pointer was left over the closed window. Re-enter the new Wayland client
+    # before sending the two clicks at the same coordinates.
+    vmctl.pointer(VM, *pt(170, 280))
     double_click(folder)
     wait_for(lambda: sorted(captions()) == ['Alpha', 'Documents'], 'new window behavior survives relaunch')
     key('KEY_LEFTCTRL', 'KEY_W')
@@ -262,11 +274,12 @@ def main():
     vmctl.start(VM)
     if not args.installed:
         install(reset=False)
-    original_mode = user('~/.local/bin/win7-classic status')
+    switcher = '/usr/bin/win7-classic' if args.explorer == Path('/usr/bin/win7-explorer') else '~/.local/bin/win7-classic'
+    original_mode = user(f'{switcher} status')
     output = json.loads(user('kscreen-doctor -j'))['outputs'][0]
     root = user('mktemp -d /tmp/w7-command-menus.XXXXXXXX')
     try:
-        toggle('windows')
+        toggle('windows', executable=switcher)
         for scale in (1, 1.5):
             user(f'kscreen-doctor output.{output["name"]}.scale.{scale}')
             try:
@@ -275,7 +288,7 @@ def main():
                 user(f'systemctl --user stop {Path(root).name}-{round(scale * 100)}.service', check=False)
     finally:
         user(f'kscreen-doctor output.{output["name"]}.scale.{output["scale"]}; rm -r {root}')
-        toggle(original_mode)
+        toggle(original_mode, executable=switcher)
     print('PASS: production View and Organize, Tiles/Content layouts and preferences, Folder Options and KIO Redo')
 
 

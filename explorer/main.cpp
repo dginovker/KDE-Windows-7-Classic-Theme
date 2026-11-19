@@ -1579,17 +1579,28 @@ private:
         if (dialog.exec() != QDialog::Accepted)
             return;
         KConfig config(QStringLiteral("win7-explorer-optionsrc"), KConfig::SimpleConfig);
-        if (foldersInNewWindow != own->isChecked())
-            config.group("General").writeEntry("OpenFoldersInNewWindow", own->isChecked());
-        auto options = config.group("View");
-        if (files->showHiddenFiles() != hidden->isChecked())
-            options.writeEntry("ShowHidden", hidden->isChecked());
-        if (thumbnails != icons->isChecked())
-            options.writeEntry("Thumbnails", icons->isChecked());
+        const auto warn = [&] {
+            QMessageBox::warning(this, dialog.windowTitle(), tr("Could not save Explorer's folder options."));
+        };
+        const auto edits = {std::tuple{"General", "OpenFoldersInNewWindow", foldersInNewWindow, own->isChecked()},
+                            {"View", "ShowHidden", files->showHiddenFiles(), hidden->isChecked()},
+                            {"View", "Thumbnails", thumbnails, icons->isChecked()}};
+        // KConfig can discard a locked write without making sync() fail.
+        for (const auto &[group, key, before, after] : edits) {
+            const auto target = config.group(group);
+            if (before != after && (target.isImmutable() || target.isEntryImmutable(key))) {
+                warn();
+                return;
+            }
+        }
+        for (const auto &[group, key, before, after] : edits) {
+            if (before != after)
+                config.group(group).writeEntry(key, after);
+        }
         if (!config.sync()) {
             // Don't let KConfig retry rejected edits on destruction if writes recover during the warning.
             config.markAsClean();
-            QMessageBox::warning(this, dialog.windowTitle(), tr("Could not save Explorer's folder options."));
+            warn();
             return;
         }
         foldersInNewWindow = own->isChecked();
@@ -1630,6 +1641,9 @@ private:
         auto *rename = files->action(KDirOperator::Rename);
         trash->setText(QStringLiteral("&Delete"));
         organize->addActions({trash, rename});
+        // Keep the original KIO label in the file-item context menu.
+        connect(organize, &QMenu::aboutToShow, rename, [rename] { rename->setText(QStringLiteral("Re&name")); });
+        connect(organize, &QMenu::aboutToHide, rename, [rename, text = rename->text()] { rename->setText(text); });
         auto *properties = organize->addAction(QStringLiteral("P&roperties"), this, [this] {
             const auto items = files->selectedItems();
             if (items.isEmpty())
