@@ -10,6 +10,8 @@ Decoration {
     alpha: false
     readonly property bool maximized: decoration.client.maximized
     readonly property bool active: decoration.client.active
+    // Wayland reports dialog modality separately from the compositor's window-action capabilities.
+    readonly property bool modal: decoration.client.modal
     readonly property int edge: maximized ? 0 : 4
     readonly property int margin: maximized ? 2 : 6
 
@@ -39,7 +41,8 @@ Decoration {
     Buttons {
         id: leftButtons
         x: root.margin; y: root.edge + 1
-        types: options.titleButtonsLeft
+        types: root.modal ? options.titleButtonsLeft.filter(type => type === DecorationOptions.DecorationButtonMenu)
+            : options.titleButtonsLeft
     }
     Text {
         x: leftButtons.x + leftButtons.width + 2
@@ -57,7 +60,11 @@ Decoration {
     Buttons {
         id: rightButtons
         x: root.width - root.margin - width; y: root.edge + 2
-        types: options.titleButtonsRight
+        types: !root.modal ? options.titleButtonsRight
+            : decoration.client.providesContextHelp
+            ? [DecorationOptions.DecorationButtonQuickHelp, DecorationOptions.DecorationButtonNone,
+               DecorationOptions.DecorationButtonClose]
+            : [DecorationOptions.DecorationButtonClose]
     }
 
     // Laid out here rather than with KWin's ButtonGroup: KWin 6.8 reports the "_" spacer from kwinrc as
@@ -70,8 +77,9 @@ Decoration {
                 required property int modelData
                 sourceComponent: modelData === DecorationOptions.DecorationButtonMenu ? menu
                     : modelData === DecorationOptions.DecorationButtonNone ? spacer
-                    : [DecorationOptions.DecorationButtonMinimize, DecorationOptions.DecorationButtonMaximizeRestore,
-                       DecorationOptions.DecorationButtonClose].indexOf(modelData) >= 0 ? caption : null
+                    : (root.modal && modelData === DecorationOptions.DecorationButtonQuickHelp)
+                      || [DecorationOptions.DecorationButtonMinimize, DecorationOptions.DecorationButtonMaximizeRestore,
+                          DecorationOptions.DecorationButtonClose].includes(modelData) ? caption : null
                 Component { id: menu; MenuButton { width: 16; height: 16 } }
                 Component { id: spacer; Item { width: 2; height: 14 } }
                 Component { id: caption; CaptionButton { buttonType: modelData } }

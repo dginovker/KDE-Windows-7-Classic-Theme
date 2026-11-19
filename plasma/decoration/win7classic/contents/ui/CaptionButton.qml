@@ -11,9 +11,10 @@ Item {
     required property int buttonType
     width: 16
     height: 14
+    readonly property bool contextHelp: buttonType === DecorationOptions.DecorationButtonQuickHelp
     enabled: buttonType === DecorationOptions.DecorationButtonClose ? decoration.client.closeable
         : buttonType === DecorationOptions.DecorationButtonMinimize ? decoration.client.minimizeable
-        : decoration.client.maximizeable
+        : contextHelp ? decoration.client.providesContextHelp : decoration.client.maximizeable
     readonly property bool sunken: mouse.pressed && frame.pointerInside
     Classic.Raster {
         id: frame
@@ -22,16 +23,28 @@ Item {
         button: true
         pressed: button.sunken
         disabled: !button.enabled
-        glyph: button.buttonType === DecorationOptions.DecorationButtonMinimize ? Classic.Raster.Minimize
+        glyph: button.contextHelp ? 0
+            : button.buttonType === DecorationOptions.DecorationButtonMinimize ? Classic.Raster.Minimize
             : button.buttonType === DecorationOptions.DecorationButtonClose ? Classic.Raster.Close
             : decoration.client.maximized ? Classic.Raster.Restore : Classic.Raster.Maximize
+    }
+
+    Text {
+        visible: button.contextHelp
+        anchors.centerIn: parent
+        anchors.horizontalCenterOffset: button.sunken ? 1 : 0
+        anchors.verticalCenterOffset: button.sunken ? 1 : 0
+        text: "?"
+        color: Classic.Palette.text
+        font.pixelSize: 11
+        font.bold: true
     }
 
     MouseArea {
         id: mouse
         anchors.fill: parent
         hoverEnabled: true
-        acceptedButtons: Qt.LeftButton | Qt.MiddleButton | Qt.RightButton
+        acceptedButtons: button.contextHelp ? Qt.LeftButton : Qt.LeftButton | Qt.MiddleButton | Qt.RightButton
         onReleased: (event) => {
             if (event.x < 0 || event.y < 0 || event.x >= width || event.y >= height)
                 return;
@@ -39,6 +52,8 @@ Item {
                 decoration.requestClose();
             else if (button.buttonType === DecorationOptions.DecorationButtonMinimize)
                 decoration.requestMinimize();
+            else if (button.contextHelp)
+                decoration.requestContextHelp();
             else
                 decoration.requestToggleMaximization(event.button);
         }
