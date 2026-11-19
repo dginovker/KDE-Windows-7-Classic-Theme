@@ -67,6 +67,7 @@ PlasmoidItem {
         filterByScreen: true
     }
 
+
     TaskMenu {
         id: taskMenu
         tasks: tasksModel
@@ -142,7 +143,7 @@ PlasmoidItem {
                     readonly property bool explorerWindow: model.IsWindow === true && model.IsGroupParent !== true
                         && model.AppId === "org.win7classic.explorer"
                     Classic.TaskWindowIcon {
-                        id: windowIcon
+                        id: taskIcon
                         registry: taskWindowIcons
                         uuid: task.explorerWindow ? task.model.WinIdList[0] : ""
                     }
@@ -178,8 +179,8 @@ PlasmoidItem {
                             x: (task.launcher ? (task.width - root.taskIconSize) / 2 : 3) + task.shift
                             y: 3 + task.shift
                             width: root.taskIconSize; height: width
-                            visible: !task.explorerWindow || windowIcon.ready
-                            source: task.explorerWindow ? windowIcon.icon : task.plainExplorerPin ? "folder" : task.model.decoration
+                            visible: !task.explorerWindow || taskIcon.ready
+                            source: task.explorerWindow ? taskIcon.icon : task.plainExplorerPin ? "folder" : task.model.decoration
                         }
                         Text {
                             visible: !task.launcher
@@ -200,22 +201,105 @@ PlasmoidItem {
                         text: task.model.display
                         pointer: Qt.point(mouse.mouseX, mouse.mouseY)
                     }
+                    Item { id: hoverAnchor; x: 3; y: -4; width: task.width; height: 1 }
+                    property bool hoverPending: false
+                    property bool hoverNeedsMotion: false
+                    property bool hoverReentered: false
+                    function cancelHover() {
+                        hoverTimer.stop();
+                        hoverPending = false;
+                    }
+                    function showWindowHover() {
+                        if (!hoverPending || !taskIcon.ready || !hoverRow.item
+                                || !mouse.containsMouse || mouse.pressed || taskMenu.visible)
+                            return;
+                        hoverPending = false;
+                        hoverRow.item.open();
+                    }
+                    onActiveChanged: if (!active) hoverNeedsMotion = false
+                    Connections {
+                        target: taskIcon
+                        function onIconChanged() {
+                            if (taskIcon.ready)
+                                task.showWindowHover();
+                            else if (hoverRow.item)
+                                hoverRow.item.visible = false;
+                        }
+                    }
+                    Loader {
+                        id: hoverRow
+                        active: task.explorerWindow
+                        sourceComponent: WindowHover {
+                            anchor: hoverAnchor
+                            titleText: task.model.display
+                            windowIcon: taskIcon.icon
+                            ownerHovered: mouse.containsMouse
+                            canClose: task.model.IsClosable === true
+                            onActivateWindow: tasksModel.requestActivate(tasksModel.makeModelIndex(task.index))
+                            onCloseWindow: tasksModel.requestClose(tasksModel.makeModelIndex(task.index))
+                        }
+                        Connections {
+                            target: taskMenu
+                            function onVisibleChanged() {
+                                if (taskMenu.visible) {
+                                    task.cancelHover();
+                                    if (hoverRow.item)
+                                        hoverRow.item.visible = false;
+                                }
+                            }
+                        }
+                    }
                     Timer {
                         id: hoverTimer
-                        interval: 700
-                        onTriggered: if (mouse.containsMouse && !mouse.pressed && !taskMenu.visible) tooltip.visible = true
+                        // First mapping the Dock can consume much of the native entry interval.
+                        interval: task.explorerWindow ? 372 : 700
+                        onTriggered: {
+                            if (!mouse.containsMouse || mouse.pressed || taskMenu.visible)
+                                return;
+                            if (!task.explorerWindow)
+                                tooltip.visible = true;
+                            else {
+                                task.hoverPending = true;
+                                task.showWindowHover();
+                            }
+                        }
                     }
                     MouseArea {
                         id: mouse
                         anchors.fill: parent
                         hoverEnabled: true
                         acceptedButtons: Qt.LeftButton | Qt.RightButton
-                        onEntered: hoverTimer.restart()
-                        onExited: { hoverTimer.stop(); tooltip.visible = false; }
+                        onEntered: {
+                            if (hoverRow.item?.visible)
+                                hoverRow.item.enteredButton();
+                            else if (!task.hoverNeedsMotion)
+                                hoverTimer.restart();
+                            else
+                                // The entering motion itself does not rearm a just-activated task.
+                                Qt.callLater(() => { task.hoverReentered = mouse.containsMouse; });
+                        }
+                        onExited: {
+                            task.hoverReentered = false;
+                            task.cancelHover();
+                            tooltip.visible = false;
+                            if (hoverRow.item)
+                                hoverRow.item.leftButton();
+                        }
                         property bool dragged: false
                         property real pressX: 0
-                        onPressed: (event) => { hoverTimer.stop(); tooltip.visible = false; dragged = false; pressX = event.x; }
+                        onPressed: (event) => {
+                            task.cancelHover();
+                            tooltip.visible = false;
+                            if (hoverRow.item)
+                                hoverRow.item.visible = false;
+                            dragged = false;
+                            pressX = event.x;
+                        }
                         onPositionChanged: (event) => {
+                            if (task.hoverNeedsMotion && task.hoverReentered && containsMouse && !pressed && !taskMenu.visible) {
+                                task.hoverNeedsMotion = false;
+                                hoverTimer.restart();
+                            }
                             if (!(pressedButtons & Qt.LeftButton) || (!dragged && Math.abs(event.x - pressX) < Qt.styleHints.startDragDistance))
                                 return;
                             dragged = true;
@@ -260,8 +344,13 @@ PlasmoidItem {
                                 tasksModel.requestNewInstance(index);
                             else if (task.active)
                                 tasksModel.requestToggleMinimized(index);
-                            else
+                            else {
+                                if (task.explorerWindow) {
+                                    task.hoverNeedsMotion = true;
+                                    task.hoverReentered = false;
+                                }
                                 tasksModel.requestActivate(index);
+                            }
                         }
                     }
                 }

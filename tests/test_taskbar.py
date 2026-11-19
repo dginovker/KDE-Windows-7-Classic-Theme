@@ -136,8 +136,9 @@ def main():
     time.sleep(1)
     shot(OUT / '1-window-tooltip.png')
     window_tip = Image.open(OUT / '1-window-tooltip.png').convert('RGB')
-    assert any(window_tip.getpixel((x, y)) == (255, 255, 225) for y in range(730, 756) for x in range(180, 400)), 'running window has no Classic tooltip'
-    print('running window button also shows a Classic tooltip')
+    assert window_tip.getpixel((130, 720)) == FACE and window_tip.getpixel((130, 710)) == WHITE
+    assert window_tip.getpixel((241, 734)) == (153, 114, 112), 'running Explorer row has no native Close art'
+    print('running Explorer shows the Classic window hover row')
 
     click(190, 778)
     wait_for(lambda: explorer()[2], 'Explorer minimized by its task button')
