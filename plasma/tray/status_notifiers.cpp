@@ -15,6 +15,10 @@
 #include <QPixmap>
 #include <QPointer>
 #include <QQuickWindow>
+#include <QScreen>
+#include <qpa/qplatformscreen.h>
+#include <KConfigGroup>
+#include <KSharedConfig>
 #include <QtEndian>
 #include <KWaylandExtras>
 #include <KIconEngine>
@@ -283,12 +287,22 @@ void StatusNotifiers::trigger(const QString &address, const QString &method, QQu
         qCritical("Classic tray: missing notifier anchor window");
         return;
     }
-    const auto point = anchor->mapToGlobal(QPointF(anchor->width() / 2, anchor->height() / 2)).toPoint();
+    const auto logical = anchor->mapToGlobal(QPointF(anchor->width() / 2, anchor->height() / 2)).toPoint();
+    auto point = logical;
+    auto *window = anchor->window();
+    const auto config = KSharedConfig::openConfig(QStringLiteral("kdeglobals"), KConfig::NoGlobals);
+    config->reparseConfiguration();
+    if (QGuiApplication::platformName() == u"wayland" && window->screen()
+        && config->group(QStringLiteral("KScreen")).readEntry("XwaylandClientsScale", true)) {
+        const auto *screen = window->screen();
+        point = screen->handle()->geometry().topLeft()
+            + (logical - screen->geometry().topLeft()) * window->devicePixelRatio();
+    }
     const QPointer<QQuickItem> anchorGuard(anchor);
     const auto data = m_items.value(address);
     const auto menu = data.value(u"Menu"_s).value<QDBusObjectPath>().path();
     const bool wantsMenu = method == u"ContextMenu" || (method == u"Activate" && data.value(u"ItemIsMenu"_s).toBool());
-    const auto send = [this, address, method, wantsMenu, menu, point, anchorGuard](const QString &token) {
+    const auto send = [this, address, method, wantsMenu, menu, logical, point, anchorGuard](const QString &token) {
         if (!m_items.contains(address) || !anchorGuard) {
             return;
         }
@@ -296,12 +310,12 @@ void StatusNotifiers::trigger(const QString &address, const QString &method, QQu
         if (!token.isEmpty()) {
             bus.asyncCall(itemCall(address, u"ProvideXdgActivationToken"_s) << token);
         }
-        const auto context = [this, address, menu, point, anchorGuard, bus] {
+        const auto context = [this, address, menu, logical, point, anchorGuard, bus] {
             if (!anchorGuard || !m_items.contains(address)) {
                 return;
             }
             if (!menu.isEmpty() && menu != u"/" && menu != u"/NO_DBUSMENU") {
-                Q_EMIT menuRequested(address, menu, anchorGuard, point.x(), point.y());
+                Q_EMIT menuRequested(address, menu, anchorGuard, logical.x(), logical.y());
             } else {
                 bus.asyncCall(itemCall(address, u"ContextMenu"_s) << point.x() << point.y());
             }
@@ -311,14 +325,11 @@ void StatusNotifiers::trigger(const QString &address, const QString &method, QQu
             return;
         }
         auto *pending = new QDBusPendingCallWatcher(bus.asyncCall(itemCall(address, method) << point.x() << point.y()), this);
-        connect(pending, &QDBusPendingCallWatcher::finished, this, [pending, context, method, address] {
+        connect(pending, &QDBusPendingCallWatcher::finished, this, [pending, method, address] {
             const QDBusPendingReply<void> reply = *pending;
             pending->deleteLater();
             if (reply.isError()) {
                 qWarning().noquote() << "Classic tray:" << method << "failed for" << address << reply.error().message();
-                if (method == u"Activate") {
-                    context();
-                }
             }
         });
     };
