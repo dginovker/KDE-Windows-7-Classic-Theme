@@ -1432,6 +1432,20 @@ public:
             files->view()->setFocus();  // Windows starts with the keyboard in the file list
     }
 
+    ~Explorer() override
+    {
+        // KIO may emit listing or selection signals while QWidget tears down the file view,
+        // after Explorer's listing state is already destroyed.
+        disconnect(files->dirLister(), nullptr, this, nullptr);
+        for (auto *sender : files->findChildren<QObject *>())
+            disconnect(sender, nullptr, this, nullptr);
+        disconnect(files, nullptr, this, nullptr);
+        if (auto *view = files->view()) {
+            view->removeEventFilter(this);
+            view->viewport()->removeEventFilter(this);
+        }
+    }
+
 protected:
     // KDirOperator's icon view sizes its grid from the font after every resize; Explorer's grid is reapplied after it.
     bool eventFilter(QObject *watched, QEvent *event) override

@@ -233,10 +233,11 @@ def exercise(out, scale, root, explorer='~/.local/bin/win7-explorer'):
         wait_for(lambda: 'Folder Options' not in captions(), 'Folder Options dismissed')
 
     folder = pt(193, 118)  # first Content row, filtered to Documents
-    def explicit_open():
+    def explicit_open(policy):
         click(folder, 'right')
-        menu = snap('folder-item-open-menu')
-        assert 'Open' in words(menu, (folder[0], folder[1], folder[0] + 140, folder[1] + 24))
+        menu = snap(f'folder-item-open-{policy}')
+        assert captions() == ['Alpha'], 'Explorer must survive opening the folder item menu'
+        assert 'Open' in words(menu, (folder[0] + 12, folder[1], folder[0] + 140, folder[1] + 25))
         key('KEY_O')
 
     browse_options('KEY_O', 'KEY_ESC')
@@ -257,7 +258,7 @@ def exercise(out, scale, root, explorer='~/.local/bin/win7-explorer'):
     key('KEY_LEFTCTRL', 'KEY_W')
     wait_for(lambda: captions() == ['Alpha'], 'closing the child leaves the original window open')
     assert 'Documents' in text(snap('browse-folders-parent-retained'), w - 244, 31, w - 117, 50)
-    explicit_open()
+    explicit_open('new-window')
     wait_for(lambda: sorted(captions()) == ['Alpha', 'Documents'], 'explicit Open leaves parent and opens a new window')
     key('KEY_LEFTCTRL', 'KEY_W')
     wait_for(lambda: captions() == ['Alpha'], 'explicit Open child closes, retaining its parent')
@@ -278,7 +279,7 @@ def exercise(out, scale, root, explorer='~/.local/bin/win7-explorer'):
     wait_for(lambda: captions() == ['Alpha'], 'child closes after relaunch')
     browse_options('KEY_S', 'KEY_ENTER')
     assert 'OpenFoldersInNewWindow=false' in user(f'cat {options_file}')
-    explicit_open()
+    explicit_open('same-window')
     wait_for(lambda: captions() == ['Documents'], 'explicit Open uses the same window after restoring Options')
     print("PASS explicit item Open: separate-window and same-window policies")
     key('KEY_LEFTALT', 'KEY_LEFT')
