@@ -138,12 +138,12 @@ protected:
             Containment::restoreContents(empty);
         }
         m_restored = true;
-        for (const auto &bus : {QDBusConnection::sessionBus(), QDBusConnection::systemBus()}) {
+        for (auto bus : {QDBusConnection::sessionBus(), QDBusConnection::systemBus()}) {
             bus.connect(QStringLiteral("org.freedesktop.DBus"), QStringLiteral("/org/freedesktop/DBus"),
                         QStringLiteral("org.freedesktop.DBus"), QStringLiteral("NameOwnerChanged"),
                         this, SLOT(serviceChanged(QString,QString,QString)));
         }
-        const auto session = QDBusConnection::sessionBus();
+        auto session = QDBusConnection::sessionBus();
         for (const auto &signal : {"packageInstalled", "packageUpdated", "packageUninstalled"}) {
             session.connect(QString(), QStringLiteral("/KPackage/Plasma/Applet"), QStringLiteral("org.kde.plasma.kpackage"),
                             QString::fromLatin1(signal), this, SLOT(packageChanged(QString)));
@@ -219,7 +219,7 @@ private:
         }
         QStringList services;
         if (!m_services.empty()) {
-            for (const auto &bus : {QDBusConnection::sessionBus(), QDBusConnection::systemBus()}) {
+            for (auto bus : {QDBusConnection::sessionBus(), QDBusConnection::systemBus()}) {
                 const auto names = bus.interface()->registeredServiceNames();
                 if (names.isValid()) {
                     services += names.value();
