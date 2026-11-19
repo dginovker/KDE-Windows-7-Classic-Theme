@@ -3,6 +3,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls as Controls
 import QtQuick.Layouts
+import org.kde.kquickcontrols as KQuickControls
 import org.kde.plasma.plasmoid
 
 Controls.ScrollView {
@@ -14,6 +15,8 @@ Controls.ScrollView {
     property var cfg_hiddenItems: []
     property var cfg_disabledStatusNotifiers: []
     readonly property var backend: Plasmoid
+    property var pendingShortcuts: new Map()
+    readonly property bool unsavedChanges: pendingShortcuts.size > 0
     readonly property var options: [qsTr("Show when relevant"), qsTr("Always show"), qsTr("Only in popup"), qsTr("Disabled")]
     readonly property var notifiers: {
         const entries = new Map();
@@ -21,6 +24,26 @@ Controls.ScrollView {
             entries.set(n.persistentId, {id: n.persistentId, name: n.Title || n.Id, notifier: true});
         }
         return [...entries.values()];
+    }
+
+    function stageShortcut(applet, shortcut) {
+        const next = new Map(pendingShortcuts);
+        if (shortcut === applet.globalShortcut.toString()) {
+            next.delete(applet);
+        } else {
+            next.set(applet, shortcut);
+        }
+        pendingShortcuts = next;
+    }
+
+    function saveConfig() {
+        // The applet can disappear while the dialog is open (for example, after a service exits).
+        for (const applet of backend.applets) {
+            if (pendingShortcuts.has(applet)) {
+                applet.globalShortcut = pendingShortcuts.get(applet);
+            }
+        }
+        pendingShortcuts = new Map();
     }
 
     function put(list, id, include) {
@@ -45,12 +68,15 @@ Controls.ScrollView {
             delegate: RowLayout {
                 id: row
                 required property var modelData
+                readonly property var applet: modelData.notifier ? null
+                    : page.backend.applets.find(candidate => candidate.pluginName === modelData.id) ?? null
                 Controls.Label {
                     Layout.fillWidth: true
                     text: row.modelData.name
                     elide: Text.ElideRight
                 }
                 Controls.ComboBox {
+                    id: visibility
                     Accessible.name: row.modelData.name
                     model: page.options
                     currentIndex: page.policy(row.modelData)
@@ -64,6 +90,20 @@ Controls.ScrollView {
                             page.cfg_extraItems = page.put(page.cfg_extraItems, id, value !== 3);
                         }
                     }
+                }
+                KQuickControls.KeySequenceItem {
+                    visible: !row.modelData.notifier
+                    enabled: row.applet !== null && visibility.currentIndex !== 3
+                    keySequence: page.pendingShortcuts.get(row.applet) ?? row.applet?.globalShortcut ?? ""
+                    onCaptureFinished: if (row.applet) page.stageShortcut(row.applet, keySequence.toString())
+                }
+                Controls.Button {
+                    readonly property var configureAction: row.applet?.internalAction("configure") ?? null
+                    visible: configureAction?.visible ?? false
+                    enabled: configureAction?.enabled ?? false
+                    Accessible.name: configureAction?.text ?? ""
+                    icon.name: "configure"
+                    onClicked: configureAction.trigger()
                 }
             }
         }
