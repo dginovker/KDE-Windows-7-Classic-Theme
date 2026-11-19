@@ -237,8 +237,11 @@ def exercise(out, scale, root, explorer='~/.local/bin/win7-explorer'):
         click(folder, 'right')
         menu = snap(f'folder-item-open-{policy}')
         assert captions() == ['Alpha'], 'Explorer must survive opening the folder item menu'
-        assert 'Open' in words(menu, (folder[0] + 12, folder[1], folder[0] + 140, folder[1] + 25))
-        click((folder[0] + 40, folder[1] + 12))  # Open Folder With has the same mnemonic.
+        row = words(menu, (folder[0] + 16, folder[1] + 2, folder[0] + 135, folder[1] + 19)).strip()
+        assert row == 'Open', f'expected the explicit Open row, not an Open With action: {row!r}'
+        position = (folder[0] + 40, folder[1] + 11)
+        vmctl.pointer(VM, *position)
+        click(position)
 
     browse_options('KEY_O', 'KEY_ESC')
     assert user(f'sha256sum {options_file}') == before
@@ -264,6 +267,7 @@ def exercise(out, scale, root, explorer='~/.local/bin/win7-explorer'):
     wait_for(lambda: captions() == ['Alpha'], 'explicit Open child closes, retaining its parent')
     key('KEY_LEFTCTRL', 'KEY_W')
     wait_for(lambda: not captions(), 'last Explorer window closed before relaunch')
+    wait_for(lambda: user(f'systemctl --user show {unit}.service -p MainPID --value') == '0', 'original Explorer process exited')
     launch()
     # Select an unambiguous item while the restored listing settles into its saved sort order.
     key('KEY_LEFTCTRL', 'KEY_E')

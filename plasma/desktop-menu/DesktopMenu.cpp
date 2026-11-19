@@ -16,8 +16,11 @@
 #include <QActionGroup>
 #include <QApplication>
 #include <QClipboard>
+#include <QDir>
+#include <QFileInfo>
 #include <QMenu>
 #include <QPointer>
+#include <QStandardPaths>
 #include <algorithm>
 #include <memory>
 
@@ -113,15 +116,8 @@ public:
             auto *submenu = menu->addMenu(u"Ne&w"_s);
             auto *entry = submenu->menuAction();
             entry->setVisible(create->isVisible());
-            const bool populated = addNewActions(*submenu, create->menu()->actions());
-            entry->setEnabled(populated && create->isEnabled());
-            if (!populated) {
-                entry->setText(u"New (incompatible KIO templates)"_s);
-                QStringList layout;
-                for (auto *action : create->menu()->actions())
-                    layout << (action->isSeparator() ? u"|"_s : action->text());
-                qCritical().noquote() << "Classic desktop menu: cannot bind New commands; unexpected KIO template sections:" << layout.join(u"; "_s);
-            }
+            addNewActions(*submenu, create);
+            entry->setEnabled(create->isEnabled() && !submenu->isEmpty());
         }
 
         menu->addSeparator();
@@ -162,37 +158,76 @@ private:
         return action;
     }
 
-    static bool addNewActions(QMenu &submenu, const QList<QAction *> &actions)
+    static QString templateOverride(const QString &file)
     {
-        // KIO gives non-directory actions only a transient index. Its filename-based sections
-        // put home templates before system files, and the three built-in links in a final section.
-        const auto n = actions.size();
-        if (n < 8 || actions[0]->data().isValid() || !actions[1]->isSeparator() || !actions[n - 4]->isSeparator()) return false;
-        qsizetype text = n - 5;
-        while (text > 1 && !actions[text - 1]->isSeparator()) --text;
-        // Check the section boundaries before relying on KIO's built-in ordering. Labels
-        // only validate those positions; a matching user template elsewhere isn't a candidate.
-        auto builtin = [](QAction *action, const QString &file) {
-            const KDesktopFile entry(u":/kio5/newfile-templates/"_s + file + u".desktop"_s);
-            // Plasma assigns automatic mnemonics to the original actions in place.
+        // These are KIO's two on-disk template locations; a same-name entry can replace a resource.
+        const auto shared = QStandardPaths::locate(QStandardPaths::GenericDataLocation, u"templates/"_s + file);
+        if (!shared.isEmpty()) return shared;
+        const auto home = QStandardPaths::writableLocation(QStandardPaths::TemplatesLocation);
+        const auto path = QDir(home).filePath(file);
+        return !home.isEmpty() && home != QDir::homePath() && QFileInfo::exists(path) ? path : QString();
+    }
+
+    static void addNewActions(QMenu &submenu, KNewFileMenu *create)
+    {
+        const auto actions = create->menu()->actions();
+        auto builtin = [](QAction *action, const KDesktopFile &entry) {
             return action->actionGroup() && !action->isSeparator()
                 && action->text().remove(u'&') == entry.readName().remove(u'&');
         };
-        if (!builtin(actions[0], u"Directory"_s) || text + 1 >= n - 4
-            || !builtin(actions[text], u"TextFile"_s) || !builtin(actions[text + 1], u"EmptyFile"_s)
-            || !builtin(actions[n - 3], u"linkURL"_s) || !builtin(actions[n - 2], u"linkPath"_s)
-            || !builtin(actions[n - 1], u"linkProgram"_s)) return false;
-
-        const auto add = [&submenu](const QString &label, QAction *source) {
-            command(submenu, label, source, source->icon());
+        const auto matches = [&](QAction *action, const QString &file) {
+            return builtin(action, KDesktopFile(u":/kio5/newfile-templates/"_s + file));
         };
-        add(u"&Folder"_s, actions[0]);
-        add(u"&Shortcut"_s, actions[n - 2]);
-        for (qsizetype i = 1; i < n; ++i) {
-            if (i == text) add(u"&Text Document"_s, actions[i]);
-            else if (i != n - 2) submenu.addAction(actions[i]);
+        const auto n = actions.size();
+        QAction *folder = nullptr, *shortcut = nullptr, *text = nullptr;
+        if (n > 1 && !actions[0]->data().isValid() && actions[1]->isSeparator()
+            && templateOverride(u"Directory.desktop"_s).isEmpty() && matches(actions[0], u"Directory.desktop"_s))
+            folder = actions[0];
+
+        const auto override = templateOverride(u"linkPath.desktop"_s);
+        const bool linkNeighbors = templateOverride(u"linkURL.desktop"_s).isEmpty()
+            && templateOverride(u"linkProgram.desktop"_s).isEmpty();
+        const KDesktopFile path(u":/kio5/newfile-templates/linkPath.desktop"_s);
+        // KIO 6.31 dispatches by the indexed template target, not the translated label. With
+        // no filename shadowing, only these resource filenames occupy the final Links section.
+        if (override.isEmpty() && linkNeighbors && path.readType() == u"Link"_s && path.readUrl() == u"__CREATE_SYMLINK__"_s
+            && n >= 4 && actions[n - 4]->isSeparator() && matches(actions[n - 3], u"linkURL.desktop"_s)
+            && builtin(actions[n - 2], path) && matches(actions[n - 1], u"linkProgram.desktop"_s))
+            shortcut = actions[n - 2];
+        if (!shortcut)
+            qCritical().noquote() << "Classic desktop menu: cannot verify KIO Shortcut target;" <<
+                (override.isEmpty() ? u"unexpected link templates"_s : u"template may shadow linkPath.desktop: "_s + override);
+
+        // Home templates precede System; the last section headed by this pair is System,
+        // even when a home override has removed Shortcut from the Links section.
+        if (linkNeighbors && templateOverride(u"TextFile.desktop"_s).isEmpty() && templateOverride(u"EmptyFile.desktop"_s).isEmpty()) {
+            for (qsizetype i = n - 2; i > 0; --i) {
+                if (actions[i - 1]->isSeparator() && matches(actions[i], u"TextFile.desktop"_s)
+                    && matches(actions[i + 1], u"EmptyFile.desktop"_s)) {
+                    text = actions[i];
+                    break;
+                }
+            }
         }
-        return true;
+        if (!folder || !text) qWarning("Classic desktop menu: cannot verify KIO Folder or Text Document template identity");
+
+        const auto add = [&submenu, create](const QString &label, QAction *source) {
+            auto *entry = submenu.addAction(source->icon(), label, create, [create, action = QPointer(source)] {
+                // A filesystem watcher can invalidate KIO's indices while the popup is open.
+                create->checkUpToDate();
+                if (action) action->trigger();
+                else qCritical("Classic desktop menu: KIO templates changed; reopen New before selecting a template");
+            });
+            entry->setEnabled(source->isEnabled());
+            entry->setVisible(source->isVisible());
+        };
+        if (folder) add(u"&Folder"_s, folder);
+        if (shortcut) add(u"&Shortcut"_s, shortcut);
+        else submenu.addAction(u"Shortcut unavailable (KIO template conflict)"_s)->setEnabled(false);
+        for (auto *action : actions) {
+            if (action == text) add(u"&Text Document"_s, action);
+            else if (action != folder && action != shortcut) submenu.addAction(action);
+        }
     }
 
     static bool isFolderViewOptions(QAction *action)
