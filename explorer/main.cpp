@@ -507,10 +507,11 @@ public:
         connect(address, &QLineEdit::editingFinished, address, &QWidget::hide);
     }
 
-    void setState(const QUrl &url, const QUrl &backUrl, const QUrl &forwardUrl)
+    void setState(const QUrl &url, const QUrl &backUrl, const QUrl &forwardUrl, const QIcon &icon)
     {
         clearNavigationTip();
         location = url;
+        addressIcon = icon;
         backDestination = backUrl;
         forwardDestination = forwardUrl;
         backEnabled = !backUrl.isEmpty();
@@ -547,7 +548,7 @@ protected:
 
         const QRect box = addressBox();
         edge(p, box, classic::shadow, classic::light);
-        p.drawPixmap(box.left() + 2, 9, QIcon::fromTheme(QStringLiteral("folder")).pixmap(16));
+        p.drawPixmap(box.left() + 2, 9, addressIcon.pixmap(QSize(16, 16), devicePixelRatioF()));
         for (int i = 0; i < crumbs.size(); ++i) {
             arrow(p, crumbs[i].arrow.left(), 16, 5);
             if (i)
@@ -596,6 +597,7 @@ private:
         QRect text, arrow;
     };
     QUrl location, backDestination, forwardDestination;
+    QIcon addressIcon;
     bool backEnabled = false, forwardEnabled = false;
     QList<Crumb> crumbs;
     QLineEdit *address = new QLineEdit(this);
@@ -1601,7 +1603,7 @@ private:
         }
         nav->search->clear();
         nav->search->setPlaceholderText(QStringLiteral("Search ") + name);
-        nav->setState(url, history.value(position - 1), history.value(position + 1));
+        nav->setState(url, history.value(position - 1), history.value(position + 1), icon);
         pane->setLocation(url);
         updateDetails();
     }
