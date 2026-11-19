@@ -108,6 +108,7 @@ public:
             shortcut->setEnabled(paste->isEnabled() && destination.isValid() && !sources.isEmpty());
         }
         if (create) {
+            create->checkUpToDate(); // The stock submenu may not have been opened yet.
             menu->addSeparator();
             auto *submenu = menu->addMenu(u"Ne&w"_s);
             auto *entry = submenu->menuAction();
@@ -173,7 +174,9 @@ private:
         // only validate those positions; a matching user template elsewhere isn't a candidate.
         auto builtin = [](QAction *action, const QString &file) {
             const KDesktopFile entry(u":/kio5/newfile-templates/"_s + file + u".desktop"_s);
-            return action->actionGroup() && !action->isSeparator() && action->text() == entry.readName();
+            // Plasma assigns automatic mnemonics to the original actions in place.
+            return action->actionGroup() && !action->isSeparator()
+                && action->text().remove(u'&') == entry.readName().remove(u'&');
         };
         if (!builtin(actions[0], u"Directory"_s) || text + 1 >= n - 4
             || !builtin(actions[text], u"TextFile"_s) || !builtin(actions[text + 1], u"EmptyFile"_s)
