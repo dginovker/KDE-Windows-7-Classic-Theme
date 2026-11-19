@@ -105,6 +105,15 @@ public:
             Classic::drawGlyph(*p,o->rect,Classic::Radio,disabled,(o->state&State_On)?Classic::Checked:Classic::Unchecked);return;
         case PE_FrameGroupBox:
             Classic::drawEdge(*p,o->rect,Classic::Etched);return;
+        case PE_FrameTabWidget:
+            if(w && w->property("classicPropertiesPane").toBool()) {
+                // Qt's Windows style draws hairlines here; the outer shadow can vanish at fractional DPR.
+                const QRect inner=Classic::drawEdge(*p,o->rect,Classic::RaisedOuter,Classic::Rect|Classic::Soft);
+                p->fillRect(inner.left(),inner.bottom(),inner.width(),1,Classic::Shadow3D);
+                p->fillRect(inner.right(),inner.top(),1,inner.height(),Classic::Shadow3D);
+                return;
+            }
+            break;
         case PE_PanelButtonCommand:
             Classic::drawButton(*p,o->rect,o->state & (State_Sunken|State_On));return;
         case PE_PanelLineEdit:

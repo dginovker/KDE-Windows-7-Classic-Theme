@@ -9,13 +9,11 @@
 #include <QLabel>
 #include <QPointer>
 #include <QPushButton>
-#include <QScreen>
 #include <QScrollArea>
 #include <QStyle>
 #include <QTabBar>
 #include <QTabWidget>
 #include <QTimer>
-#include <QWindow>
 
 #include <functional>
 #include <vector>
@@ -75,7 +73,7 @@ public:
 
         // Drop KIO's construction-time minimum once. The layout owns the minimum thereafter.
         setMinimumSize(0, 0);
-        refresh(true);
+        refresh();
     }
 
 private:
@@ -95,12 +93,11 @@ private:
     QPointer<QLayout> footerLayout;
     QPointer<KPageWidget> installedPage;
     QPointer<QDialogButtonBox> installedButtons;
-    QMetaObject::Connection workAreaChanged;
     std::vector<std::function<void()>> undoPresentation;
     QPointer<QWidget> general, identity, storage;
+    QPointer<QPushButton> iconPicker;
     QPointer<QLabel> created;
     bool queued = false;
-    bool firstShow = true;
 
     void incompatible(const char *part)
     {
@@ -141,20 +138,21 @@ private:
         (object->*set)(value);
     }
 
-    void margins(QLayout *layout, const QMargins &value)
+    template<typename T>
+    void margins(T *object, const QMargins &value)
     {
-        undoPresentation.emplace_back([layout = QPointer(layout), old = layout->contentsMargins()] {
-            if (layout)
-                layout->setContentsMargins(old);
+        undoPresentation.emplace_back([object = QPointer(object), old = object->contentsMargins()] {
+            if (object)
+                object->setContentsMargins(old);
         });
-        layout->setContentsMargins(value);
+        object->setContentsMargins(value);
     }
 
     bool classic() const { return QApplication::style()->name() == QStringLiteral("win7classic"); }
 
     void restorePresentation()
     {
-        for (QWidget *w : {general.data(), identity.data(), storage.data()}) {
+        for (QWidget *w : {general.data(), identity.data(), storage.data(), static_cast<QWidget *>(iconPicker.data())}) {
             if (w) {
                 w->removeEventFilter(this);
                 w->update();
@@ -182,10 +180,17 @@ private:
         // Measurements in logical pixels from reference/screenshots/w7-properties.png.
         change(ui.tabs, &QTabWidget::documentMode, &QTabWidget::setDocumentMode, false);
         change(ui.tabs->tabBar(), &QTabBar::expanding, &QTabBar::setExpanding, false);
-        margins(layout(), {4, 4, 4, 4});
+        undoPresentation.emplace_back([tabs = QPointer(ui.tabs)] {
+            if (tabs)
+                tabs->setProperty("classicPropertiesPane", {});
+        });
+        ui.tabs->setProperty("classicPropertiesPane", true);
+        margins(layout(), {4, 7, 4, 4});
         change<QLayout>(layout(), &QLayout::spacing, &QLayout::setSpacing, 0);
         margins(page->layout(), {});
-        margins(footerLayout, {});
+        // KPageView gives its footer widget an inset. The Classic row ends at the page edge instead.
+        margins(buttons, {});
+        margins(footerLayout.data(), {0, 6, 0, 4});
         margins(ui.column, {14, 9, 14, 9});
         change(ui.grid, &QGridLayout::horizontalSpacing, &QGridLayout::setHorizontalSpacing, 12);
         change(ui.grid, &QGridLayout::verticalSpacing, &QGridLayout::setVerticalSpacing, 7);
@@ -198,6 +203,8 @@ private:
         change<QWidget>(ui.icon, &QWidget::minimumSize, &QWidget::setMinimumSize, QSize(38, 38));
         change<QWidget>(ui.icon, &QWidget::maximumSize, &QWidget::setMaximumSize, QSize(38, 38));
         change<QAbstractButton>(ui.icon, &QAbstractButton::iconSize, &QAbstractButton::setIconSize, QSize(32, 32));
+        iconPicker = ui.icon;
+        iconPicker->installEventFilter(this);
         change<QLayout>(buttons->layout(), &QLayout::spacing, &QLayout::setSpacing, 6);
         general = ui.page;
         created = ui.created;
@@ -211,41 +218,22 @@ private:
         general->installEventFilter(this);
     }
 
-    void watchScreen(QScreen *screen)
+    void fitPreferred()
     {
-        disconnect(workAreaChanged);
-        if (screen)
-            workAreaChanged = connect(screen, &QScreen::availableGeometryChanged, this, &FolderProperties::queueRefresh);
-        queueRefresh();
-    }
-
-    void fit(bool preferred = false)
-    {
-        if (!viewport || !screen())
-            return;
         layout()->activate();
-        QMargins frame = windowHandle() ? windowHandle()->frameMargins() : QMargins();
-        if (QGuiApplication::platformName() == QStringLiteral("wayland") && frame.isNull()) {
-            // Wayland does not report the server-side title bar to the client. Leave room for it
-            // rather than filling the entire output with the client area and clipping the footer.
-            frame = {8, qMax(32, fontMetrics().height() + 12), 8, 8};
-        }
-        const QSize available = screen()->availableGeometry().marginsRemoved(frame).size();
-        QSize wanted = size();
-        if (preferred) {
-            const QMargins margins = layout()->contentsMargins();
-            const QSize footer = footerLayout->sizeHint();
-            wanted = QSize(qMax(viewport->sizeHint().width(), footer.width()) + margins.left() + margins.right(),
-                           viewport->sizeHint().height() + footer.height() + margins.top() + margins.bottom() + layout()->spacing());
-            if (classic())
-                wanted = wanted.expandedTo({358, 446});
-        }
-        const QSize bounded = wanted.boundedTo(available).expandedTo(minimumSize());
-        if (bounded != size())
-            resize(bounded);
+        const QMargins margins = layout()->contentsMargins();
+        const QSize footer = footerLayout->sizeHint();
+        const QSize page = viewport->sizeHint();
+        QSize wanted(qMax(page.width(), footer.width()) + margins.left() + margins.right(),
+                     page.height() + footer.height() + margins.top() + margins.bottom() + layout()->spacing());
+        if (classic())
+            wanted = wanted.expandedTo({358, 446});
+        // Qt Wayland bounds the initial client size with xdg_toplevel.configure_bounds.
+        // KWin subtracts its panel reservation and server frame before sending them.
+        resize(wanted);
     }
 
-    void refresh(bool preferred)
+    void refresh()
     {
         if (!viewport || !footerLayout || !installedPage || !installedButtons || pageWidget() != installedPage
             || buttonBox() != installedButtons || !layout() || layout()->indexOf(viewport) < 0
@@ -254,13 +242,11 @@ private:
             || footerLayout->indexOf(installedButtons) < 0) {
             // KPageDialog can reinstall its layout. Don't restyle or fit a tree it no longer owns.
             viewport.clear();
-            disconnect(workAreaChanged);
             restorePresentation();
             incompatible("installed page/footer ownership");
             return;
         }
         syncPresentation();
-        fit(preferred);
     }
 
     void queueRefresh()
@@ -270,19 +256,19 @@ private:
         queued = true;
         QTimer::singleShot(0, this, [this] {
             queued = false;
-            refresh(firstShow && isVisible());
-            if (isVisible())
-                firstShow = false;
+            refresh();
         });
     }
 
     void showEvent(QShowEvent *event) override
     {
         KPropertiesDialog::showEvent(event);
-        if (viewport && windowHandle()) {
-            connect(windowHandle(), &QWindow::screenChanged, this, &FolderProperties::watchScreen, Qt::UniqueConnection);
-            watchScreen(windowHandle()->screen());
-        }
+        if (!viewport)
+            return;
+        // Measure visible controls before Qt maps the surface and applies the compositor's bounds.
+        refresh();
+        if (viewport)
+            fitPreferred();
     }
 
     bool event(QEvent *event) override
@@ -296,6 +282,18 @@ private:
 
     bool eventFilter(QObject *object, QEvent *event) override
     {
+        if (object == iconPicker) {
+            if (event->type() == QEvent::Enter || event->type() == QEvent::Leave)
+                iconPicker->update();
+            if (event->type() == QEvent::Paint && !iconPicker->underMouse() && !iconPicker->hasFocus() && !iconPicker->isDown()) {
+                // The reference has bare folder art; keep the real picker's bevel and focus cue on interaction.
+                QPainter p(iconPicker);
+                iconPicker->icon().paint(&p, QStyle::alignedRect(iconPicker->layoutDirection(), Qt::AlignCenter,
+                                                               iconPicker->iconSize(), iconPicker->rect()),
+                                         Qt::AlignCenter, iconPicker->isEnabled() ? QIcon::Normal : QIcon::Disabled);
+                return true;
+            }
+        }
         if (event->type() == QEvent::Paint) {
             if (object == general && created && created->isVisible() && general->layout()) {
                 QPainter p(general);
