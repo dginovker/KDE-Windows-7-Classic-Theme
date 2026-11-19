@@ -257,7 +257,7 @@ switch_to() {
     fi
     if [[ -z $problem && $target == windows ]]; then
         local trays ready tray_id
-        if trays=$(shell 'print(panels().flatMap(p => p.widgets()).filter(w => w.type === "org.win7classic.tray").map(w => w.id).join(" "))') &&
+        if trays=$(shell 'var ids = []; for (const p of panels()) for (const w of p.widgets()) if (w.type === "org.win7classic.tray") ids.push(w.id); print(ids.join(" "))') &&
            ready=$(journalctl --user -b -u plasma-plasmashell --after-cursor "$tray_cursor" --no-pager -o cat); then
             for tray_id in $trays; do
                 if ! grep -qE "Classic notification area ready: ${tray_id}$" <<< "$ready"; then
