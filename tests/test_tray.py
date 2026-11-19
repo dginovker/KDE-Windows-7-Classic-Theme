@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Exercise the packaged Classic tray and stock applet shortcut recorder in the lab."""
+import argparse
 from io import BytesIO
 from pathlib import Path
 import re
 import subprocess
-import sys
 import time
 
 from PIL import Image, ImageChops
@@ -16,8 +16,6 @@ from test_taskbar import FACE, SHADOW, WHITE, tray_left
 REFERENCE = ROOT / 'reference/screenshots/w7-notification-area.png'
 SINK = '@DEFAULT_AUDIO_SINK@'
 APPLET_CONFIG = '~/.config/plasma-org.kde.plasma.desktop-appletsrc'
-KEYS = ('KEY_LEFTMETA', 'KEY_LEFTSHIFT', 'KEY_F10')
-SHORTCUT = 'Meta+Shift+F10'
 
 
 def icon_center(image, reference, box):
@@ -56,15 +54,17 @@ def label(words, name, where=lambda x, y: True):
     return hits[0]
 
 
-def has_shortcut():
+def has_shortcut(shortcut):
     layout = user(f'cat {APPLET_CONFIG}')
     # Assert the shortcut belongs to Notifications itself, not the tray or another applet.
     group = re.search(r'(?m)^(\[Containments\].*\[Applets\]\[\d+\])\n[^\[]*?^plugin=org\.kde\.plasma\.notifications$', layout)
     assert group, 'Notifications is not in the live applet config'
-    return f'{group[1]}[Shortcuts]\nglobal={SHORTCUT}' in layout
+    return f'{group[1]}[Shortcuts]\nglobal={shortcut}' in layout
 
 
-def main(out):
+def main(out, function_key):
+    keys = ('KEY_LEFTMETA', 'KEY_LEFTSHIFT', 'KEY_' + function_key)
+    shortcut = 'Meta+Shift+' + function_key
     out.mkdir(parents=True, exist_ok=True)
     vmctl.start(VM)
     assert user('/usr/bin/win7-classic status') == 'current'
@@ -113,19 +113,20 @@ def main(out):
         time.sleep(1)
         items = words('items-before')
         _, y = label(items, 'Notifications')
-        assert not has_shortcut(), f'test key already configured: {SHORTCUT}'
+        assigned = lambda: has_shortcut(shortcut)
+        assert not assigned(), f'test key already configured: {shortcut}'
         click(label(items, 'None', lambda x, cy: x > 600 and abs(cy - y) < 10))
-        key(*KEYS)
+        key(*keys)
         time.sleep(1.5)
         snap('items-pending')
-        assert not has_shortcut(), 'the editor applied before confirmation'
+        assert not assigned(), 'the editor applied before confirmation'
         click(label(words('items-pending-buttons', (760, 650, 1060, 700)), 'Apply'))
-        wait_for(has_shortcut, 'stock shortcut editor saves the hosted applet shortcut')
+        wait_for(assigned, 'stock shortcut editor saves the hosted applet shortcut')
         key('KEY_ESC')
         time.sleep(.7)
         user('notify-send -a Kate -t 1500 -h string:desktop-entry:org.kde.kate "W39-Shortcut" "Native activation proof"')
         time.sleep(3)
-        key(*KEYS)
+        key(*keys)
         wait_for(lambda: any('W39-Shortcut' in word for word, _ in words('shortcut-history')),
                  'real history opened by the saved shortcut')
         click((810, 540))
@@ -147,4 +148,9 @@ def main(out):
 
 
 if __name__ == '__main__':
-    main(Path(sys.argv[1]))
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('out', type=Path)
+    parser.add_argument('--key', choices=[f'F{i}' for i in range(1, 13)], default='F10',
+                        help='unused Meta+Shift function key for the real recorder')
+    args = parser.parse_args()
+    main(args.out, args.key)

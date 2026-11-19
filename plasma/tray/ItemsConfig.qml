@@ -20,7 +20,7 @@ Controls.ScrollView {
     readonly property var options: [qsTr("Show when relevant"), qsTr("Always show"), qsTr("Only in popup"), qsTr("Disabled")]
     readonly property var notifiers: {
         const entries = new Map();
-        for (const n of backend.statusNotifiers?.items ?? []) {
+        for (const n of backend?.statusNotifiers?.items ?? []) {
             entries.set(n.persistentId, {id: n.persistentId, name: n.Title || n.Id, notifier: true});
         }
         return [...entries.values()];
@@ -64,12 +64,12 @@ Controls.ScrollView {
         Controls.CheckBox { id: showAll; text: qsTr("Show all items in the notification area") }
         Controls.CheckBox { id: pin; text: qsTr("Keep the hidden-icons popup open") }
         Repeater {
-            model: page.backend.appletChoices.concat(page.notifiers)
+            model: page.backend?.appletChoices.concat(page.notifiers) ?? []
             delegate: RowLayout {
                 id: row
                 required property var modelData
                 readonly property var applet: modelData.notifier ? null
-                    : page.backend.applets.find(candidate => candidate.pluginName === modelData.id) ?? null
+                    : page.backend?.applets.find(candidate => candidate.pluginName === modelData.id) ?? null
                 Controls.Label {
                     Layout.fillWidth: true
                     text: row.modelData.name
@@ -95,7 +95,7 @@ Controls.ScrollView {
                     visible: !row.modelData.notifier
                     enabled: row.applet !== null && visibility.currentIndex !== 3
                     keySequence: page.pendingShortcuts.get(row.applet) ?? row.applet?.globalShortcut ?? ""
-                    onCaptureFinished: if (row.applet) page.stageShortcut(row.applet, keySequence.toString())
+                    onKeySequenceModified: if (row.applet) page.stageShortcut(row.applet, keySequence.toString())
                 }
                 Controls.Button {
                     readonly property var configureAction: row.applet?.internalAction("configure") ?? null
