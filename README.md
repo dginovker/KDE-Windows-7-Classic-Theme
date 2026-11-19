@@ -42,6 +42,14 @@ The system package adds **Windows 7 Classic Desktop Menu** to Plasma's Mouse Act
 
 The Classic menu uses real Plasma Folder View and KIO actions for View, Sort by, Refresh, New and Paste. Paste shortcut creates a filesystem link for local file URLs. Screen resolution, Gadgets and Personalize open the KDE settings or widget browser; More icon options, Undo and Edit Mode keep KDE's functionality. Icon and file commands require Folder View. Independent grid snapping and show/hide all desktop icons or gadgets are not provided. Normal file, widget and panel menus are unchanged.
 
+## Optional Windows taskbar appearance
+
+In Windows mode, right-click an empty part of the **Windows 7 Classic taskbar** widget and choose **Configure Windows 7 Classic taskbar → Appearance**. **Use a plain folder icon for the closed Explorer pin** only changes that pin's artwork to the Windows 7 folder. The pinned app, its running location icon and its jump list are unchanged. Uncheck it to restore the native Explorer launcher artwork.
+
+For a shorter taskbar, use Plasma's **Show Panel Configuration → Panel height** on the Windows panel. The default remains 44 logical px. The Classic controls fit a shorter panel, but Plasma can squeeze other widgets below their minimum heights; it does not guarantee that they still fit. At 150%, 36 logical px (54 physical px) was the smallest tested with a two-row pager, stock System Tray and monitor, and widgets requiring 32 logical px inside the panel. Try 38 (57 physical px) for more room. A 30-logical-pixel panel (45 physical px) leaves only 26 px for those widgets and is not suitable for that layout. Raise the height again if any control becomes hard to see or use.
+
+A normal `win7-classic current` saves both Windows-only adjustments; the next `win7-classic windows` restores them. No `rebuild` is needed. To undo, uncheck the icon option and set the Windows panel back to its previous height.
+
 ## Mixed installs and removal
 
 A package plus a development install must both be upgraded: `cd packaging && makepkg -si`, then `./install.sh` as the desktop user. Each cleans its own legacy renderers; install/switch warnings identify legacy copies in the other root. Only the known old Classic decoration identity is migrated in live/saved current settings.

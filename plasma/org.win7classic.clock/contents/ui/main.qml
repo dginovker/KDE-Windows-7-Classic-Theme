@@ -96,7 +96,9 @@ PlasmoidItem {
             }
         }
         Kirigami.Icon {
-            x: area.panelRight - 19; y: 15 - area.origin.y; width: 16; height: 16
+            x: area.panelRight - 19
+            y: area.Window.window ? Math.min(15, Math.floor((area.Window.window.height - height) / 2) + 1) - area.origin.y : 0
+            width: 16; height: 16
             source: "user-desktop"
             MouseArea {
                 anchors.fill: parent

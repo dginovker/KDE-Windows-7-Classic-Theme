@@ -5,6 +5,9 @@
     <entry name="launchers" type="StringList">
       <default>applications:firefox.desktop,applications:org.win7classic.explorer.desktop</default>
     </entry>
+    <entry name="plainExplorerPin" type="Bool">
+      <default>false</default>
+    </entry>
     <entry name="favorites" type="StringList">
       <default>org.kde.konsole.desktop,org.win7classic.explorer.desktop,firefox.desktop,org.kde.kate.desktop,systemsettings.desktop</default>
     </entry>

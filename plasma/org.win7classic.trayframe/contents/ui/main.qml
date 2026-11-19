@@ -24,7 +24,7 @@ PlasmoidItem {
         Classic.Raster {
             x: 0; y: 4 - area.origin.y
             width: area.Window.window ? area.Window.window.width - area.origin.x - 2 : 0
-            height: 38
+            height: area.Window.window ? Math.max(0, Math.min(38, area.Window.window.height - 6)) : 0
             edge: Classic.Raster.SunkenOuter
         }
     }

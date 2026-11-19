@@ -16,10 +16,14 @@ PlasmoidItem {
     Plasmoid.constraintHints: Plasmoid.CanFillArea
 
     readonly property int buttonY: 4
-    readonly property int buttonHeight: 38
+    // Keep the native margins when the user chooses a thinner Plasma panel.
+    readonly property int buttonHeight: Window.window ? Math.max(0, Math.min(38, Window.window.height - 6)) : 0
+    readonly property int taskIconSize: Math.max(0, buttonHeight - 6)
     readonly property int tasksX: 63
     readonly property int spacing: 2
-    readonly property int launcherWidth: 48
+    readonly property int nativeLauncherWidth: 48
+    // The native 32 px icon has 8 px of horizontal padding on either side.
+    readonly property int launcherWidth: Math.round(taskIconSize * nativeLauncherWidth / 32)
     readonly property int maxWindowWidth: 160
     readonly property int minWindowWidth: 60
 
@@ -80,17 +84,19 @@ PlasmoidItem {
         onHeightChanged: Qt.callLater(syncOrigin)
         Connections { target: area.Window.window; function onWidthChanged() { Qt.callLater(area.syncOrigin) } }
 
-        readonly property int launchers: tasksModel.launcherCount
+        // The model's cached launcherCount can be stale on first activation; size the buttons we actually render.
+        readonly property int launchers: taskRow.children.reduce((count, item) => count + (item.launcher === true ? 1 : 0), 0)
         readonly property int windows: tasksModel.count - launchers
+        // Leave the running-task width budget unchanged when compact pins free space.
         readonly property int windowWidth: windows === 0 ? root.maxWindowWidth : Math.max(root.minWindowWidth, Math.min(root.maxWindowWidth,
-            Math.floor((width + origin.x - root.tasksX - launchers * root.launcherWidth - (tasksModel.count - 1) * root.spacing) / windows)))
+            Math.floor((width + origin.x - root.tasksX - launchers * root.nativeLauncherWidth - (tasksModel.count - 1) * root.spacing) / windows)))
 
         Bevel {
             id: start
             x: 2 - area.origin.x; y: root.buttonY - area.origin.y; width: 52; height: root.buttonHeight
             sunken: startMouse.pressed || startMenu.visible
             Image {
-                x: 2 + (start.sunken ? 1 : 0); y: 11 + (start.sunken ? 1 : 0)
+                x: 2 + (start.sunken ? 1 : 0); y: Math.floor((start.height - 14) / 2) - 1 + (start.sunken ? 1 : 0)
                 width: 18; height: 14
                 source: "flag.svg"
                 sourceSize: Qt.size(18, 14)
@@ -105,7 +111,7 @@ PlasmoidItem {
                 renderType: Text.NativeRendering
             }
             Classic.Raster {
-                x: 19; y: 3; width: 30; height: 32
+                x: 19; y: 3; width: 30; height: root.taskIconSize
                 focused: startMenu.visible && !startMenu.hotTracking
                 patternOrigin: Qt.point(21, 763)
             }
@@ -140,6 +146,8 @@ PlasmoidItem {
                         registry: taskWindowIcons
                         uuid: task.explorerWindow ? task.model.WinIdList[0] : ""
                     }
+                    readonly property bool plainExplorerPin: launcher && Plasmoid.configuration.plainExplorerPin
+                        && model.AppId === "org.win7classic.explorer"
                     readonly property bool active: model.IsActive === true && model.IsMinimized !== true
                     readonly property bool sunken: (active && !launcher) || mouse.pressed || (taskMenu.visible && taskMenu.taskButton === task)
                     readonly property int shift: sunken ? 1 : 0
@@ -161,15 +169,15 @@ PlasmoidItem {
                             fill: task.active && !task.launcher ? Classic.Palette.highlight3D : Classic.Palette.face
                         }
                         Kirigami.Icon {
-                            x: (task.launcher ? (task.width - 32) / 2 : 3) + task.shift
+                            x: (task.launcher ? (task.width - root.taskIconSize) / 2 : 3) + task.shift
                             y: 3 + task.shift
-                            width: 32; height: 32
+                            width: root.taskIconSize; height: width
                             visible: !task.explorerWindow || windowIcon.ready
-                            source: task.explorerWindow ? windowIcon.icon : task.model.decoration
+                            source: task.explorerWindow ? windowIcon.icon : task.plainExplorerPin ? "folder" : task.model.decoration
                         }
                         Text {
                             visible: !task.launcher
-                            x: 39 + task.shift; y: task.shift
+                            x: root.taskIconSize + 7 + task.shift; y: task.shift
                             width: task.width - x - 4; height: task.height
                             verticalAlignment: Text.AlignVCenter
                             elide: Text.ElideRight
