@@ -110,10 +110,14 @@ public:
         if (create) {
             menu->addSeparator();
             auto *submenu = menu->addMenu(u"Ne&w"_s);
-            addNewActions(*submenu, create->menu()->actions());
             auto *entry = submenu->menuAction();
             entry->setVisible(create->isVisible());
-            entry->setEnabled(create->isEnabled());
+            const bool populated = addNewActions(*submenu, create->menu()->actions());
+            entry->setEnabled(populated && create->isEnabled());
+            if (!populated) {
+                entry->setText(u"New (incompatible KIO templates)"_s);
+                qCritical("Classic desktop menu: unexpected KNewFileMenu template sections; cannot bind New commands");
+            }
         }
 
         menu->addSeparator();
@@ -154,22 +158,35 @@ private:
         return action;
     }
 
-    static void addNewActions(QMenu &submenu, const QList<QAction *> &actions)
+    static bool addNewActions(QMenu &submenu, const QList<QAction *> &actions)
     {
-        submenu.addActions(actions);
-        // KIO exposes no template ID on its actions. Match the built-in template's localized name and icon.
-        const KDesktopFile path(u":/kio5/newfile-templates/linkPath.desktop"_s);
-        QList<QAction *> links;
-        for (auto *action : actions)
-            if (action->text() == path.readName() && action->icon().name() == path.readIcon()) links.append(action);
-        if (links.size() != 1 || actions.size() < 2 || !actions[1]->isSeparator()) {
-            qCritical("Classic desktop menu: could not identify KIO's Folder/Shortcut arrangement");
-            return;
+        // KIO gives non-directory actions only a transient index. Its filename-based sections
+        // put home templates before system files, and the three built-in links in a final section.
+        const auto n = actions.size();
+        if (n < 8 || actions[0]->data().isValid() || !actions[1]->isSeparator() || !actions[n - 4]->isSeparator()) return false;
+        qsizetype text = n - 5;
+        while (text > 1 && !actions[text - 1]->isSeparator()) --text;
+        // Check the section boundaries before relying on KIO's built-in ordering. Labels
+        // only validate those positions; a matching user template elsewhere isn't a candidate.
+        auto builtin = [](QAction *action, const QString &file) {
+            const KDesktopFile entry(u":/kio5/newfile-templates/"_s + file + u".desktop"_s);
+            return action->actionGroup() && !action->isSeparator() && action->text() == entry.readName();
+        };
+        if (!builtin(actions[0], u"Directory"_s) || text + 1 >= n - 4
+            || !builtin(actions[text], u"TextFile"_s) || !builtin(actions[text + 1], u"EmptyFile"_s)
+            || !builtin(actions[n - 3], u"linkURL"_s) || !builtin(actions[n - 2], u"linkPath"_s)
+            || !builtin(actions[n - 1], u"linkProgram"_s)) return false;
+
+        const auto add = [&submenu](const QString &label, QAction *source) {
+            command(submenu, label, source, source->icon());
+        };
+        add(u"&Folder"_s, actions[0]);
+        add(u"&Shortcut"_s, actions[n - 2]);
+        for (qsizetype i = 1; i < n; ++i) {
+            if (i == text) add(u"&Text Document"_s, actions[i]);
+            else if (i != n - 2) submenu.addAction(actions[i]);
         }
-        auto *link = links.constFirst();
-        auto *shortcut = command(submenu, u"&Shortcut"_s, link, link->icon());
-        submenu.insertAction(actions[1], shortcut);
-        submenu.removeAction(link);
+        return true;
     }
 
     static bool isFolderViewOptions(QAction *action)

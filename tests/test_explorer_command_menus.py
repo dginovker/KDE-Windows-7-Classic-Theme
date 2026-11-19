@@ -176,6 +176,16 @@ def exercise(out, scale, root, explorer='~/.local/bin/win7-explorer'):
     key('KEY_L')
     key('KEY_M')
 
+    # Trigger the Organize proxy, not F2, and verify the selected file is renamed by KIO.
+    click(pt(255, 227))  # Zulu, below Documents, Sample and .hidden in Content
+    organize()
+    key('KEY_N')
+    wait_for(lambda: any('Rename' in title for title in captions()), 'Organize → Rename opens KIO')
+    snap('organize-rename-dialog')
+    key('KEY_LEFTCTRL', 'KEY_A')
+    vmctl.type_text(VM, 'Zulu-renamed.txt\n')
+    wait_for(lambda: exists(f'{alpha}/Zulu-renamed.txt') and not exists(f'{alpha}/Zulu.txt'), 'Organize Rename changes the real filename')
+
     # Sort the same backing model; then Copy/Paste/Undo/Redo must change actual files.
     click(pt(460, 400), 'right')
     key('KEY_B')
@@ -222,6 +232,12 @@ def exercise(out, scale, root, explorer='~/.local/bin/win7-explorer'):
         wait_for(lambda: 'Folder Options' not in captions(), 'Folder Options dismissed')
 
     folder = pt(193, 118)  # first Content row, filtered to Documents
+    def explicit_open():
+        click(folder, 'right')
+        menu = snap('folder-item-open-menu')
+        assert 'Open' in words(menu, (folder[0], folder[1], folder[0] + 140, folder[1] + 24))
+        key('KEY_O')
+
     browse_options('KEY_O', 'KEY_ESC')
     assert user(f'sha256sum {options_file}') == before
     double_click(folder)
@@ -240,6 +256,10 @@ def exercise(out, scale, root, explorer='~/.local/bin/win7-explorer'):
     key('KEY_LEFTCTRL', 'KEY_W')
     wait_for(lambda: captions() == ['Alpha'], 'closing the child leaves the original window open')
     assert 'Documents' in text(snap('browse-folders-parent-retained'), w - 244, 31, w - 117, 50)
+    explicit_open()
+    wait_for(lambda: sorted(captions()) == ['Alpha', 'Documents'], 'explicit Open leaves parent and opens a new window')
+    key('KEY_LEFTCTRL', 'KEY_W')
+    wait_for(lambda: captions() == ['Alpha'], 'explicit Open child closes, retaining its parent')
     key('KEY_LEFTCTRL', 'KEY_W')
     wait_for(lambda: not captions(), 'last Explorer window closed before relaunch')
     launch()
@@ -257,8 +277,10 @@ def exercise(out, scale, root, explorer='~/.local/bin/win7-explorer'):
     wait_for(lambda: captions() == ['Alpha'], 'child closes after relaunch')
     browse_options('KEY_S', 'KEY_ENTER')
     assert 'OpenFoldersInNewWindow=false' in user(f'cat {options_file}')
-    double_click(folder)
-    wait_for(lambda: captions() == ['Documents'], 'same-window behavior restored through Options')
+    explicit_open()
+    wait_for(lambda: captions() == ['Documents'], 'explicit Open uses the same window after restoring Options')
+    key('KEY_LEFTALT', 'KEY_LEFT')
+    wait_for(lambda: captions() == ['Alpha'], 'Back after explicit same-window Open')
     assert user(f'cmp ~/.config/kdeglobals {cfg}/kdeglobals && echo exact') == 'exact'
 
 
