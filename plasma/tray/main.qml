@@ -139,16 +139,13 @@ ContainmentItem {
                 acceptedButtons: Qt.RightButton | Qt.MiddleButton
                 onTapped: (point, button) => notifier.send(button === Qt.RightButton ? "ContextMenu" : "SecondaryActivate")
             }
-            WheelHandler {
+            MouseArea {
+                anchors.fill: parent
+                acceptedButtons: Qt.NoButton
                 onWheel: event => {
                     if (event.angleDelta.y !== 0) {
                         tray.notifiers.scroll(notifier.modelData.address, event.angleDelta.y, "vertical");
                     }
-                }
-            }
-            WheelHandler {
-                orientation: Qt.Horizontal
-                onWheel: event => {
                     if (event.angleDelta.x !== 0) {
                         tray.notifiers.scroll(notifier.modelData.address, event.angleDelta.x, "horizontal");
                     }
