@@ -238,7 +238,7 @@ def exercise(out, scale, root, explorer='~/.local/bin/win7-explorer'):
         menu = snap(f'folder-item-open-{policy}')
         assert captions() == ['Alpha'], 'Explorer must survive opening the folder item menu'
         assert 'Open' in words(menu, (folder[0] + 12, folder[1], folder[0] + 140, folder[1] + 25))
-        key('KEY_O')
+        click((folder[0] + 40, folder[1] + 12))  # Open Folder With has the same mnemonic.
 
     browse_options('KEY_O', 'KEY_ESC')
     assert user(f'sha256sum {options_file}') == before
