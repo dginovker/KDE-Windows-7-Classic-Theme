@@ -5,13 +5,14 @@ from hashlib import sha256
 from io import BytesIO
 import json
 from pathlib import Path
+import shlex
 import subprocess
 import time
 
 from PIL import Image
 
 from lab import VM, install, kwin_script, shot, toggle, user, vmctl, wait_for
-from test_explorer import EXPLORER, captions, click, exists, key
+from test_explorer import EXPLORER, captions, click, double_click, exists, key
 
 
 def words(image, box):
@@ -22,7 +23,7 @@ def words(image, box):
     return subprocess.check_output(['tesseract', 'stdin', 'stdout', '--psm', '6'], input=buf.getvalue(), stderr=subprocess.DEVNULL).decode()
 
 
-def exercise(out, scale, root):
+def exercise(out, scale, root, explorer='~/.local/bin/win7-explorer'):
     out.mkdir(parents=True, exist_ok=True)
     x, y, w, h = (256, 120, 768, 560) if scale == 1 else (42, 45, 730, 405)
     prefix = f'{root}/scale-{scale:g}'
@@ -34,8 +35,10 @@ def exercise(out, scale, root):
     group = sha256(f'file://{alpha}'.encode()).hexdigest()
 
     def launch():
-        user(f'systemd-run --user --collect -q --unit={unit} --setenv=XDG_CONFIG_HOME={cfg} ~/.local/bin/win7-explorer {alpha}')
+        user(f'systemd-run --user --collect -q --unit={unit} --setenv=XDG_CONFIG_HOME={cfg} {explorer} {alpha}')
         wait_for(lambda: 'Alpha' in captions(), 'Explorer at Alpha')
+        print(user(f'pid=$(systemctl --user show {unit}.service -p MainPID --value); '
+                   'test "$pid" -gt 0 && readlink -f /proc/$pid/exe && sha256sum /proc/$pid/exe'))
         kwin_script(app + f' {{ w.frameGeometry={{x:{x},y:{y},width:{w},height:{h}}}; workspace.activeWindow=w; }}')
 
     def pt(xl, yl):
@@ -140,19 +143,26 @@ def exercise(out, scale, root):
 
     organize()
     key('KEY_L')
-    snap('layout')
+    layout_image = snap('layout')
+    # OCR the highlighted first row separately from the dark-on-light rows beneath it.
+    layout = text(layout_image, 241, 215, 409, 236) + text(layout_image, 232, 237, 409, 299)
+    for label in ('Menu bar', 'Details pane', 'Preview pane', 'Navigation pane'):
+        _, marker, layout = layout.partition(label)
+        assert marker, (label, layout)
     key('KEY_M')
     bar = text(snap('visible-menu-bar'), 4, 57, 220, 80)
     assert all(label in bar for label in ('File', 'Edit', 'View', 'Tools', 'Help')), bar
     key('KEY_LEFTALT', 'KEY_T')
     key('KEY_F')
     wait_for(lambda: 'Folder Options' in captions(), 'menu bar Tools → Folder Options')
+    key('KEY_LEFTALT', 'KEY_V')
     key('KEY_LEFTALT', 'KEY_H')
     key('KEY_ESC')
     assert not exists(f'{cfg}/win7-explorer-optionsrc')
     key('KEY_LEFTALT', 'KEY_T')
     key('KEY_F')
     wait_for(lambda: 'Folder Options' in captions(), 'Folder Options reopen')
+    key('KEY_LEFTALT', 'KEY_V')
     snap('folder-options')
     key('KEY_LEFTALT', 'KEY_H')
     key('KEY_ENTER')
@@ -190,6 +200,53 @@ def exercise(out, scale, root):
     click(pt(53, 169))  # Redo
     wait_for(lambda: exists(target), 'Organize Redo recreates copy')
     assert user(f'cmp {alpha}/Sample.txt {target} && echo exact') == 'exact'
+
+    # The General option must affect actual KIO activation, not just remember a radio choice.
+    go(alpha, 'Alpha')
+    key('KEY_LEFTCTRL', 'KEY_E')
+    vmctl.type_text(VM, 'Documents')
+    options_file = f'{cfg}/win7-explorer-optionsrc'
+    before = user(f'sha256sum {options_file}')
+
+    def browse_options(choice, confirmation):
+        organize()
+        key('KEY_F')
+        wait_for(lambda: 'Folder Options' in captions(), 'Organize → Folder and search options')
+        key('KEY_LEFTALT', choice)
+        snap(f'browse-folders-{choice}-{confirmation}')
+        key(confirmation)
+        wait_for(lambda: 'Folder Options' not in captions(), 'Folder Options dismissed')
+
+    folder = pt(250, 118)  # first Content row, filtered to Documents
+    browse_options('KEY_O', 'KEY_ESC')
+    assert user(f'sha256sum {options_file}') == before
+    double_click(folder)
+    wait_for(lambda: captions() == ['Documents'], 'Cancel leaves folder activation in the starting window')
+    key('KEY_LEFTALT', 'KEY_LEFT')
+    wait_for(lambda: captions() == ['Alpha'], 'same-window Back still works')
+    browse_options('KEY_O', 'KEY_ENTER')
+    assert 'OpenFoldersInNewWindow=true' in user(f'cat {options_file}')
+    # Re-enter the filter; folder navigation clears it, but opening a second window must not.
+    key('KEY_LEFTCTRL', 'KEY_E')
+    vmctl.type_text(VM, 'Documents')
+    click(folder)
+    key('KEY_ENTER')
+    wait_for(lambda: sorted(captions()) == ['Alpha', 'Documents'], 'Enter opens a second Explorer window')
+    snap('browse-folders-two-windows')
+    key('KEY_LEFTCTRL', 'KEY_W')
+    wait_for(lambda: captions() == ['Alpha'], 'closing the child leaves the original window open')
+    assert 'Documents' in text(snap('browse-folders-parent-retained'), w - 231, 26, w - 28, 58)
+    key('KEY_LEFTCTRL', 'KEY_W')
+    wait_for(lambda: not captions(), 'last Explorer window closed before relaunch')
+    launch()
+    double_click(folder)
+    wait_for(lambda: sorted(captions()) == ['Alpha', 'Documents'], 'new window behavior survives relaunch')
+    key('KEY_LEFTCTRL', 'KEY_W')
+    wait_for(lambda: captions() == ['Alpha'], 'child closes after relaunch')
+    browse_options('KEY_S', 'KEY_ENTER')
+    assert 'OpenFoldersInNewWindow=false' in user(f'cat {options_file}')
+    double_click(folder)
+    wait_for(lambda: captions() == ['Documents'], 'same-window behavior restored through Options')
     assert user(f'cmp ~/.config/kdeglobals {cfg}/kdeglobals && echo exact') == 'exact'
 
 
@@ -197,7 +254,11 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('out', type=Path)
     parser.add_argument('--installed', action='store_true')
+    parser.add_argument('--explorer', type=Path, help='absolute path to the prebuilt Explorer in the lab (with --installed)')
     args = parser.parse_args()
+    if args.explorer and (not args.installed or not args.explorer.is_absolute()):
+        parser.error('--explorer requires --installed and an absolute guest path')
+    explorer = shlex.quote(str(args.explorer)) if args.explorer else '~/.local/bin/win7-explorer'
     vmctl.start(VM)
     if not args.installed:
         install(reset=False)
@@ -209,7 +270,7 @@ def main():
         for scale in (1, 1.5):
             user(f'kscreen-doctor output.{output["name"]}.scale.{scale}')
             try:
-                exercise(args.out / f'{scale:g}x', scale, root)
+                exercise(args.out / f'{scale:g}x', scale, root, explorer)
             finally:
                 user(f'systemctl --user stop {Path(root).name}-{round(scale * 100)}.service', check=False)
     finally:

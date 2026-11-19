@@ -42,6 +42,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QFontMetricsF>
+#include <QGroupBox>
 #include <QHeaderView>
 #include <QLabel>
 #include <QLineEdit>
@@ -56,6 +57,8 @@
 #include <QPainter>
 #include <QPrintDialog>
 #include <QPrinter>
+#include <QPointer>
+#include <QRadioButton>
 #include <QRegularExpression>
 #include <QScreen>
 #include <QScopedValueRollback>
@@ -71,6 +74,7 @@
 #include <QStyledItemDelegate>
 #include <QStringDecoder>
 #include <QTextDocument>
+#include <QTabWidget>
 #include <QTimer>
 #include <QTreeView>
 #include <QVBoxLayout>
@@ -364,10 +368,13 @@ class Files : public KDirOperator
 public:
     using KDirOperator::KDirOperator;
     std::function<void(const KFileItem &, const QPoint &)> onMenu;
+    std::function<void(const QUrl &)> onOpenFolder;
     int presentation = Large;
     void syncSelectionActions() { updateSelectionDependentActions(); }
 
 protected:
+    void selectDir(const KFileItem &item) override { onOpenFolder(item.targetUrl()); }
+
     QAbstractItemView *createView(QWidget *parent, KFile::FileView viewKind) override
     {
         if (presentation == Tiles || presentation == Content)
@@ -448,8 +455,11 @@ protected:
         if (pressed >= 0 && pressOpens(pressed)) {
             const int part = std::exchange(pressed, -1);
             const auto click = parts[part].click;
+            // Organize → Close can delete the owning window during the popup event loop.
+            const QPointer<Painted> alive(this);
             click();
-            update();
+            if (alive)
+                alive->update();
         }
     }
     void mouseReleaseEvent(QMouseEvent *e) override
@@ -1237,6 +1247,7 @@ class Explorer : public QMainWindow
 public:
     explicit Explorer(const QUrl &start)
     {
+        setAttribute(Qt::WA_DeleteOnClose);
         auto *central = new QWidget;
         auto *column = new QVBoxLayout(central);
         column->setContentsMargins(0, 0, 0, 0);
@@ -1249,9 +1260,11 @@ public:
         disconnect(properties, &QAction::triggered, files, nullptr);
         connect(properties, &QAction::triggered, this, [this] { showExplorerProperties(files->selectedItems(), files); });
         files->onMenu = [this](const KFileItem &item, const QPoint &pos) { contextMenu(item, pos); };
+        files->onOpenFolder = [this](const QUrl &url) { openFolder(url); };
         files->setMode(KFile::Files);
         files->setFollowNewDirectories(false);
         KConfig config(QStringLiteral("win7-explorer-optionsrc"), KConfig::SimpleConfig);
+        foldersInNewWindow = config.group("General").readEntry("OpenFoldersInNewWindow", false);
         const auto options = config.group("View");
         thumbnails = options.readEntry("Thumbnails", true);
         files->setInlinePreviewShown(thumbnails);
@@ -1493,6 +1506,7 @@ private:
     QActionGroup *backgroundViews = new QActionGroup(this);
     QMenuBar *fileMenuBar = new QMenuBar;
     QAction *detailsPaneAction;
+    bool foldersInNewWindow;
     bool thumbnails;
     int viewIndex = -1;
     int iconSize = 96;
@@ -1531,29 +1545,54 @@ private:
         dialog.setWindowTitle(tr("Folder Options"));
         auto *layout = new QVBoxLayout(&dialog);
         auto *scope = new QLabel(tr("These options apply only to Explorer."), &dialog);
-        auto *hidden = new QCheckBox(tr("Show &hidden files"), &dialog);
-        auto *icons = new QCheckBox(tr("Show &thumbnails instead of file icons"), &dialog);
+        auto *tabs = new QTabWidget(&dialog);
+        auto *general = new QWidget(tabs);
+        auto *browse = new QGroupBox(tr("Browse folders"), general);
+        auto *same = new QRadioButton(tr("Open each folder in the &same window"), browse);
+        auto *own = new QRadioButton(tr("Open each folder in its &own window"), browse);
+        (foldersInNewWindow ? own : same)->setChecked(true);
+        auto *choices = new QVBoxLayout(browse);
+        choices->addWidget(same);
+        choices->addWidget(own);
+        auto *generalLayout = new QVBoxLayout(general);
+        generalLayout->addWidget(browse);
+        generalLayout->addStretch();
+        tabs->addTab(general, tr("&General"));
+
+        auto *view = new QWidget(tabs);
+        auto *viewLayout = new QVBoxLayout(view);
+        auto *hidden = new QCheckBox(tr("Show &hidden files"), view);
+        auto *icons = new QCheckBox(tr("Show &thumbnails instead of file icons"), view);
         hidden->setChecked(files->showHiddenFiles());
         icons->setChecked(thumbnails);
+        viewLayout->addWidget(hidden);
+        viewLayout->addWidget(icons);
+        viewLayout->addStretch();
+        tabs->addTab(view, tr("&View"));
+
         auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
         layout->addWidget(scope);
-        layout->addWidget(hidden);
-        layout->addWidget(icons);
+        layout->addWidget(tabs);
         layout->addWidget(buttons);
         connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
         connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
         if (dialog.exec() != QDialog::Accepted)
             return;
         KConfig config(QStringLiteral("win7-explorer-optionsrc"), KConfig::SimpleConfig);
+        if (foldersInNewWindow != own->isChecked())
+            config.group("General").writeEntry("OpenFoldersInNewWindow", own->isChecked());
         auto options = config.group("View");
-        options.writeEntry("ShowHidden", hidden->isChecked());
-        options.writeEntry("Thumbnails", icons->isChecked());
+        if (files->showHiddenFiles() != hidden->isChecked())
+            options.writeEntry("ShowHidden", hidden->isChecked());
+        if (thumbnails != icons->isChecked())
+            options.writeEntry("Thumbnails", icons->isChecked());
         if (!config.sync()) {
             // Don't let KConfig retry rejected edits on destruction if writes recover during the warning.
             config.markAsClean();
             QMessageBox::warning(this, dialog.windowTitle(), tr("Could not save Explorer's folder options."));
             return;
         }
+        foldersInNewWindow = own->isChecked();
         files->setShowHiddenFiles(hidden->isChecked());
         thumbnails = icons->isChecked();
         files->setInlinePreviewShown(thumbnails);
@@ -1581,6 +1620,8 @@ private:
         layout->addSeparator();
         detailsPaneAction = toggle(QStringLiteral("&Details pane"), details);
         auto *preview = files->action(KDirOperator::ShowPreviewPanel);
+        preview->setText(QStringLiteral("&Preview pane"));
+        preview->setIcon(assetIcon(QStringLiteral("preview-pane")));
         layout->addAction(preview);
         toggle(QStringLiteral("&Navigation pane"), pane);
         auto *options = organize->addAction(QStringLiteral("&Folder and search options"), this, &Explorer::folderOptions);
@@ -1952,15 +1993,27 @@ private:
 
     void open(const KFileItem &item) { openUrl(item.targetUrl(), item.mimetype()); }
 
+    void openFolder(const QUrl &url)
+    {
+        if (foldersInNewWindow)
+            (new Explorer(url))->show();
+        else
+            files->setUrl(url, true);
+    }
+
     void openItems(const KFileItemList &items)
     {
-        // One folder opens here; multiple selections must not replace each other in this view.
+        // Multiple selections must not replace each other in this view.
         if (items.size() == 1 && items.first().isDir()) {
-            files->setUrl(items.first().targetUrl(), true);
+            openFolder(items.first().targetUrl());
             return;
         }
-        for (const auto &item : items)
-            open(item);
+        for (const auto &item : items) {
+            if (foldersInNewWindow && item.isDir())
+                openFolder(item.targetUrl());
+            else
+                open(item);
+        }
     }
 
     void toClipboard(bool cutting)
