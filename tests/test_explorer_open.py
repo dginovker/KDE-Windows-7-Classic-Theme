@@ -16,6 +16,41 @@ from test_explorer_empty import stop_unit
 from test_explorer_selection import activate, app_windows, unit_pid
 
 
+def close_fixture_kwrite(pid, fixture):
+    receipt = user(f'''python - {pid} {shlex.quote(fixture)} <<'PY'
+import os
+from pathlib import Path
+import select
+import signal
+import sys
+
+pid = int(sys.argv[1])
+fixture = os.fsencode(sys.argv[2])
+try:
+    # Pin the process before reading cmdline so PID reuse cannot redirect the signal.
+    fd = os.pidfd_open(pid)
+except ProcessLookupError:
+    sys.exit(0)
+poll = select.poll()
+poll.register(fd, select.POLLIN)
+try:
+    args = Path(f'/proc/{{pid}}/cmdline').read_bytes().split(b'\\0')
+    if poll.poll(0):
+        sys.exit(0)
+    if fixture not in args and b'file://' + fixture not in args:
+        sys.exit(f'Refusing to close KWrite PID {{pid}}: fixture argument missing')
+    signal.pidfd_send_signal(fd, signal.SIGTERM)
+except (FileNotFoundError, ProcessLookupError):
+    if not poll.poll(0):
+        raise
+if not poll.poll(5000):
+    sys.exit(f'Fixture KWrite PID {{pid}} did not exit')
+print(f'Closed verified KWrite PID {{pid}}')
+PY''')
+    if receipt:
+        print(receipt, flush=True)
+
+
 def exercise(out, scale, root, explorer):
     out.mkdir(parents=True)
     config = f'{root}/config'
@@ -25,6 +60,8 @@ def exercise(out, scale, root, explorer):
     argv = f'{root}/chooser-argv'
     desktop = f'~/.local/share/applications/{unit}.desktop'
     parent, kate = 0, 0
+    kwrite = None
+    fixture = f'{folder}/Read.txt'
     owned_chooser = None
     wide = (40, 40, 768, 440)
     narrow = (40, 40, 265, 440)
@@ -257,17 +294,28 @@ file --mime-type {folder}/RefusalMarker''')
 
         wait_for(kwrite_offered, 'text-item Open With submenu offers KWrite')
         click(target)
-        wait_for(lambda: user('pgrep -x kwrite || true'), 'item popup Open With launched KWrite')
-        (kwrite,) = map(int, user('pgrep -x kwrite').splitlines())
+
+        def fixture_kwrite():
+            nonlocal kwrite
+            owned = user(f'''for pid in $(pgrep -x kwrite || true); do
+                if tr '\\0' '\\n' <"/proc/$pid/cmdline" | grep -Fqx -e {fixture} -e file://{fixture}; then
+                    printf '%s\\n' "$pid"
+                fi
+            done''')
+            if owned:
+                (kwrite,) = map(int, owned.splitlines())
+            return kwrite
+
+        wait_for(fixture_kwrite, 'item popup Open With launched KWrite with the fixture path')
         wait_for(lambda: kwin_query(f'''const w = workspace.activeWindow;
             if (w && w.pid == {kwrite} && w.caption.startsWith('Read.txt')) emit(w.pid);'''),
                  'KWrite shows the selected document')
         verify_editor('context-open-with-kwrite')
-        selected = user(f'''tr '\\0' '\\n' </proc/{kwrite}/cmdline | grep -Fx -e {folder}/Read.txt -e file://{folder}/Read.txt''')
+        selected = user(f'''tr '\\0' '\\n' </proc/{kwrite}/cmdline | grep -Fx -e {fixture} -e file://{fixture}''')
         (out / 'context-open-with-kwrite-path.txt').write_text(selected + '\n')
-        print(f'{scale:g}x item popup Open: Kate displayed selected document; Open With: KWrite received {selected}', flush=True)
-        key('KEY_LEFTALT', 'KEY_F4')
-        wait_for(lambda: not user('pgrep -x kwrite || true'), 'KWrite closed')
+        print(f'{scale:g}x item popup Open: Kate displayed selected document; Open With: KWrite PID {kwrite} received {selected}', flush=True)
+        close_fixture_kwrite(kwrite, fixture)
+        kwrite = None
         activate(parent, wide)
         click(point(146, 74))
         snap('toolbar-open-with-menu')
@@ -330,6 +378,8 @@ file --mime-type {folder}/RefusalMarker''')
             'for (const w of workspace.windowList()) emit(w.internalId, w.pid, w.resourceClass, w.caption, w.active, w.modal);'), indent=2) + '\n')
         raise
     finally:
+        if kwrite is not None:
+            close_fixture_kwrite(kwrite, fixture)
         if owned_chooser is not None and chooser_windows().get(owned_chooser):
             key('KEY_ESC')
             wait_for(lambda: chooser_closed(owned_chooser), f'closed owned chooser {owned_chooser}')
@@ -349,7 +399,6 @@ file --mime-type {folder}/RefusalMarker''')
                 wait_for(lambda: all(other != pid for other, *_ in app_windows()), f'owned window {pid} closed')
         stop_unit(unit)
         stop_unit(unit + '-kate')
-        user('pkill -x kwrite || true')
         after = user(manifest)
         (out / 'fixtures-after.txt').write_text(after + '\n')
         assert after == before, 'Open changed fixture data or permissions'
