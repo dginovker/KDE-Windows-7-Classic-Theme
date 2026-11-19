@@ -9,7 +9,7 @@ url='https://github.com/dginovker/KDE-Windows-7-Classic-Theme'
 # Wine's Tahoma (bundled font) is LGPL; everything else is GPL.
 license=('GPL-3.0-or-later' 'LGPL-2.1-or-later')
 # plasma-desktop provides kcm_clock; the lock screen uses the private sessions API in Plasma 6.8.2.
-depends=('plasma-desktop>=6.8' 'plasma-workspace=6.8.2' 'kscreenlocker=6.8.2' 'kwin>=6.8' 'kio>=6.17' 'dolphin' 'kwindowsystem' 'python' 'dconf' 'dbus' 'glib2' 'qt6-tools' 'qt6-virtualkeyboard' 'qt6-wayland' 'wayland')
+depends=('plasma-desktop>=6.8' 'plasma-workspace=6.8.2' 'kscreenlocker=6.8.2' 'kwin>=6.8' 'kio>=6.17' 'dolphin' 'kwindowsystem' 'kiconthemes' 'pulseaudio-qt' 'python' 'dconf' 'dbus' 'glib2' 'qt6-tools' 'qt6-virtualkeyboard' 'qt6-wayland' 'wayland')
 makedepends=('wine' 'python-fonttools' 'cmake' 'extra-cmake-modules' 'plasma-wayland-protocols')
 options=(!debug)
 install=win7-classic.install

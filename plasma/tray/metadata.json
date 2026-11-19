@@ -1,7 +1,7 @@
 {
     "KPlugin": {
         "Id": "org.win7classic.tray",
-        "Name": "Windows 7 Classic notification area (prototype)",
+        "Name": "Windows 7 Classic notification area",
         "Description": "Classic presentation for real Plasma applets",
         "Category": "Windows and Tasks",
         "Icon": "preferences-desktop-notification",

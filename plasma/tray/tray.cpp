@@ -91,7 +91,11 @@ protected:
     void restoreContents(KConfigGroup &group) override
     {
         Containment::restoreContents(group);
-        auto general = group.group(QStringLiteral("Configuration")).group(QStringLiteral("General"));
+        auto general = group.group(QStringLiteral("General"));
+        const auto shortcut = group.group(QStringLiteral("Shortcuts")).readEntry("global", QString());
+        if (!shortcut.isEmpty()) {
+            setGlobalShortcut(QKeySequence(shortcut));
+        }
         const auto known = general.readEntry("knownItems", QStringList());
         auto enabled = general.readEntry("extraItems", QStringList());
         for (const auto &meta : Plasma::PluginLoader::self()->listAppletMetaData(QString())) {

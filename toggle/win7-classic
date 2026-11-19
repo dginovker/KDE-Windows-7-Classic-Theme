@@ -129,6 +129,7 @@ copy_files() {
 }
 
 preflight_windows() {
+    [[ -f /usr/lib/qt6/plugins/plasma/applets/org.win7classic.tray.so ]] || die "system-wide Classic notification area is missing; run: cd packaging && makepkg -si"
     [[ -f /usr/lib/qt6/plugins/styles/libwin7classicstyle.so ]] || die "system-wide Win7Classic Qt style is missing; run: cd packaging && makepkg -si"
     systemd-run --user --wait --pipe --collect -q "$probe" --available || die "Win7Classic style cannot load; reinstall: cd packaging && makepkg -si"
 }
@@ -208,15 +209,7 @@ switch_to() {
                 problem="Quick Launch migration check failed (exit $migration_status): $migrated"
             fi
         fi
-        if [[ -z $problem && $target == windows ]]; then
-            local tray_layout
-            if tray_layout=$(python3 "$share/windows/tray_layout.py" "$config/plasma-org.kde.plasma.desktop-appletsrc" 2>&1); then
-                [[ -z $tray_layout ]] || log "$tray_layout"
-            else
-                failure_status=$?
-                problem="System Tray layout migration failed (exit $failure_status)${tray_layout:+: $tray_layout}"
-            fi
-        fi
+
     else
         # First use of a mode: build it from the layout being left, plus the mode's shipped files (e.g. panel theme).
         for f in "${FILES[@]}"; do [[ ! -e $share/$target/$f ]] || cp "$share/$target/$f" "$config/$f"; done
@@ -226,6 +219,27 @@ switch_to() {
             problem="seeding $target failed (exit $failure_status)${out:+: $out}"
         fi
         appearance_dir=$share/$target
+    fi
+    if [[ -z $problem && $target == windows ]]; then
+        local tray_layout original_tray layout_path=$config/plasma-org.kde.plasma.desktop-appletsrc
+        if tray_layout=$("$share/windows/migrate-tray" --check "$layout_path" 2>&1); then
+            if [[ -n $tray_layout ]]; then
+                if original_tray=$(mktemp -d "$state/profiles/windows-before-tray.XXXXXX") &&
+                   cp -a "$appearance_dir/." "$original_tray/" &&
+                   { [[ $appearance_dir != "$share/windows" ]] || copy_files "$config" "$original_tray"; }; then
+                    log "System Tray original staged profile: $original_tray"
+                    if tray_layout=$("$share/windows/migrate-tray" "$layout_path" 2>&1); then
+                        log "$tray_layout"
+                    else
+                        failure_status=$?
+                        problem="System Tray migration failed (exit $failure_status): $tray_layout"
+                    fi
+                else problem="could not preserve the pre-migration System Tray profile: $original_tray"; fi
+            fi
+        else
+            failure_status=$?
+            problem="System Tray migration check failed (exit $failure_status): $tray_layout"
+        fi
     fi
     [[ -n $problem ]] || load_appearance "$target" "$appearance_dir"
     if [[ -n $problem ]]; then :

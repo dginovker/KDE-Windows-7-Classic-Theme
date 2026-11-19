@@ -1,13 +1,11 @@
 #!/usr/bin/env python3
-"""Build a reversible migration receipt from a staged Windows panel, never current."""
+"""Replace only a Classic panel’s stock tray in a staged Windows layout."""
 import argparse
-from hashlib import sha256
 from pathlib import Path
 import re
 import sys
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[3] / 'toggle/windows'))
-from layout import Layout
+from layout import Layout, replace_layout
 
 STOCK = 'org.kde.plasma.systemtray'
 CLASSIC = 'org.win7classic.tray'
@@ -41,20 +39,23 @@ def transform(text, undo=False):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--staged-windows', required=True, type=Path)
-    parser.add_argument('--receipt', required=True, type=Path, help='New scratch directory')
+    parser.add_argument('--check', action='store_true')
+    parser.add_argument('--undo', action='store_true')
+    parser.add_argument('layout', type=Path)
     args = parser.parse_args()
-    old = args.staged_windows.read_bytes()
-    new = transform(old.decode()).encode()
-    if old == new:
-        raise SystemExit('No stock tray immediately after a Classic tray frame')
-    if transform(new.decode(), undo=True).encode() != old:
-        raise SystemExit('Migration is not reversible byte-for-byte')
-    args.receipt.mkdir(mode=0o700)
-    for name, data in [('original', old), ('converted', new)]:
-        (args.receipt / name).write_bytes(data)
-        print(f'{sha256(data).hexdigest()}  {name}')
+    original = args.layout.read_bytes()
+    new = transform(original.decode(), args.undo)
+    if new.encode() == original:
+        return
+    if transform(new, not args.undo).encode() != original:
+        raise ValueError('tray migration is not reversible byte-for-byte')
+    if not args.check:
+        replace_layout(args.layout, original, new)
+    print('replaced Classic panel notification area' if not args.undo else 'restored stock System Tray')
 
 
 if __name__ == '__main__':
-    main()
+    try:
+        main()
+    except (OSError, ValueError) as error:
+        sys.exit(f'Tray migration: {error}')

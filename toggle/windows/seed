@@ -13,7 +13,6 @@ import sys
 from pathlib import Path
 
 from launchers import DEFAULT_LAUNCHERS, normalize_launchers
-from tray_layout import apply as apply_tray_defaults
 
 REPLACED = {'org.kde.plasma.kickoff', 'org.kde.plasma.kicker', 'org.kde.plasma.kickerdash', 'org.kde.plasma.taskmanager',
             'org.kde.plasma.icontasks', 'org.kde.plasma.quicklaunch', 'org.kde.plasma.digitalclock', 'org.kde.plasma.showdesktop',
@@ -175,7 +174,6 @@ def main(configdir):
         applets.set((*group, 'Wallpaper', 'org.kde.color', 'General'), 'Color', '58,110,165')
     seed_recycle_bin(applets, desktops, new_id)
     applets.write()
-    apply_tray_defaults(applets.path)
     shellrc.write()
 
 

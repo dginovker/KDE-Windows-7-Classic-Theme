@@ -105,6 +105,15 @@ ContainmentItem {
         }
     }
 
+    readonly property Item notificationArea: tray
+
+    // Consumers can anchor to a real mapped cell, never activate the applet through this API.
+    function cellForPlugin(pluginId) {
+        const applet = Containment.applets.find(item => item.pluginName === pluginId);
+        return applet ? (hostedCell(visibleCells, applet, cellRevision)
+                         || (overflow.visible ? hostedCell(hiddenCells, applet, cellRevision) : null)) : null;
+    }
+
     function hostedCell(deck, applet, revision) {
         for (let i = 0; i < deck.count; ++i) {
             const cell = deck.itemAt(i);
