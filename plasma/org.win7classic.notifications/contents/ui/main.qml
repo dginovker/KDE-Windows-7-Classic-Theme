@@ -1,0 +1,310 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+pragma ComponentBehavior: Bound
+import QtQuick
+import QtQuick.Controls as QQC
+import QtQuick.Layouts
+import QtQml.Models
+import org.kde.kirigami as Kirigami
+import org.kde.plasma.plasmoid
+import org.kde.plasma.core as PlasmaCore
+import org.kde.kcmutils as KCMUtils
+import org.kde.config as KConfig
+import org.kde.notificationmanager as NM
+import org.kde.taskmanager as TaskManager
+import "../../../../../win7-classic/popup-backend" as PopupBackend
+
+PlasmoidItem {
+    id: root
+    preferredRepresentation: compactRepresentation
+    activationTogglesExpanded: false
+    Plasmoid.onActivated: root.toggleHistory()
+    Plasmoid.icon: !NM.Server.valid || inhibited ? "notifications-disabled-symbolic"
+        : history.unreadNotificationsCount > 0 ? "notification-active-symbolic" : "notification-inactive-symbolic"
+    Plasmoid.status: !NM.Server.valid || inhibited || history.unreadNotificationsCount > 0 || history.activeJobsCount > 0
+        || history.dismissedResidentNotificationsCount > 0 ? PlasmaCore.Types.ActiveStatus : PlasmaCore.Types.PassiveStatus
+    toolTipMainText: qsTr("Notifications")
+    toolTipSubText: !NM.Server.valid ? qsTr("Plasma notification service unavailable")
+        : inhibited ? qsTr("Do not disturb") : qsTr("%n unread notification(s)", "", history.unreadNotificationsCount)
+
+    readonly property Item anchorItem: compactRepresentationItem
+    readonly property bool anchored: policy.popupPosition === NM.Settings.CloseToWidget
+    readonly property rect workArea: Plasmoid.containment ? Qt.rect(
+        Plasmoid.containment.screenGeometry.x + Plasmoid.containment.availableScreenRect.x,
+        Plasmoid.containment.screenGeometry.y + Plasmoid.containment.availableScreenRect.y,
+        Plasmoid.containment.availableScreenRect.width,
+        Plasmoid.containment.availableScreenRect.height) : Qt.rect(0, 0, 0, 0)
+    property double now: Date.now()
+    readonly property bool inhibited: NM.Server.valid && (policy.notificationsInhibitedUntil.getTime() > now
+        || policy.notificationsInhibitedByApplication || (policy.inhibitNotificationsWhenFullscreen && policy.fullscreenFocused)
+        || (policy.inhibitNotificationsWhenScreensMirrored && policy.screensMirrored))
+
+    function toggleHistory() {
+        if (historyPopup.visible) {
+            historyPopup.close();
+        } else if (anchorItem?.Window.window) {
+            popups.hideInhibitionSummary();
+            historyPopup.visible = true;
+        }
+    }
+
+    function toggleDnd() {
+        const wasInhibited = inhibited;
+        if (wasInhibited) {
+            policy.notificationsInhibitedUntil = undefined;
+            policy.revokeApplicationInhibitions();
+            policy.fullscreenFocused = false;
+            policy.screensMirrored = false;
+        } else {
+            const until = new Date();
+            until.setFullYear(until.getFullYear() + 1);
+            policy.notificationsInhibitedUntil = until;
+        }
+        policy.save();
+        if (inhibited !== wasInhibited)
+            shortcuts.showOsd(inhibited ? "notifications-disabled" : "notifications", inhibited ? qsTr("Notifications Off") : qsTr("Notifications On"));
+    }
+
+    function clearHistory() {
+        if (history.expiredNotificationsCount > 0) {
+            history.clear(NM.Notifications.ClearExpired);
+            shortcuts.showOsd("edit-clear-history", qsTr("Notification history cleared"));
+        }
+    }
+
+    function syncNotificationSounds() {
+        if (!audio.notificationStreamPresent)
+            return;
+        if (inhibited && !audio.notificationStreamMuted) {
+            policy.notificationSoundsInhibited = true;
+            audio.setNotificationStreamMuted(true);
+            policy.save();
+        } else if (!inhibited && policy.notificationSoundsInhibited) {
+            audio.setNotificationStreamMuted(false);
+            policy.notificationSoundsInhibited = false;
+            policy.save();
+        }
+    }
+
+    onInhibitedChanged: {
+        NM.Server.inhibited = inhibited;
+        if (!inhibited)
+            popups.showInhibitionSummary(policy.lowPriorityHistory ? NM.Notifications.LowUrgency : NM.Notifications.NormalUrgency,
+                policy.historyBlacklistedApplications, policy.historyBlacklistedServices);
+        syncNotificationSounds();
+    }
+    onWorkAreaChanged: Qt.callLater(positionPopups)
+    onAnchorItemChanged: Qt.callLater(positionPopups)
+
+    NM.Settings { id: policy; onSettingsChanged: Qt.callLater(root.positionPopups) }
+    Timer { interval: 1000; repeat: true; running: true; onTriggered: root.now = Date.now() }
+    PopupBackend.Audio { id: audio; onNotificationStreamChanged: root.syncNotificationSounds() }
+
+    PopupBackend.NotificationShortcuts {
+        id: shortcuts
+        onToggleDoNotDisturb: root.toggleDnd()
+        onClearHistory: root.clearHistory()
+    }
+    TaskManager.TasksModel { id: taskModel; groupMode: TaskManager.TasksModel.GroupDisabled }
+
+    compactRepresentation: MouseArea {
+        acceptedButtons: Qt.LeftButton | Qt.MiddleButton
+        onClicked: mouse => {
+            if (mouse.button === Qt.MiddleButton)
+                root.toggleDnd();
+            else if (mouse.button === Qt.LeftButton)
+                root.toggleHistory();
+        }
+        Kirigami.Icon { anchors.fill: parent; source: Plasmoid.icon }
+    }
+
+    NM.Notifications {
+        id: popups
+        showExpired: false
+        showDismissed: false
+        showAddedDuringInhibition: false
+        showJobs: policy.jobsInNotifications
+        blacklistedDesktopEntries: policy.popupBlacklistedApplications
+        blacklistedNotifyRcNames: policy.popupBlacklistedServices
+        whitelistedDesktopEntries: root.inhibited ? policy.doNotDisturbPopupWhitelistedApplications : []
+        whitelistedNotifyRcNames: root.inhibited ? policy.doNotDisturbPopupWhitelistedServices : []
+        sortMode: NM.Notifications.SortByTypeAndUrgency
+        sortOrder: Qt.AscendingOrder
+        groupMode: NM.Notifications.GroupDisabled
+        window: root.anchorItem?.Window.window || null
+        limit: Math.max(1, Math.ceil(root.workArea.height / (Kirigami.Units.gridUnit * 4)))
+        urgencies: (!root.inhibited || policy.criticalPopupsInDoNotDisturbMode ? NM.Notifications.CriticalUrgency : 0)
+            | (!root.inhibited ? NM.Notifications.NormalUrgency : 0)
+            | (!root.inhibited && policy.lowPriorityPopups ? NM.Notifications.LowUrgency : 0)
+        onShowNotificationsRequested: if (!historyPopup.visible) root.toggleHistory()
+    }
+
+    NM.Notifications {
+        id: history
+        showExpired: true
+        showDismissed: true
+        showJobs: policy.jobsInNotifications
+        sortMode: NM.Notifications.SortByDate
+        groupMode: NM.Notifications.GroupDisabled
+        ignoreBlacklistDuringInhibition: true
+        blacklistedDesktopEntries: policy.historyBlacklistedApplications
+        blacklistedNotifyRcNames: policy.historyBlacklistedServices
+        urgencies: NM.Notifications.CriticalUrgency | NM.Notifications.NormalUrgency
+            | (policy.lowPriorityHistory ? NM.Notifications.LowUrgency : 0)
+        window: historyPopup
+    }
+
+    Instantiator {
+        id: balloons
+        model: popups
+        delegate: Balloon {
+            required property var model
+            required property int index
+            entry: model
+            row: index
+            source: popups
+            settings: policy
+            tasks: taskModel
+            availableHeight: Math.max(54, Math.floor(root.workArea.height * 0.8))
+            critical: model.urgency === NM.Notifications.CriticalUrgency
+                || (model.urgency === NM.Notifications.NormalUrgency && !policy.inhibitNotificationsWhenFullscreen)
+            onHeightChanged: Qt.callLater(root.positionPopups)
+        }
+        onObjectAdded: (index, object) => {
+            const popup = object as Balloon;
+            const row = popups.index(index, 0);
+            if (root.inhibited)
+                popup.entry.wasAddedDuringInhibition = false;
+            if (popup.entry.type === NM.Notifications.NotificationType && popup.entry.desktopEntry && !popup.entry.notifyRcName) {
+                policy.registerKnownApplication(popup.entry.desktopEntry);
+                policy.save();
+            }
+            popups.stopTimeout(row);
+            popups.playSoundHint(row);
+            Qt.callLater(root.positionPopups);
+        }
+        onObjectRemoved: (index, object) => {
+            const popup = object as Balloon;
+            const id = Number(popup.notificationId);
+            if (Number.isInteger(id) && id > 0)
+                popups.startTimeout(id);
+            Qt.callLater(root.positionPopups);
+        }
+    }
+
+    Timer {
+        interval: 100
+        repeat: true
+        running: balloons.count > 0
+        onTriggered: root.positionPopups()
+    }
+
+    function positionPopups() {
+        const area = workArea;
+        if (!anchorItem?.Window.window || area.width <= 0 || area.height <= 0)
+            return;
+
+        const anchor = anchorItem.mapToGlobal(anchorItem.width / 2, anchorItem.height / 2);
+        const pos = policy.popupPosition;
+        const above = anchored ? anchor.y >= area.y + area.height / 2 : pos >= NM.Settings.BottomLeft;
+        const towardsLeft = pos === NM.Settings.TopLeft || pos === NM.Settings.BottomLeft;
+        const centered = pos === NM.Settings.TopCenter || pos === NM.Settings.BottomCenter;
+        let edge = above ? area.y + area.height : area.y;
+        if (!anchored)
+            edge += above ? -2 * Kirigami.Units.gridUnit : 2 * Kirigami.Units.gridUnit;
+        for (let i = 0; i < balloons.count; ++i) {
+            const p = balloons.objectAt(i) as Balloon;
+            if (!p)
+                continue;
+            p.tail = anchored && i === 0;
+            p.tailAtBottom = above;
+            const w = p.width || 272;
+            const preferredX = anchored ? anchor.x - 235 : centered ? area.x + (area.width - w) / 2
+                : towardsLeft ? area.x + 2 * Kirigami.Units.gridUnit : area.x + area.width - w - 2 * Kirigami.Units.gridUnit;
+            p.x = Math.round(Math.max(area.x, Math.min(preferredX, area.x + area.width - w)));
+            p.tailOffset = Math.round(Math.max(15, Math.min(w - 15, anchor.x - p.x)));
+            p.y = Math.round(above ? edge - p.height : edge);
+            p.visible = i === 0 || (above ? p.y > area.y + area.height * 0.2 : p.y + p.height < area.y + area.height * 0.8);
+            edge += above ? -p.height - 4 : p.height + 4;
+        }
+    }
+
+    PlasmaCore.Dialog {
+        id: historyPopup
+        visualParent: root.anchorItem
+        location: Plasmoid.location
+        type: PlasmaCore.Dialog.AppletPopup
+        backgroundHints: PlasmaCore.Dialog.SolidBackground
+        hideOnWindowDeactivate: true
+        visible: false
+        onVisibleChanged: if (!visible) history.lastRead = undefined
+
+        mainItem: ColumnLayout {
+            implicitWidth: 344
+            implicitHeight: 400
+            Keys.onEscapePressed: historyPopup.close()
+            RowLayout {
+                Layout.fillWidth: true
+                QQC.CheckBox {
+                    text: qsTr("Do not disturb")
+                    checked: root.inhibited
+                    onClicked: root.toggleDnd()
+                }
+                Item { Layout.fillWidth: true }
+                QQC.Button {
+                    text: qsTr("Clear History")
+                    enabled: history.expiredNotificationsCount > 0
+                    onClicked: root.clearHistory()
+                }
+            }
+            QQC.Label {
+                visible: history.count === 0
+                text: NM.Server.valid ? qsTr("No notifications") : root.toolTipSubText
+            }
+            QQC.ScrollView {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                id: historyScroll
+                contentWidth: availableWidth
+                Column {
+                    width: historyScroll.availableWidth
+                    spacing: 5
+                    Repeater {
+                        model: history
+                        delegate: Rectangle {
+                            id: historyCard
+                            required property var model
+                            required property int index
+                            width: parent.width
+                            height: historyContents.implicitHeight + 10
+                            color: "white"
+                            border.color: "#aca899"
+                            NotificationContents {
+                                id: historyContents
+                                x: 5; y: 5
+                                width: parent.width - 10
+                                entry: historyCard.model
+                                row: historyCard.index
+                                source: history
+                                showSettings: true
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Plasmoid.contextualActions: [
+        PlasmaCore.Action {
+            text: qsTr("Configure Notifications…")
+            icon.name: "configure"
+            visible: KConfig.KAuthorized.authorizeControlModule("kcm_notifications")
+            onTriggered: KCMUtils.KCMLauncher.openSystemSettings("kcm_notifications")
+        },
+        PlasmaCore.Action {
+            text: qsTr("Clear History")
+            visible: history.expiredNotificationsCount > 0
+            onTriggered: root.clearHistory()
+        }
+    ]
+}
