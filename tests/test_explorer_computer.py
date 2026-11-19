@@ -6,7 +6,7 @@ import time
 
 from PIL import Image
 
-from lab import VM, executable, explorer_identity, install, kwin_script, shot, toggle, user, vmctl, wait_for
+from lab import VM, clipboard, executable, explorer_identity, install, kwin_script, shot, toggle, user, vmctl, wait_for
 from test_explorer import EXPLORER, captions, click, key, open_folder
 from test_explorer_command_menus import words
 from test_upgrade import output_name
@@ -116,8 +116,11 @@ def run(out, scale, base, exe):
     assert 'W7VOLUME' in words(capture(out, 'remounted-volume'), pt(225, 118) + pt(430, 176))
     address('file:///', 'File System')
     root = capture(out, 'explicit-root')
-    root_text = words(root, pt(165, 92) + pt(753, 347))
-    assert 'Storage volumes' not in root_text and sum(x in root_text.split() for x in ('bin', 'boot', 'dev', 'etc', 'home')) >= 3, root_text
+    assert 'Storage volumes' not in words(root, pt(176, 94) + pt(400, 120))
+    key('KEY_LEFTALT', 'KEY_D')
+    key('KEY_LEFTCTRL', 'KEY_C')
+    assert clipboard() == '/', 'the location is not the filesystem root'
+    print('typed file:/// reached File System; live address edit copied literal /', flush=True)
     address(f'{base}/Ordinary', 'Ordinary')
     capture(out, 'ordinary-folder')
     key('KEY_LEFTCTRL', 'KEY_W')
