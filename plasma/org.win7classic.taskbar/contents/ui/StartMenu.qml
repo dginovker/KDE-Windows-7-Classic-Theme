@@ -1,6 +1,7 @@
 import QtCore
 import QtQuick
 import QtQuick.Window
+import QtQuick.Templates as T
 import "../../../../../win7-classic/primitives2" as Classic
 import org.kde.plasma.core as PlasmaCore
 import org.kde.plasma.plasmoid
@@ -170,36 +171,54 @@ PlasmaCore.Dialog {
 
         // ---------- programs view: white list ----------
         Rectangle {
+            id: programsPane
+            readonly property int rowHeight: 18
+            readonly property bool overflow: programList.count * rowHeight > programList.height
             visible: menu.view === "programs"
             x: 3; y: 3; width: 250; height: 378; color: "white"
             clip: true
             ListView {
                 id: programList
                 anchors.fill: parent; anchors.topMargin: 2
+                anchors.rightMargin: programsPane.overflow ? programScroll.width : 0
                 model: menu.programsModel || programs
+                clip: true
                 boundsBehavior: Flickable.StopAtBounds
+                pixelAligned: true
+                onModelChanged: {
+                    cancelFlick();
+                    positionViewAtBeginning();
+                }
+                T.ScrollBar.vertical: ProgramScrollBar {
+                    id: programScroll
+                    parent: programsPane
+                    anchors { right: programsPane.right; top: programsPane.top; bottom: programsPane.bottom }
+                    visible: programsPane.overflow
+                    list: programList
+                }
                 delegate: Item {
+                    id: programRow
                     required property var model
                     required property int index
                     readonly property bool selected: menu.current === index
                     readonly property bool expandable: menu.programChild(programList.model, index) !== null
-                    width: 248; height: 18
-                    Rectangle { x: 1; width: 246; height: 18; color: menu.highlight; visible: parent.selected }
+                    width: programList.width - 2; height: programsPane.rowHeight
+                    Rectangle { x: 1; width: programRow.width - 2; height: programRow.height; color: menu.highlight; visible: programRow.selected }
                     Image {
                         x: 4; y: 1; width: 16; height: 16
-                        visible: parent.expandable
+                        visible: programRow.expandable
                         source: "assets/program-group.png"
                     }
                     Kirigami.Icon {
                         x: 4; y: 1; width: 16; height: 16
-                        visible: !parent.expandable
-                        source: model.decoration; selected: parent.selected
+                        visible: !programRow.expandable
+                        source: programRow.model.decoration; selected: programRow.selected
                     }
-                    Label { x: 24; width: 220; height: 18; text: model.display; color: parent.selected ? "white" : "black" }
+                    Label { x: 24; width: programRow.width - 28; height: programRow.height; text: programRow.model.display; color: programRow.selected ? "white" : "black" }
                     MouseArea {
-                        anchors.fill: parent; hoverEnabled: true
-                        onEntered: menu.current = index
-                        onClicked: menu.activateProgram(index)
+                        anchors.fill: programRow; hoverEnabled: true
+                        onEntered: menu.current = programRow.index
+                        onClicked: menu.activateProgram(programRow.index)
                     }
                 }
             }
@@ -462,6 +481,8 @@ PlasmaCore.Dialog {
         programsModel = null;
         programsPath = [];
         current = -1;
+        programList.cancelFlick();
+        programList.positionViewAtBeginning();
     }
     function programsBack() {
         if (programsPath.length) {

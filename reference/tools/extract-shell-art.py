@@ -11,3 +11,11 @@ for name, scene, box in [('search', 'w7-menu', (228, 723, 250, 746)),
 frame = Image.open(root / 'reference/screenshots/w7-menu.png').convert('RGBA').crop((300, 303, 362, 365))
 frame.paste((0, 0, 0, 0), (7, 7, 55, 53))
 frame.save(out / 'account-frame.png')
+
+# Accessories at 96 DPI; extract only the arrow glyphs and the two-pixel track pattern.
+scrollbar = Image.open(root / 'reference/screenshots/w7-programs-overflow.png').convert('RGBA')
+for name, y in [('up', 8), ('down', 370)]:
+    glyph = scrollbar.crop((238, y, 245, y + 4))
+    glyph.putalpha(glyph.convert('L').point(lambda shade: 255 if shade == 0 else 0))
+    glyph.save(out / f'program-scroll-{name}.png')
+scrollbar.crop((234, 18, 236, 20)).save(out / 'program-scroll-track.png')
