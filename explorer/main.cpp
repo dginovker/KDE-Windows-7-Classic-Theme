@@ -3,6 +3,7 @@
 // widgets, which do the actual file management.
 #include "ClassicPrimitives.h"
 #include "FolderProperties.h"
+#include <KApplicationTrader>
 #include <KConfig>
 #include <KConfigGroup>
 #include <KDirLister>
@@ -12,6 +13,7 @@
 #include <KFileItemDelegate>
 #include <KFileItemListProperties>
 #include <KFilePreviewGenerator>
+#include <KIO/ApplicationLauncherJob>
 #include <KIO/UDSEntry>
 #include <KIO/FileUndoManager>
 #include <KIO/Global>
@@ -37,6 +39,8 @@
 #include <QDir>
 #include <QDragEnterEvent>
 #include <QEnterEvent>
+#include <QFile>
+#include <QFileInfo>
 #include <QFontMetricsF>
 #include <QHeaderView>
 #include <QLabel>
@@ -49,6 +53,8 @@
 #include <QMimeData>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QPrintDialog>
+#include <QPrinter>
 #include <QRegularExpression>
 #include <QScreen>
 #include <QSortFilterProxyModel>
@@ -58,6 +64,8 @@
 #include <QStandardPaths>
 #include <QStyle>
 #include <QStyledItemDelegate>
+#include <QStringDecoder>
+#include <QTextDocument>
 #include <QTimer>
 #include <QTreeView>
 #include <QVBoxLayout>
@@ -738,13 +746,16 @@ public:
         QMenu *menu = nullptr;
         std::function<void()> act;
         QActionGroup *menuAnchorActions = nullptr;
+        QAction *action = nullptr;
     };
     QList<Command> left, right;
-    void setOpen(bool selected, const QString &icon, QMenu *menu)
+    void setSelection(bool selected, const QString &icon, QMenu *menu, bool library, bool print)
     {
-        if (showOpen == selected && openIcon == icon && left[1].menu == menu)
+        if (showOpen == selected && openIcon == icon && left[1].menu == menu && showLibrary == library && showPrint == print)
             return;
         showOpen = selected;
+        showLibrary = library;
+        showPrint = print;
         openIcon = icon;
         left[1].icon = QIcon::fromTheme(icon);
         left[1].menu = menu;
@@ -765,7 +776,7 @@ public:
         QList<std::pair<Command, int>> commands;
         int fullWidth = x;
         for (qsizetype i = 0; i < left.size(); ++i) {
-            if (i == 1 && !showOpen)
+            if ((i == 1 && !showOpen) || (i == 2 && !showLibrary) || (i == 4 && !showPrint))
                 continue;
             const Command &command = left[i];
             const int width = 21 + metrics.horizontalAdvance(command.text) + (command.menu ? 15 : 0)
@@ -790,7 +801,9 @@ public:
             add({QStringLiteral("»"), {}, nullptr, [this, hidden, x] {
                 QMenu menu(this);
                 for (const auto &command : hidden) {
-                    if (command.act)
+                    if (command.action)
+                        menu.addAction(command.action);
+                    else if (command.act)
                         menu.addAction(command.icon, command.text, this, command.act);
                     if (command.menu) {
                         auto *submenu = menu.addMenu(command.act ? QStringLiteral("Open with") : command.text);
@@ -846,7 +859,7 @@ protected:
     }
 
 private:
-    bool showOpen = false;
+    bool showOpen = false, showLibrary = true, showPrint = false;
     QString openIcon;
     QList<Command> visibleLeft;
     const Command &command(int part) const { return part < visibleLeft.size() ? visibleLeft[part] : right[part - visibleLeft.size()]; }
@@ -864,6 +877,8 @@ private:
             } else {
                 menu->exec(mapToGlobal(QPoint(x, 29)));
             }
+        } else if (command.action) {
+            command.action->trigger();
         } else {
             command.act();
         }
@@ -1252,6 +1267,7 @@ private:
     qsizetype position = -1;
     bool stepping = false;
     KFileItemActions openWith;
+    QAction *print = action(tr("&Print"), {}, {}, [this] { printText(files->selectedItems()); });
     QAction *cut = action(QStringLiteral("Cu&t"), QKeySequence::Cut, QStringLiteral("edit-cut"), [this] { toClipboard(true); });
     QAction *copy = action(QStringLiteral("&Copy"), QKeySequence::Copy, QStringLiteral("edit-copy"), [this] { toClipboard(false); });
     QAction *paste = action(QStringLiteral("&Paste"), QKeySequence::Paste, QStringLiteral("edit-paste"), [this] { pasteInto(files->url()); });
@@ -1358,6 +1374,8 @@ private:
                                             {"Videos", "library-videos", QStandardPaths::MoviesLocation}})
             library->addAction(assetIcon(QString::fromLatin1(icon)), QString::fromLatin1(name), this, [this, location] {
                 const KFileItemList selection = files->selectedItems();
+                if (!canIncludeInLibrary(selection))
+                    return;
                 auto *job = KIO::link(selection.isEmpty() ? QList<QUrl>{files->url()} : selection.urlList(),
                                       QUrl::fromLocalFile(QStandardPaths::writableLocation(location)));
                 job->setUiDelegate(KIO::createDefaultJobUiDelegate(KJobUiDelegate::AutoHandlingEnabled, this));
@@ -1416,6 +1434,7 @@ private:
                      {QStringLiteral("Open"), {}, nullptr, [this] { openItems(files->selectedItems()); }},
                      {QStringLiteral("Include in library"), {}, library, {}},
                      {QStringLiteral("Share with"), {}, share, {}},
+                     {tr("Print"), {}, nullptr, {}, nullptr, print},
                      {QStringLiteral("New folder"), {}, nullptr, [this] { files->mkdir(); }}};
         bar->right = {{QStringLiteral("View"), assetIcon(QStringLiteral("view-large")), viewMenu,
                        [this] { chooseView((viewIndex + 1) % views->actions().size()); }, views},
@@ -1621,8 +1640,10 @@ private:
         const int total = proxy()->rowCount();
         const bool filesOnly = !items.isEmpty() && std::ranges::all_of(items, &KFileItem::isFile);
         details->setItems(items, filesOnly, total, folderIcon);
-        bar->setOpen(!items.isEmpty(), filesOnly ? items.first().iconName() : QStringLiteral("org.win7classic.explorer"),
-                     items.size() == 1 && filesOnly ? openMenu : nullptr);
+        const bool printable = !localTextPath(items).isEmpty();
+        print->setEnabled(printable);
+        bar->setSelection(!items.isEmpty(), filesOnly ? items.first().iconName() : QStringLiteral("org.win7classic.explorer"),
+                          items.size() == 1 && filesOnly ? openMenu : nullptr, canIncludeInLibrary(items), printable);
         updateActions();
         empty->setVisible(total == 0 && listedUrl == listingRoot(files->url()));
         layoutEmptyMessage();
@@ -1692,6 +1713,68 @@ private:
         job->setUiDelegate(KIO::createDefaultJobUiDelegate(KJobUiDelegate::AutoHandlingEnabled, this));
     }
 
+    static bool canIncludeInLibrary(const KFileItemList &items)
+    {
+        return std::ranges::all_of(items, &KFileItem::isDir);
+    }
+
+    static QString localTextPath(const KFileItemList &items)
+    {
+        if (items.size() != 1 || !items.first().isFile() || items.first().mimetype() != QLatin1String("text/plain"))
+            return {};
+        const QString path = items.first().url().toLocalFile();
+        const QFileInfo file(path);
+        return file.isFile() && file.isReadable() ? path : QString();
+    }
+
+    void printText(const KFileItemList &items)
+    {
+        const QString path = localTextPath(items);
+        if (path.isEmpty())
+            return;
+        QFile file(path);
+        if (!file.open(QIODevice::ReadOnly)) {
+            QMessageBox::critical(this, tr("Print"), file.errorString());
+            return;
+        }
+        const auto bytes = file.readAll();
+        QStringDecoder decoder(QStringConverter::encodingForData(bytes).value_or(QStringConverter::Utf8));
+        const QString text = decoder(bytes);
+        if (file.error() != QFileDevice::NoError || decoder.hasError()) {
+            QMessageBox::critical(this, tr("Print"), file.error() != QFileDevice::NoError ? file.errorString()
+                                                                                       : tr("Cannot decode this text file as Unicode."));
+            return;
+        }
+        QPrinter printer(QPrinter::HighResolution);
+        printer.setDocName(QFileInfo(file).fileName());
+        QPrintDialog dialog(&printer, this);
+        if (dialog.exec() == QDialog::Accepted) {
+            QTextDocument document;
+            document.setPlainText(text);
+            document.print(&printer);
+            if (printer.printerState() == QPrinter::Error)
+                QMessageBox::critical(this, tr("Print"), tr("The print job failed."));
+        }
+    }
+
+    void createShortcut(QUrl source)
+    {
+        source = source.adjusted(QUrl::StripTrailingSlash);
+        const QDir dir(source.adjusted(QUrl::RemoveFilename).toLocalFile());
+        const QString base = tr("%1 - Shortcut").arg(source.fileName());
+        QString dest = dir.filePath(base);
+        for (int i = 2; QFileInfo::exists(dest) || QFileInfo(dest).isSymLink(); ++i)
+            dest = dir.filePath(tr("%1 (%2)").arg(base).arg(i));
+        auto *job = KIO::linkAs(source, QUrl::fromLocalFile(dest));
+        // A raced collision must fail rather than offer to overwrite another file.
+        job->setUiDelegate(nullptr);
+        connect(job, &KJob::result, this, [this](KJob *result) {
+            if (result->error())
+                QMessageBox::critical(this, tr("Create shortcut"), result->errorString());
+        });
+        KIO::FileUndoManager::self()->recordCopyJob(job);
+    }
+
     void contextMenu(const KFileItem &item, const QPoint &pos)
     {
         updateActions();
@@ -1721,6 +1804,19 @@ private:
             const KFileItemList items = files->selectedItems().isEmpty() ? KFileItemList{item} : files->selectedItems();
             auto *openItem = menu.addAction(QStringLiteral("&Open"), this, [this, items] { openItems(items); });
             menu.setDefaultAction(openItem);
+            if (!localTextPath(items).isEmpty()) {
+                const auto editors = KApplicationTrader::queryByMimeType(QStringLiteral("text/plain"), [](const KService::Ptr &service) {
+                    return service->categories().contains(QStringLiteral("TextEditor"));
+                });
+                if (!editors.isEmpty())
+                    menu.addAction(tr("&Edit"), this, [this, editor = editors.first(), items] {
+                        auto *job = new KIO::ApplicationLauncherJob(editor);
+                        job->setUrls(items.urlList());
+                        job->setUiDelegate(KIO::createDefaultJobUiDelegate(KJobUiDelegate::AutoHandlingEnabled, this));
+                        job->start();
+                    });
+                menu.addAction(print);
+            }
             openWith.setItemListProperties(KFileItemListProperties(items));
             openWith.setParentWidget(this);
             openWith.insertOpenWithActionsTo(nullptr, &menu, {});
@@ -1729,6 +1825,9 @@ private:
             if (item.isDir())
                 menu.addAction(QStringLiteral("&Paste"), this, [this, item] { pasteInto(item.url()); })->setEnabled(paste->isEnabled());
             menu.addSeparator();
+            if (items.size() == 1 && items.first().url().isLocalFile() && (items.first().isFile() || items.first().isDir())
+                && QFileInfo(files->url().toLocalFile()).isWritable())
+                menu.addAction(tr("Create &shortcut"), this, [this, url = items.first().url()] { createShortcut(url); });
             menu.addActions({files->action(KDirOperator::Trash), files->action(KDirOperator::Rename)});
             menu.addSeparator();
             menu.addAction(files->action(KDirOperator::Properties));
