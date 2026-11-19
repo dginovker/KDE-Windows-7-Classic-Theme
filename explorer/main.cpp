@@ -1404,6 +1404,8 @@ public:
             }
         });
         connect(files, &KDirOperator::viewChanged, this, [this](QAbstractItemView *view) {
+            viewPreviewPlugins = files->previewGenerator()->enabledPlugins();
+            applyInlinePreviews();
             view->setFrameShape(QFrame::NoFrame);
             // With the scroll bar "as needed", QListView always reserves its width, which costs Windows' fifth column.
             // Windows reflows only once the bar appears, so the bar is switched off until there is something to scroll.
@@ -1495,6 +1497,13 @@ public:
     }
 
 protected:
+    void changeEvent(QEvent *event) override
+    {
+        QMainWindow::changeEvent(event);
+        if (event->type() == QEvent::StyleChange && viewIndex == Details)
+            applyInlinePreviews();
+    }
+
     // KDirOperator's icon view sizes its grid from the font after every resize; Explorer's grid is reapplied after it.
     bool eventFilter(QObject *watched, QEvent *event) override
     {
@@ -1597,6 +1606,7 @@ private:
     QAction *detailsPaneAction;
     bool foldersInNewWindow;
     bool thumbnails;
+    QStringList viewPreviewPlugins;
     int viewIndex = -1;
     int iconSize = 96;
     bool keyboardUsed = false;
@@ -1696,7 +1706,21 @@ private:
         files->setShowHiddenFiles(hidden->isChecked());
         thumbnails = icons->isChecked();
         files->setInlinePreviewShown(thumbnails);
-        files->previewGenerator()->setPreviewShown(thumbnails);
+        applyInlinePreviews();
+    }
+
+    void applyInlinePreviews()
+    {
+        auto *generator = files->previewGenerator();
+        auto plugins = viewPreviewPlugins;
+        if (viewIndex == Details && style()->name().compare(QStringLiteral("Win7Classic"), Qt::CaseInsensitive) == 0)
+            plugins.removeAll(QStringLiteral("directorythumbnail"));
+        if (plugins != generator->enabledPlugins()) {
+            // KIO shares the directory model across views; changing plugins alone leaves existing previews in it.
+            generator->setPreviewShown(false);
+            generator->setEnabledPlugins(plugins);
+        }
+        generator->setPreviewShown(thumbnails);
     }
 
     void commands()
