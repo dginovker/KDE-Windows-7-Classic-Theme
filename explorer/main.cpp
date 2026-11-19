@@ -777,7 +777,7 @@ private:
         QList<Crumb> list;
         if (!url.isLocalFile()) {
             if (!url.isEmpty())
-                list.append({locationName(url), url, {}, {}});
+                list.append({url == computerUrl ? locationName(url) : url.toDisplayString(), url, {}, {}});
             return list;
         }
         const QString path = QDir::cleanPath(url.toLocalFile());
