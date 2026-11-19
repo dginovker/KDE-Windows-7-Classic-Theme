@@ -15,10 +15,10 @@ ContainmentItem {
     property int expandedChildren: 0
     readonly property var ownedBackend: Plasmoid
     readonly property var notifiers: ownedBackend.statusNotifiers
-    readonly property var visibleSnis: notifiers?.items.filter(n => notifierPlacement(n) === 2) ?? []
-    readonly property var hiddenSnis: notifiers?.items.filter(n => notifierPlacement(n) === 1) ?? []
+    readonly property var visibleEntries: entriesAt(2)
+    readonly property var hiddenEntries: entriesAt(1)
     readonly property var configured: Plasmoid.configuration
-    readonly property bool hasOverflow: hidden.length > 0 || hiddenSnis.length > 0
+    readonly property bool hasOverflow: hiddenEntries.length > 0
 
     function toggleOverflow() {
         if (hasOverflow) {
@@ -26,8 +26,24 @@ ContainmentItem {
         }
     }
     onHasOverflowChanged: if (!hasOverflow) overflow.visible = false
-    readonly property var hidden: Containment.applets.filter(a => placement(a) === 1)
-    readonly property var shown: Containment.applets.filter(a => placement(a) === 2)
+    readonly property var categoryOrder: ["UnknownCategory", "ApplicationStatus", "Communications", "SystemServices", "Hardware"]
+
+    function entriesAt(position) {
+        const rows = Containment.applets.filter(a => placement(a) === position).map(a => ({
+            applet: a, name: a.title, category: ownedBackend.category(a)
+        }));
+        for (const n of notifiers?.items ?? []) {
+            if (notifierPlacement(n) === position) {
+                rows.push({ notifier: n, name: n.Title, category: n.Category });
+            }
+        }
+        rows.sort((a, b) => {
+            const last = entry => entry.applet?.pluginName === "org.kde.plasma.notifications" ? 1 : 0;
+            const rank = entry => Math.max(0, categoryOrder.indexOf(entry.category));
+            return last(a) - last(b) || rank(a) - rank(b) || (a.name || "").localeCompare(b.name || "");
+        });
+        return rows;
+    }
 
     Layout.minimumWidth: rail.implicitWidth
     Layout.maximumWidth: rail.implicitWidth
@@ -59,17 +75,19 @@ ContainmentItem {
         id: sniComponent
         Controls.AbstractButton {
             id: notifier
-            required property var modelData
+            property var modelData
             width: tray.pitch
             height: tray.pitch
             focusPolicy: Qt.StrongFocus
-            Accessible.name: modelData.Title || modelData.Id
+            Accessible.name: modelData?.Title || modelData?.Id || ""
             Controls.ToolTip.visible: hovered
             Controls.ToolTip.text: Accessible.name
             function send(method) {
                 tray.notifiers.trigger(modelData.address, method, notifier);
             }
             onClicked: send("Activate")
+            Keys.onReturnPressed: send("Activate")
+            Keys.onEnterPressed: send("Activate")
             Keys.onPressed: event => {
                 if (event.key === Qt.Key_Menu) {
                     send("ContextMenu");
@@ -81,14 +99,14 @@ ContainmentItem {
                     anchors.centerIn: parent
                     width: 22
                     height: 22
-                    source: notifier.modelData.icon
+                    source: notifier.modelData?.icon ?? ""
                 }
                 Kirigami.Icon {
                     anchors.right: parent.right
                     anchors.bottom: parent.bottom
                     width: 11
                     height: 11
-                    source: notifier.modelData.overlay
+                    source: notifier.modelData?.overlay ?? ""
                 }
             }
             TapHandler {
@@ -125,7 +143,7 @@ ContainmentItem {
     function hostedCell(deck, applet, revision) {
         for (let i = 0; i < deck.count; ++i) {
             const cell = deck.itemAt(i);
-            if (cell?.modelData === applet) {
+            if (cell?.modelData.applet === applet) {
                 return cell;
             }
         }
@@ -135,12 +153,27 @@ ContainmentItem {
     Component {
         id: cellComponent
         Item {
+            id: cell
             required property var modelData
             width: tray.pitch
             height: tray.pitch
+            activeFocusOnTab: !!modelData.applet
+            Accessible.role: Accessible.Button
+            Accessible.name: modelData.applet?.title ?? ""
+            Accessible.onPressAction: modelData.applet?.activated()
+            Keys.onSpacePressed: modelData.applet?.activated()
+            Keys.onReturnPressed: modelData.applet?.activated()
+            Keys.onEnterPressed: modelData.applet?.activated()
+            Keys.onMenuPressed: tray.ownedBackend.showAppletMenu(modelData.applet, cell)
             TapHandler {
+                enabled: !!cell.modelData.applet
                 acceptedButtons: Qt.RightButton
-                onTapped: tray.ownedBackend.showAppletMenu(parent.modelData, parent)
+                onTapped: tray.ownedBackend.showAppletMenu(cell.modelData.applet, cell)
+            }
+            Loader {
+                active: !!cell.modelData.notifier
+                sourceComponent: sniComponent
+                onLoaded: item.modelData = Qt.binding(() => cell.modelData.notifier)
             }
         }
     }
@@ -164,6 +197,11 @@ ContainmentItem {
             onClicked: tray.toggleOverflow()
             Keys.onReturnPressed: tray.toggleOverflow()
             Keys.onEnterPressed: tray.toggleOverflow()
+            Keys.onMenuPressed: tray.ownedBackend.configureTray()
+            TapHandler {
+                acceptedButtons: Qt.RightButton
+                onTapped: tray.ownedBackend.configureTray()
+            }
             background: Rectangle {
                 visible: marker.hovered || marker.visualFocus || marker.down || overflow.visible
                 anchors.fill: parent
@@ -181,10 +219,9 @@ ContainmentItem {
                 }
             }
         }
-        Repeater { model: tray.visibleSnis; delegate: sniComponent }
         Repeater {
             id: visibleCells
-            model: tray.shown
+            model: tray.visibleEntries
             delegate: cellComponent
             onItemAdded: tray.cellRevision++
             onItemRemoved: tray.cellRevision++
@@ -203,7 +240,7 @@ ContainmentItem {
         }
         mainItem: Grid {
             id: overflowGrid
-            columns: Math.min(8, Math.max(1, tray.hidden.length + tray.hiddenSnis.length))
+            columns: Math.min(8, Math.max(1, tray.hiddenEntries.length))
             Layout.minimumWidth: implicitWidth
             Layout.preferredWidth: implicitWidth
             Layout.maximumWidth: implicitWidth
@@ -211,10 +248,9 @@ ContainmentItem {
             Layout.preferredHeight: implicitHeight
             Layout.maximumHeight: implicitHeight
             Keys.onEscapePressed: overflow.visible = false
-            Repeater { model: tray.hiddenSnis; delegate: sniComponent }
             Repeater {
                 id: hiddenCells
-                model: tray.hidden
+                model: tray.hiddenEntries
                 delegate: cellComponent
                 onItemAdded: tray.cellRevision++
                 onItemRemoved: tray.cellRevision++
@@ -232,7 +268,7 @@ ContainmentItem {
                                         || (overflow.visible ? tray.hostedCell(hiddenCells, modelData, tray.cellRevision) : null)
             // Leave hidden applets in the panel until the overflow is opened, so their shortcuts are alive.
             readonly property Item holder: slot || hosted
-            readonly property bool overflowChildExpanded: !!(nativeItem?.expanded && tray.hidden.includes(modelData))
+            readonly property bool overflowChildExpanded: !!(nativeItem?.expanded && tray.placement(modelData) === 1)
             onOverflowChildExpandedChanged: tray.expandedChildren += overflowChildExpanded ? 1 : -1
             Component.onDestruction: {
                 if (overflowChildExpanded) {

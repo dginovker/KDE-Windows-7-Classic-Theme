@@ -1,6 +1,11 @@
 #include "notifier_menu.h"
 #include "status_notifiers.h"
 #include <KConfigGroup>
+#include <KConfigLoader>
+#include <QDBusConnection>
+#include <QDBusConnectionInterface>
+#include <QRegularExpression>
+#include <QTimer>
 #include <KPluginFactory>
 #include <Plasma/Containment>
 #include <Plasma/PluginLoader>
@@ -16,12 +21,14 @@
 class ClassicTray final : public Plasma::Containment
 {
     Q_OBJECT
+    Q_PROPERTY(QVariantList appletChoices READ appletChoices NOTIFY appletChoicesChanged)
     Q_PROPERTY(QString speakerArt READ speakerArt NOTIFY speakerArtChanged)
     Q_PROPERTY(StatusNotifiers *statusNotifiers READ statusNotifiers NOTIFY statusNotifiersChanged)
 public:
     ClassicTray(QObject *parent, const KPluginMetaData &meta, const QVariantList &args)
         : Plasma::Containment(parent, meta, args)
     {
+        setHasConfigurationInterface(true);
     }
 
     void init() override
@@ -38,6 +45,36 @@ public:
         m_server = PulseAudioQt::Context::instance()->server();
         connect(m_server, &PulseAudioQt::Server::defaultSinkChanged, this, &ClassicTray::followSink);
         followSink();
+    }
+
+    QVariantList appletChoices() const
+    {
+        QVariantList result;
+        for (const auto &meta : m_catalog) {
+            result.append(QVariantMap{{QStringLiteral("id"), meta.pluginId()},
+                                      {QStringLiteral("name"), meta.name()}});
+        }
+        return result;
+    }
+
+    Q_INVOKABLE QString category(Plasma::Applet *applet) const
+    {
+        return applet->pluginMetaData().value(u"X-Plasma-NotificationAreaCategory");
+    }
+
+    Q_INVOKABLE void configureTray()
+    {
+        if (auto *action = internalAction(QStringLiteral("configure"))) {
+            action->trigger();
+        }
+    }
+
+    void configChanged() override
+    {
+        Containment::configChanged();
+        if (m_restored) {
+            scheduleSync();
+        }
     }
 
     Q_INVOKABLE void showAppletMenu(Plasma::Applet *applet, QQuickItem *anchor)
@@ -81,40 +118,155 @@ public:
     }
 
 Q_SIGNALS:
+    void appletChoicesChanged();
     void speakerArtChanged();
     void statusNotifiersChanged();
 
 protected:
     void restoreContents(KConfigGroup &group) override
     {
-        Containment::restoreContents(group);
-        auto general = group.group(QStringLiteral("General"));
         const auto shortcut = group.group(QStringLiteral("Shortcuts")).readEntry("global", QString());
         if (!shortcut.isEmpty()) {
             setGlobalShortcut(QKeySequence(shortcut));
         }
-        const auto known = general.readEntry("knownItems", QStringList());
-        auto enabled = general.readEntry("extraItems", QStringList());
-        for (const auto &meta : Plasma::PluginLoader::self()->listAppletMetaData(QString())) {
-            if (meta.isEnabledByDefault() && !meta.value(u"X-Plasma-NotificationAreaCategory").isEmpty()
-                && !known.contains(meta.pluginId()) && !enabled.contains(meta.pluginId())) {
-                enabled.append(meta.pluginId());
-            }
+        m_groups = group.group(QStringLiteral("Applets"));
+        refreshCatalog();
+        syncApplets();
+        if (applets().isEmpty()) {
+            // The base marks an empty containment ready. Do not let it recreate a disabled saved widget.
+            KConfigGroup empty;
+            Containment::restoreContents(empty);
         }
-        for (const auto &id : std::as_const(enabled)) {
-            const auto active = applets();
-            if (std::ranges::any_of(active, [&id](auto *a) { return a->pluginName() == id; })) {
-                continue;
-            }
-            if (immutability() != Plasma::Types::Mutable) {
-                qCritical().noquote() << "Classic tray: cannot load" << id << "in immutable layout";
-            } else if (!createApplet(id)) {
-                qCritical().noquote() << "Classic tray: could not load configured applet" << id;
-            }
+        m_restored = true;
+        for (const auto &bus : {QDBusConnection::sessionBus(), QDBusConnection::systemBus()}) {
+            bus.connect(QStringLiteral("org.freedesktop.DBus"), QStringLiteral("/org/freedesktop/DBus"),
+                        QStringLiteral("org.freedesktop.DBus"), QStringLiteral("NameOwnerChanged"),
+                        this, SLOT(serviceChanged(QString,QString,QString)));
+        }
+        const auto session = QDBusConnection::sessionBus();
+        for (const auto &signal : {"packageInstalled", "packageUpdated", "packageUninstalled"}) {
+            session.connect(QString(), QStringLiteral("/KPackage/Plasma/Applet"), QStringLiteral("org.kde.plasma.kpackage"),
+                            QString::fromLatin1(signal), this, SLOT(packageChanged(QString)));
+        }
+        connect(this, &Applet::immutabilityChanged, this, &ClassicTray::scheduleSync);
+    }
+
+private Q_SLOTS:
+    void serviceChanged(const QString &name, const QString &, const QString &)
+    {
+        if (std::ranges::any_of(m_services, [&name](const auto &rx) { return rx.match(name).hasMatch(); })) {
+            scheduleSync();
         }
     }
 
+    void packageChanged(const QString &)
+    {
+        refreshCatalog();
+        scheduleSync();
+    }
+
 private:
+    void refreshCatalog()
+    {
+        m_catalog.clear();
+        m_services.clear();
+        for (const auto &meta : Plasma::PluginLoader::self()->listAppletMetaData(QString())) {
+            if (meta.value(u"X-Plasma-NotificationAreaCategory").isEmpty()) {
+                continue;
+            }
+            m_catalog.insert(meta.pluginId(), meta);
+            const auto service = meta.value(u"X-Plasma-DBusActivationService");
+            if (!service.isEmpty()) {
+                m_services.insert(meta.pluginId(), QRegularExpression::fromWildcard(service));
+            }
+        }
+        Q_EMIT appletChoicesChanged();
+    }
+
+    void scheduleSync()
+    {
+        if (m_syncing) {
+            return;
+        }
+        m_syncing = true;
+        QTimer::singleShot(0, this, [this] {
+            syncApplets();
+            m_syncing = false;
+        });
+    }
+
+    void syncApplets()
+    {
+        auto *settings = configScheme();
+        settings->load();
+        auto known = settings->property("knownItems").toStringList();
+        auto enabled = settings->property("extraItems").toStringList();
+        const auto originalKnown = known;
+        for (const auto &meta : m_catalog) {
+            const auto id = meta.pluginId();
+            if (meta.isEnabledByDefault() && !known.contains(id)) {
+                known.append(id);
+                if (!enabled.contains(id)) {
+                    enabled.append(id);
+                }
+            }
+        }
+        if (known != originalKnown && immutability() == Plasma::Types::Mutable) {
+            settings->findItemByName(QStringLiteral("knownItems"))->setProperty(known);
+            settings->findItemByName(QStringLiteral("extraItems"))->setProperty(enabled);
+            settings->save();
+            settings->read();
+        }
+        QStringList services;
+        if (!m_services.empty()) {
+            for (const auto &bus : {QDBusConnection::sessionBus(), QDBusConnection::systemBus()}) {
+                const auto names = bus.interface()->registeredServiceNames();
+                if (names.isValid()) {
+                    services += names.value();
+                } else {
+                    qCritical().noquote() << "Classic tray: cannot enumerate services:" << names.error().message();
+                }
+            }
+        }
+        QSet<QString> wanted;
+        for (const auto &id : enabled) {
+            if (!m_catalog.contains(id)) {
+                qWarning().noquote() << "Classic tray: enabled plugin unavailable:" << id;
+                continue;
+            }
+            if (!m_services.contains(id) || std::ranges::any_of(services, [rx = m_services.value(id)](const QString &name) {
+                    return rx.match(name).hasMatch();
+                })) {
+                wanted.insert(id);
+            }
+        }
+        for (auto *applet : applets()) {
+            if (!wanted.remove(applet->pluginName())) {
+                // Do not destroy() the settings: a service may come back under the same applet ID.
+                applet->deleteLater();
+            }
+        }
+        for (const auto &id : wanted) {
+            if (immutability() != Plasma::Types::Mutable) {
+                qCritical().noquote() << "Classic tray: cannot load" << id << "in immutable layout";
+                continue;
+            }
+            uint savedId = 0;
+            for (const auto &name : m_groups.groupList()) {
+                if (m_groups.group(name).readEntry("plugin", QString()) == id) {
+                    savedId = name.toUInt();
+                    break;
+                }
+            }
+            auto applet = Plasma::PluginLoader::self()->loadApplet(id, savedId, {});
+            if (!applet || !applet->pluginMetaData().isValid()) {
+                qCritical().noquote() << "Classic tray: could not load configured applet" << id;
+                continue;
+            }
+            addApplet(std::move(applet));
+        }
+    }
+
     void followSink()
     {
         if (m_sink) {
@@ -132,6 +284,11 @@ private:
     StatusNotifiers *m_notifiers = nullptr;
     PulseAudioQt::Server *m_server = nullptr;
     QPointer<PulseAudioQt::Sink> m_sink;
+    QMap<QString, KPluginMetaData> m_catalog;
+    QMap<QString, QRegularExpression> m_services;
+    KConfigGroup m_groups;
+    bool m_restored = false;
+    bool m_syncing = false;
 };
 
 K_PLUGIN_CLASS_WITH_JSON(ClassicTray, "metadata.json")
