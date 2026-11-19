@@ -476,6 +476,27 @@ protected:
 };
 
 static const QUrl computerUrl(QStringLiteral("win7-explorer:/computer"));
+static const QUrl librariesUrl(QStringLiteral("win7-explorer:/libraries"));
+
+static bool isOverviewUrl(const QUrl &url) { return url == computerUrl || url == librariesUrl; }
+
+static QUrl standardFolder(QStandardPaths::StandardLocation location)
+{
+    return QUrl::fromLocalFile(QStandardPaths::writableLocation(location));
+}
+
+struct Library {
+    const char *name;
+    const char *icon;
+    QStandardPaths::StandardLocation location;
+};
+
+static constexpr Library libraries[] = {
+    {"Documents", "library-documents", QStandardPaths::DocumentsLocation},
+    {"Music", "library-music", QStandardPaths::MusicLocation},
+    {"Pictures", "library-pictures", QStandardPaths::PicturesLocation},
+    {"Videos", "library-videos", QStandardPaths::MoviesLocation},
+};
 
 static quint64 browseableMountId(const QString &path)
 {
@@ -494,7 +515,7 @@ class OverviewTiles : public QStyledItemDelegate
 {
 public:
     using QStyledItemDelegate::QStyledItemDelegate;
-    enum Role { Target = Qt::UserRole, MountId, CapacityText, UsedPercent };
+    enum Role { Target = Qt::UserRole, MountId, CapacityText, UsedPercent, Subtitle };
 
     void paint(QPainter *p, const QStyleOptionViewItem &option, const QModelIndex &item) const override
     {
@@ -510,11 +531,14 @@ public:
         const int left = r.left() + 56, w = r.right() - left - 3;
         const QFontMetrics metrics(option.font);
         const int line = metrics.height();
-        const int top = usage.isEmpty() ? r.center().y() - line / 2 : r.center().y() - line - 5;
+        const QString subtitle = item.data(Subtitle).toString();
+        const int top = usage.isEmpty() ? r.center().y() - (subtitle.isEmpty() ? line / 2 : line) : r.center().y() - line - 5;
         const auto text = [&](int y, const QString &value) {
             p->drawText(QRect(left, y, w, line), Qt::AlignVCenter, metrics.elidedText(value, Qt::ElideRight, w));
         };
         text(top, item.data().toString());
+        if (!subtitle.isEmpty())
+            text(top + line, subtitle);
         if (!usage.isEmpty()) {
             const QRect meter(left, top + line + 1, w, 11);
             p->fillRect(meter, classic::light);
@@ -534,6 +558,7 @@ class Overview : public QWidget
 public:
     QListWidget *tiles = new QListWidget;
     QLabel *heading = new QLabel;
+    QLabel *description = new QLabel;
     Overview()
     {
         setAutoFillBackground(true);
@@ -549,6 +574,8 @@ public:
         heading->setWordWrap(true);
         heading->setAlignment(Qt::AlignTop | Qt::AlignLeft);
         layout->addWidget(heading);
+        description->setWordWrap(true);
+        layout->addWidget(description);
         tiles->setFrameShape(QFrame::NoFrame);
         tiles->setViewMode(QListView::IconMode);
         tiles->setMovement(QListView::Static);
@@ -560,9 +587,31 @@ public:
         layout->addWidget(tiles, 1);
     }
 
-    void setComputer()
+    void load(const QUrl &url)
     {
+        const bool computer = url == computerUrl;
+        auto font = this->font();
+        if (!computer)
+            font.setPixelSize(qRound(QFontMetricsF(font).height() * 1.25));
+        heading->setFont(font);
+        description->setVisible(!computer);
         tiles->clear();
+        if (computer) {
+            loadComputer();
+            return;
+        }
+        tiles->setVisible(true);
+        heading->setText(tr("Libraries"));
+        description->setText(tr("Open a library to see your files in its configured folder."));
+        for (const auto &library : libraries) {
+            auto *item = add(QString::fromLatin1(library.name), assetIcon(QString::fromLatin1(library.icon)), standardFolder(library.location));
+            item->setData(OverviewTiles::Subtitle, tr("Library"));
+        }
+    }
+
+private:
+    void loadComputer()
+    {
         // Probe a guaranteed path so unavailable mount IDs aren't mistaken for inaccessible volumes.
         struct statx root = {};
         const bool supported = ::statx(AT_FDCWD, "/", AT_NO_AUTOMOUNT, STATX_MNT_ID_UNIQUE, &root) == 0
@@ -596,6 +645,7 @@ public:
         heading->setText(tr("Storage volumes (%1)").arg(tiles->count()));
     }
 
+public:
     void filter(const QString &text)
     {
         for (int i = 0; i < tiles->count(); ++i) {
@@ -619,6 +669,8 @@ static QString locationName(const QUrl &url)
 {
     if (url == computerUrl)
         return QStringLiteral("Computer");
+    if (url == librariesUrl)
+        return QStringLiteral("Libraries");
     if (url.isLocalFile() && url.path() == QLatin1String("/"))
         return QStringLiteral("File System");
     const QString name = url.adjusted(QUrl::StripTrailingSlash).fileName();
@@ -1073,23 +1125,18 @@ public:
 
     NavigationPane()
     {
-        auto path = [](QStandardPaths::StandardLocation l) { return QUrl::fromLocalFile(QStandardPaths::writableLocation(l)); };
         rows = {
             {QStringLiteral("Favorites"), QStringLiteral("favorites"), QUrl()},
-            {QStringLiteral("Desktop"), QStringLiteral("desktop"), path(QStandardPaths::DesktopLocation), true},
-            {QStringLiteral("Downloads"), QStringLiteral("downloads"), path(QStandardPaths::DownloadLocation), true},
+            {QStringLiteral("Desktop"), QStringLiteral("desktop"), standardFolder(QStandardPaths::DesktopLocation), true},
+            {QStringLiteral("Downloads"), QStringLiteral("downloads"), standardFolder(QStandardPaths::DownloadLocation), true},
             {QStringLiteral("Recent Places"), QStringLiteral("recent-places"), QUrl(QStringLiteral("recentlyused:/locations")), true},
             {},
-            {QStringLiteral("Libraries"), QStringLiteral("libraries"), path(QStandardPaths::HomeLocation)},
-            {QStringLiteral("Documents"), QStringLiteral("library-documents"), path(QStandardPaths::DocumentsLocation), true},
-            {QStringLiteral("Music"), QStringLiteral("library-music"), path(QStandardPaths::MusicLocation), true},
-            {QStringLiteral("Pictures"), QStringLiteral("library-pictures"), path(QStandardPaths::PicturesLocation), true},
-            {QStringLiteral("Videos"), QStringLiteral("library-videos"), path(QStandardPaths::MoviesLocation), true},
-            {},
-            {QStringLiteral("Computer"), QStringLiteral("computer"), computerUrl},
-            {},
-            {QStringLiteral("Network"), QStringLiteral("network"), QUrl(QStringLiteral("remote:/"))},
+            {QStringLiteral("Libraries"), QStringLiteral("libraries"), librariesUrl},
         };
+        for (const auto &library : libraries)
+            rows.append({QString::fromLatin1(library.name), QString::fromLatin1(library.icon), standardFolder(library.location), true});
+        rows.append({{}, {QStringLiteral("Computer"), QStringLiteral("computer"), computerUrl}, {},
+                     {QStringLiteral("Network"), QStringLiteral("network"), QUrl(QStringLiteral("remote:/"))}});
         setFocusPolicy(Qt::ClickFocus);
     }
 
@@ -1254,7 +1301,7 @@ public:
         column->setSpacing(0);
         setCentralWidget(central);
 
-        files = new Files(start == computerUrl ? QUrl::fromLocalFile(QDir::homePath()) : start, this);
+        files = new Files(isOverviewUrl(start) ? QUrl::fromLocalFile(QDir::homePath()) : start, this);
         auto *properties = files->action(KDirOperator::Properties);
         // Keep KDirOperator's action state and shortcut, but use Explorer's native-dialog subclass.
         disconnect(properties, &QAction::triggered, files, nullptr);
@@ -1426,7 +1473,7 @@ public:
                           KDirOperator::SortAscending, KDirOperator::SortDescending}) {
             connect(files->action(mode), &QAction::triggered, this, [this] { rememberSort(); });
         }
-        entered(start == computerUrl ? start : files->url());
+        entered(isOverviewUrl(start) ? start : files->url());
         resize(760, 534);
         if (!inOverview())
             files->view()->setFocus();  // Windows starts with the keyboard in the file list
@@ -1478,7 +1525,7 @@ private:
 
     void navigate(const QUrl &url)
     {
-        if (url == computerUrl) {
+        if (isOverviewUrl(url)) {
             entered(url);
             return;
         }
@@ -1501,7 +1548,7 @@ private:
     void refresh()
     {
         if (inOverview()) {
-            overview->setComputer();
+            overview->load(history[position]);
             overview->filter(nav->search->text());
             updateDetails();
         } else {
@@ -1673,18 +1720,15 @@ private:
 
         // Windows libraries collect folders; here a library is the XDG folder, and including adds a link to it.
         auto *library = new QMenu(this);
-        for (auto [name, icon, location] : {std::tuple{"Documents", "library-documents", QStandardPaths::DocumentsLocation},
-                                            {"Music", "library-music", QStandardPaths::MusicLocation},
-                                            {"Pictures", "library-pictures", QStandardPaths::PicturesLocation},
-                                            {"Videos", "library-videos", QStandardPaths::MoviesLocation}})
-            library->addAction(assetIcon(QString::fromLatin1(icon)), QString::fromLatin1(name), this, [this, location] {
+        for (const auto &entry : libraries)
+            library->addAction(assetIcon(QString::fromLatin1(entry.icon)), QString::fromLatin1(entry.name), this, [this, location = entry.location] {
                 const KFileItemList selection = files->selectedItems();
-                if (!canIncludeInLibrary(selection))
+                if (inOverview() || !canIncludeInLibrary(selection))
                     return;
                 // KDirOperator appends a slash; KIO names the link using QUrl::fileName().
                 const auto sources = selection.isEmpty() ? QList<QUrl>{files->url().adjusted(QUrl::StripTrailingSlash)}
                                                          : selection.urlList();
-                auto *job = KIO::link(sources, QUrl::fromLocalFile(QStandardPaths::writableLocation(location)));
+                auto *job = KIO::link(sources, standardFolder(location));
                 job->setUiDelegate(KIO::createDefaultJobUiDelegate(KJobUiDelegate::AutoHandlingEnabled, this));
             });
         auto *share = new QMenu(this);
@@ -1890,21 +1934,21 @@ private:
 
     void entered(const QUrl &url)
     {
-        const bool computer = url == computerUrl;
-        if (computer != inOverview()) {
+        const bool special = isOverviewUrl(url);
+        if (special != inOverview()) {
             for (auto *a : folderCommands)
-                a->setVisible(!computer);
+                a->setVisible(!special);
             for (auto *a : folderShortcuts) {
-                if (computer)
+                if (special)
                     removeAction(a);
                 else
                     addAction(a);
             }
-            pages->setCurrentWidget(computer ? static_cast<QWidget *>(overview) : files);
-            bar->setOverview(computer);
+            pages->setCurrentWidget(special ? static_cast<QWidget *>(overview) : files);
+            bar->setOverview(special);
         }
-        if (computer) {
-            overview->setComputer();
+        if (special) {
+            overview->load(url);
             overview->tiles->setFocus();
         } else {
             restoreFolderView();
@@ -1913,7 +1957,8 @@ private:
         }
         const QString name = locationName(url);
         setWindowTitle(name);
-        const QIcon icon = computer ? assetIcon(QStringLiteral("computer")) : QIcon::fromTheme(KIO::iconNameForUrl(url));
+        const QIcon icon = special ? assetIcon(url == computerUrl ? QStringLiteral("computer") : QStringLiteral("libraries"))
+                                   : QIcon::fromTheme(KIO::iconNameForUrl(url));
         // As pixels: given a theme icon, Qt sends KWin only its name, and KWin looks it up in its own icon theme,
         // which doesn't follow the live switch to Windows mode's icons.
         QIcon pixels;
