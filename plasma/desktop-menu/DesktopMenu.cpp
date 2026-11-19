@@ -1,5 +1,6 @@
 #include <KConfig>
 #include <KConfigGroup>
+#include <KDesktopFile>
 #include <KDirModel>
 #include <KFileItem>
 #include <KIO/CopyJob>
@@ -17,6 +18,7 @@
 #include <QClipboard>
 #include <QMenu>
 #include <QPointer>
+#include <algorithm>
 #include <memory>
 
 using namespace Qt::StringLiterals;
@@ -108,7 +110,7 @@ public:
         if (create) {
             menu->addSeparator();
             auto *submenu = menu->addMenu(u"Ne&w"_s);
-            submenu->addActions(create->menu()->actions());
+            addNewActions(*submenu, create->menu()->actions());
             auto *entry = submenu->menuAction();
             entry->setVisible(create->isVisible());
             entry->setEnabled(create->isEnabled());
@@ -150,6 +152,24 @@ private:
         action->setCheckable(source->isCheckable());
         action->setChecked(source->isChecked());
         return action;
+    }
+
+    static void addNewActions(QMenu &submenu, const QList<QAction *> &actions)
+    {
+        submenu.addActions(actions);
+        // KIO exposes no template ID on its actions. Match the built-in template's localized name and icon.
+        const KDesktopFile path(u":/kio5/newfile-templates/linkPath.desktop"_s);
+        QList<QAction *> links;
+        for (auto *action : actions)
+            if (action->text() == path.readName() && action->icon().name() == path.readIcon()) links.append(action);
+        if (links.size() != 1 || actions.size() < 2 || !actions[1]->isSeparator()) {
+            qCritical("Classic desktop menu: could not identify KIO's Folder/Shortcut arrangement");
+            return;
+        }
+        auto *link = links.constFirst();
+        auto *shortcut = command(submenu, u"&Shortcut"_s, link, link->icon());
+        submenu.insertAction(actions[1], shortcut);
+        submenu.removeAction(link);
     }
 
     static bool isFolderViewOptions(QAction *action)

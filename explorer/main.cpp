@@ -1640,10 +1640,12 @@ private:
         auto *trash = files->action(KDirOperator::Trash);
         auto *rename = files->action(KDirOperator::Rename);
         trash->setText(QStringLiteral("&Delete"));
-        organize->addActions({trash, rename});
-        // Keep the original KIO label in the file-item context menu.
-        connect(organize, &QMenu::aboutToShow, rename, [rename] { rename->setText(QStringLiteral("Re&name")); });
-        connect(organize, &QMenu::aboutToHide, rename, [rename, text = rename->text()] { rename->setText(text); });
+        organize->addAction(trash);
+        // Changing the KIO action's text would also change the file-item menu, including after overflow dismissal.
+        auto *organizeRename = organize->addAction(rename->icon(), QStringLiteral("Re&name"), rename, &QAction::trigger);
+        auto syncRename = [rename, organizeRename] { organizeRename->setEnabled(rename->isEnabled()); };
+        connect(rename, &QAction::changed, organizeRename, syncRename);
+        syncRename();
         auto *properties = organize->addAction(QStringLiteral("P&roperties"), this, [this] {
             const auto items = files->selectedItems();
             if (items.isEmpty())
