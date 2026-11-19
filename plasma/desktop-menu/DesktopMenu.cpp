@@ -116,7 +116,10 @@ public:
             entry->setEnabled(populated && create->isEnabled());
             if (!populated) {
                 entry->setText(u"New (incompatible KIO templates)"_s);
-                qCritical("Classic desktop menu: unexpected KNewFileMenu template sections; cannot bind New commands");
+                QStringList layout;
+                for (auto *action : create->menu()->actions())
+                    layout << (action->isSeparator() ? u"|"_s : action->text());
+                qCritical().noquote() << "Classic desktop menu: cannot bind New commands; unexpected KIO template sections:" << layout.join(u"; "_s);
             }
         }
 

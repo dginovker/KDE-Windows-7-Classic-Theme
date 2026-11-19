@@ -177,7 +177,7 @@ def exercise(out, scale, root, explorer='~/.local/bin/win7-explorer'):
     key('KEY_M')
 
     # Trigger the Organize proxy, not F2, and verify the selected file is renamed by KIO.
-    click(pt(255, 227))  # Zulu, below Documents, Sample and .hidden in Content
+    click(pt(255, 251))  # Zulu, below Documents, Sample and .hidden in Content
     organize()
     key('KEY_N')
     wait_for(lambda: any('Rename' in title for title in captions()), 'Organize → Rename opens KIO')
@@ -185,6 +185,7 @@ def exercise(out, scale, root, explorer='~/.local/bin/win7-explorer'):
     key('KEY_LEFTCTRL', 'KEY_A')
     vmctl.type_text(VM, 'Zulu-renamed.txt\n')
     wait_for(lambda: exists(f'{alpha}/Zulu-renamed.txt') and not exists(f'{alpha}/Zulu.txt'), 'Organize Rename changes the real filename')
+    print("PASS Organize → Rename: Zulu.txt → Zulu-renamed.txt")
 
     # Sort the same backing model; then Copy/Paste/Undo/Redo must change actual files.
     click(pt(460, 400), 'right')
@@ -279,6 +280,7 @@ def exercise(out, scale, root, explorer='~/.local/bin/win7-explorer'):
     assert 'OpenFoldersInNewWindow=false' in user(f'cat {options_file}')
     explicit_open()
     wait_for(lambda: captions() == ['Documents'], 'explicit Open uses the same window after restoring Options')
+    print("PASS explicit item Open: separate-window and same-window policies")
     key('KEY_LEFTALT', 'KEY_LEFT')
     wait_for(lambda: captions() == ['Alpha'], 'Back after explicit same-window Open')
     assert user(f'cmp ~/.config/kdeglobals {cfg}/kdeglobals && echo exact') == 'exact'
