@@ -2,7 +2,7 @@
 # Tested with Plasma/KWin 6.8.2 and Qt 6.12; the QML relies on Plasma 6.8 APIs.
 pkgname=win7-classic
 pkgver=0.4
-pkgrel=5
+pkgrel=6
 pkgdesc='Windows 7 Classic look for KDE Plasma, switchable live with win7-classic'
 arch=(x86_64)
 url='https://github.com/dginovker/KDE-Windows-7-Classic-Theme'
@@ -10,7 +10,7 @@ url='https://github.com/dginovker/KDE-Windows-7-Classic-Theme'
 license=('GPL-3.0-or-later' 'LGPL-2.1-or-later')
 # plasma-desktop provides kcm_clock (and pulls in systemsettings).
 depends=('plasma-desktop>=6.8' 'plasma-workspace>=6.8' 'kwin>=6.8' 'kio>=6.17' 'kwindowsystem' 'python' 'dconf' 'dbus' 'glib2' 'qt6-tools' 'qt6-wayland' 'wayland')
-makedepends=('wine' 'cmake' 'extra-cmake-modules' 'plasma-wayland-protocols')
+makedepends=('wine' 'python-fonttools' 'cmake' 'extra-cmake-modules' 'plasma-wayland-protocols')
 options=(!debug)
 install=win7-classic.install
 

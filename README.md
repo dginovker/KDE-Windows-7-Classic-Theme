@@ -12,7 +12,7 @@ No host theme, session or boot changes are authorized by these artifacts. Preser
 
 ## Install and toggle
 
-Arch: `cd packaging && makepkg -si` (needs `wine` at build time for its LGPL Tahoma font; tested with Plasma/KWin 6.8.2 and Qt 6.12). Before removing the package, run `win7-classic current`; removal warns about anyone still in Windows mode. For development, first install the package: the Win7Classic Qt style must be system-wide so already-running apps can discover it. Then `./install.sh` updates the user-local surfaces. Both install and Windows-mode activation refuse a missing system style (fix: `cd packaging && makepkg -si`). Nothing changes on screen until you switch.
+Arch: `cd packaging && makepkg -si` (uses Wine's LGPL Tahoma and `python-fonttools`; tested with Plasma/KWin 6.8.2 and Qt 6.12). Before removing the package, run `win7-classic current`; removal warns about anyone still in Windows mode. For development, first install the package: the Win7Classic Qt style must be system-wide so already-running apps can discover it. Then `./install.sh` updates the user-local surfaces (requires the same build dependencies). Both install and Windows-mode activation refuse a missing system style (fix: `cd packaging && makepkg -si`). Nothing changes on screen until you switch.
 
 `win7-classic windows|current|toggle|status|restore` swaps the whole Plasma panel/desktop layout and panel theme by restarting only plasmashell; KWin and applications keep running. Each mode keeps its own saved layout under `~/.local/state/win7-classic/`, and every switch is logged there. Colors, fonts, widget style and window decoration are swapped key-by-key (only the keys listed in `toggle/windows/keys/`), so other settings in `kdeglobals`/`kwinrc` stay untouched, and running Qt apps update live. A switch that fails (e.g. a widget plugin is missing) rolls back and stays in the old mode; `restore` brings back the current layout from a terminal even with no panel running. The first switch builds Windows mode from your current panel (`toggle/windows/seed`): the launcher, task manager, clock, show-desktop and spacers become the Classic ones; every other widget (pager, monitors, your own widgets, the tray and its items) keeps its settings; unrelated widgets sit before the notification area. `win7-classic rebuild` discards the Windows layout and builds it again from the current one.
 
@@ -95,6 +95,8 @@ Both Classic surfaces use Windows 7 Ultimate's genuine 16:10 logon bitmap, accou
 ## Tests
 
 `bash tests/test_calendar_offscreen.sh` checks QML loading, calendar geometry, Apia’s skipped civil day, midnight rollover, localized labels and advancing seconds without a desktop session or VM (package build dependencies and `en_US.UTF-8` locale).
+
+`python tests/test_tahoma_bold.py /path/to/extracted-package/usr/share/fonts/win7-classic` checks that HarfBuzz shapes `fi` and `fl` as separate bold letters at their unligated positions (requires Wine, `python-fonttools` and `uharfbuzz`; no VM).
 
 VM tests run from the host against the lab VM and write screenshots to the given directory:
 

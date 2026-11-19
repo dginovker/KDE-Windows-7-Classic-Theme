@@ -31,6 +31,7 @@ done
 # Dependency/build failures must leave the previous installation intact.
 build=$(mktemp -d)
 trap 'rm -rf "$build"' EXIT
+python3 "$src/fonts/fix-tahoma-bold.py" /usr/share/wine/fonts/tahomabd.ttf "$build/tahomabd.ttf"
 if [[ ${1:-} == --prefix ]]; then prefix=/usr; else prefix=$(dirname "$data"); fi
 cmake -S "$src/explorer" -B "$build" -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$prefix" >/dev/null
 cmake --build "$build" --parallel 2 >/dev/null
@@ -42,9 +43,7 @@ if [[ ${1:-} != --prefix ]]; then
 fi
 
 mkdir -p "$fonts" "$fontconf"
-for f in tahoma.ttf tahomabd.ttf; do
-    install -m644 /usr/share/wine/fonts/$f "$fonts/"
-done
+install -m644 /usr/share/wine/fonts/tahoma.ttf "$build/tahomabd.ttf" "$fonts/"
 install -m644 "$src/fonts/70-win7-classic-tahoma.conf" "$fontconf/"
 
 mkdir -p "$data/plasma/plasmoids" "$data/plasma/desktoptheme" "$data/kwin/decorations" "$data/themes" "$bin"
