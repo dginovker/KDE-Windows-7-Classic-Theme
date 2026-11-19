@@ -18,6 +18,14 @@ ContainmentItem {
     readonly property var visibleSnis: notifiers?.items.filter(n => notifierPlacement(n) === 2) ?? []
     readonly property var hiddenSnis: notifiers?.items.filter(n => notifierPlacement(n) === 1) ?? []
     readonly property var configured: Plasmoid.configuration
+    readonly property bool hasOverflow: hidden.length > 0 || hiddenSnis.length > 0
+
+    function toggleOverflow() {
+        if (hasOverflow) {
+            overflow.visible = !overflow.visible;
+        }
+    }
+    onHasOverflowChanged: if (!hasOverflow) overflow.visible = false
     readonly property var hidden: Containment.applets.filter(a => placement(a) === 1)
     readonly property var shown: Containment.applets.filter(a => placement(a) === 2)
 
@@ -139,11 +147,7 @@ ContainmentItem {
 
     Connections {
         target: tray.ownedBackend
-        function onActivated() {
-            if (tray.hidden.length || tray.hiddenSnis.length) {
-                overflow.visible = !overflow.visible;
-            }
-        }
+        function onActivated() { tray.toggleOverflow(); }
     }
 
     Row {
@@ -151,12 +155,22 @@ ContainmentItem {
         anchors.verticalCenter: parent.verticalCenter
         layoutDirection: Qt.LeftToRight
         Controls.AbstractButton {
+            id: marker
             width: 18
             height: tray.pitch
-            visible: tray.hidden.length > 0 || tray.hiddenSnis.length > 0
+            visible: tray.hasOverflow
             focusPolicy: Qt.StrongFocus
             Accessible.name: overflow.visible ? qsTr("Close hidden icons") : qsTr("Show hidden icons")
-            onClicked: overflow.visible = !overflow.visible
+            onClicked: tray.toggleOverflow()
+            Keys.onReturnPressed: tray.toggleOverflow()
+            Keys.onEnterPressed: tray.toggleOverflow()
+            background: Rectangle {
+                visible: marker.hovered || marker.visualFocus || marker.down || overflow.visible
+                anchors.fill: parent
+                anchors.margins: 1
+                color: "transparent"
+                border.color: marker.down || overflow.visible ? "#808080" : "#ffffff"
+            }
             contentItem: Item {
                 Image {
                     anchors.centerIn: parent
@@ -180,10 +194,23 @@ ContainmentItem {
     PlasmaCore.AppletPopup {
         id: overflow
         appletInterface: tray
-        visualParent: rail
+        visualParent: marker
         popupDirection: Qt.TopEdge
         hideOnWindowDeactivate: !tray.configured.pin && tray.expandedChildren === 0
-        mainItem: Row {
+        onVisibleChanged: if (visible) {
+            requestActivate();
+            overflowGrid.forceActiveFocus();
+        }
+        mainItem: Grid {
+            id: overflowGrid
+            columns: Math.min(8, Math.max(1, tray.hidden.length + tray.hiddenSnis.length))
+            Layout.minimumWidth: implicitWidth
+            Layout.preferredWidth: implicitWidth
+            Layout.maximumWidth: implicitWidth
+            Layout.minimumHeight: implicitHeight
+            Layout.preferredHeight: implicitHeight
+            Layout.maximumHeight: implicitHeight
+            Keys.onEscapePressed: overflow.visible = false
             Repeater { model: tray.hiddenSnis; delegate: sniComponent }
             Repeater {
                 id: hiddenCells
@@ -214,7 +241,7 @@ ContainmentItem {
             }
             readonly property var compact: nativeItem?.compactRepresentationItem
             readonly property string art: {
-                if (!compact || !slot || slot.parent !== rail) {
+                if (!compact || !slot) {
                     return "";
                 }
                 switch (modelData.pluginName) {

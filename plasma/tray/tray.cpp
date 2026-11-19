@@ -77,10 +77,7 @@ public:
         if (m_sink->isMuted()) {
             return QStringLiteral("speaker-muted.png");
         }
-        if (m_sink->volume() == 0) {
-            return {};
-        }
-        return QStringLiteral("speaker-unmuted.png");
+        return m_sink->volume() == 0 ? QStringLiteral("speaker-zero.png") : QStringLiteral("speaker-unmuted.png");
     }
 
 Q_SIGNALS:

@@ -6,7 +6,7 @@ from pathlib import Path
 
 from PIL import Image, ImageChops
 
-ROOT = Path(__file__).resolve().parents[3]
+ROOT = Path(__file__).resolve().parents[2]
 CROP = (1100, 756, 1280, 800)
 FACE = (212, 208, 200)
 SHA = {
@@ -42,6 +42,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('backlog', type=Path)
     parser.add_argument('output', type=Path)
+    parser.add_argument('--zero', required=True, type=Path, help='Genuine 1280×800 zero-volume capture')
     args = parser.parse_args()
     target = capture('target', ROOT / 'reference/screenshots/w7-notification-area.png')
     panes = {name: capture(name, args.backlog / f'w7-{name}.png') for name in SHA if name != 'target'}
@@ -52,6 +53,11 @@ def main():
     normal = extract(target, speaker, args.output, 'speaker-unmuted')
     muted = extract(panes['muted'], speaker, args.output, 'speaker-muted')
     assert normal.tobytes() != muted.tobytes()
+    if sha256(args.zero.read_bytes()).hexdigest() != 'ffb403d72a2bb483bc37617096d28ec9b8e93eebb16604ab8d7f6770e02b1b54':
+        raise ValueError('Unrecognized zero-volume reference')
+    with Image.open(args.zero) as png:
+        zero = extract(png.convert('RGB'), (1177, 771, 1193, 787), args.output, 'speaker-zero')
+    assert zero.tobytes() not in (normal.tobytes(), muted.tobytes())
     ethernet = (53, 15, 69, 31)
     assert all(p.crop(ethernet).tobytes() == target.crop(ethernet).tobytes() for p in panes.values())
     extract(target, ethernet, args.output, 'ethernet-disconnected')
