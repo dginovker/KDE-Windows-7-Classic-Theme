@@ -7,9 +7,11 @@ Every panel with a task manager becomes the Classic taskbar in place: launchers,
 show-desktop and spacers are replaced; every other widget (pager, monitors, custom widgets, the tray with its
 items) keeps its config groups untouched. With no such panel, a new bottom panel is added.
 """
-from pathlib import Path
 import re
+import subprocess
 import sys
+from pathlib import Path
+
 from launchers import DEFAULT_LAUNCHERS, normalize_launchers
 from tray_layout import apply as apply_tray_defaults
 
@@ -17,6 +19,9 @@ REPLACED = {'org.kde.plasma.kickoff', 'org.kde.plasma.kicker', 'org.kde.plasma.k
             'org.kde.plasma.icontasks', 'org.kde.plasma.quicklaunch', 'org.kde.plasma.digitalclock', 'org.kde.plasma.showdesktop',
             'org.kde.plasma.minimizeall', 'org.kde.plasma.panelspacer', 'org.kde.plasma.marginsseparator'}
 TASKS = {'org.kde.plasma.taskmanager', 'org.kde.plasma.icontasks'}
+FOLDER = 'org.kde.plasma.folder'
+DESKTOPS = {FOLDER, 'org.kde.desktopcontainment'}
+TRASH = 'org.kde.plasma.trash'
 
 class Config:
     """A KConfig file as an ordered list of (group path, lines), so untouched groups are written back verbatim."""
@@ -57,6 +62,49 @@ class Config:
     def write(self):
         text = '\n\n'.join(''.join(f'[{p}]' for p in g) + '\n' + '\n'.join(l) for g, l in self.groups)
         self.path.write_text(text + '\n')
+
+
+def seed_recycle_bin(applets, desktops, new_id):
+    widgets = [g for g, _ in applets.groups if len(g) >= 4 and g[-2] == 'Applets']
+    if any(applets.get(g, 'plugin') == TRASH for g in widgets):
+        print('Recycle Bin: keeping existing Trash widget')
+        return
+
+    primary = [g for g in desktops if applets.get(g, 'lastScreen') == '0']
+    if len(primary) != 1 or any(g[:2] == primary[0] for g in widgets):
+        print('Recycle Bin: add the stock Trash widget manually on a customized desktop')
+        return
+
+    if any(applets.get(g, 'plugin') == FOLDER for g in desktops):
+        # Applet and file-icon placement are independent. Never put a widget over a Folder View icon
+        # or create a shared Desktop file that would also show up in current mode.
+        default_view = all(applets.get((*g, 'General'), 'url') in (None, 'desktop:', 'desktop:/')
+                           for g in desktops if applets.get(g, 'plugin') == FOLDER)
+        if not default_view:
+            print('Recycle Bin: leaving custom Folder View alone')
+            return
+        desktop = Path(subprocess.check_output(['/usr/lib/qt6/bin/qtpaths6', '--writable-path', 'DesktopLocation'],
+                                               text=True).removesuffix('\n'))
+        if not desktop.is_absolute():
+            raise ValueError(f'Qt returned an invalid Desktop location: {desktop}')
+        if desktop.exists() and any(p.name != '.directory' for p in desktop.iterdir()):
+            print('Recycle Bin: leaving populated Folder View alone, including any existing Trash links')
+            return
+
+    group = primary[0]
+    applet = new_id()
+    applets.set((*group, 'Applets', applet), 'plugin', TRASH)
+    applets.set((*group, 'Applets', applet), 'immutability', '1')
+    # A compact slot on an otherwise clear desktop keeps the stock applet near the native icon size.
+    geometry_keys = {'ItemGeometriesHorizontal', 'ItemGeometriesVertical'}
+    geometry_keys.update(line.partition('=')[0] for g, lines in applets.groups if g == group
+                         for line in lines if line.startswith('ItemGeometries-'))
+    for key in sorted(geometry_keys):
+        previous = applets.get(group, key) or ''
+        if previous and not previous.endswith(';'):
+            previous += ';'
+        applets.set(group, key, f'{previous}Applet-{applet}:0,0,80,80,0;')
+    print(f'desktop {group[1]}: added stock Trash widget as Recycle Bin')
 
 
 def main(configdir):
@@ -121,10 +169,11 @@ def main(configdir):
         shellrc.set(('PlasmaViews', f'Panel {c}', 'Defaults'), 'thickness', '44')
         print(f'panel {c}: Classic taskbar with {len(kept)} kept widget(s) {[plugin.get(a) for a in kept]}')
 
-    for c in containments:
-        if applets.get(('Containments', c), 'plugin') in ('org.kde.plasma.folder', 'org.kde.desktopcontainment'):
-            applets.set(('Containments', c), 'wallpaperplugin', 'org.kde.color')
-            applets.set(('Containments', c, 'Wallpaper', 'org.kde.color', 'General'), 'Color', '58,110,165')
+    desktops = [('Containments', c) for c in containments if applets.get(('Containments', c), 'plugin') in DESKTOPS]
+    for group in desktops:
+        applets.set(group, 'wallpaperplugin', 'org.kde.color')
+        applets.set((*group, 'Wallpaper', 'org.kde.color', 'General'), 'Color', '58,110,165')
+    seed_recycle_bin(applets, desktops, new_id)
     applets.write()
     apply_tray_defaults(applets.path)
     shellrc.write()

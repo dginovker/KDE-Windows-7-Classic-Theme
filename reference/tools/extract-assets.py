@@ -10,12 +10,12 @@ Back/Forward are cropped from reference screenshots because Explorer's Classic l
 its raw bitmaps; the hover/pressed captures are taken twice with the pointer on opposite rims and merged.
 """
 import io
-from pathlib import Path
 import shutil
 import struct
 import subprocess
 import sys
 import tempfile
+from pathlib import Path
 
 from PIL import Image
 
@@ -144,13 +144,19 @@ def main():
         for number, state in ((307, 'normal'), (308, 'hot')):
             bitmap(resources(dlls / 'ExplorerFrame.dll', 2, number, tmp)).crop((0, 0, 21, 21)).save(ASSETS / f'search-{state}.png')
 
-    sizes = sorted({size for name in set(THEME_ICONS.values()) for size in icons[name]})
+    # KIO and Plasma use the same stock icon names for both Trash states.
+    with tempfile.TemporaryDirectory() as tmp:
+        for group, name in ((55, 'user-trash'), (54, 'user-trash-full')):
+            icons[name] = icon_sizes(resources(dlls / 'imageres.dll', 14, group, tmp))
+
+    theme_icons = THEME_ICONS | {'user-trash': 'user-trash', 'user-trash-full': 'user-trash-full'}
+    sizes = sorted({size for name in theme_icons.values() for size in icons[name]})
     THEME.mkdir(parents=True)
     (THEME / 'index.theme').write_text(
-        '[Icon Theme]\nName=Windows 7 Classic\nComment=Windows 7 folder and place icons; everything else comes from Breeze\n'
+        '[Icon Theme]\nName=Windows 7 Classic\nComment=Windows 7 folder, place and Recycle Bin icons; everything else comes from Breeze\n'
         'Inherits=breeze,hicolor\nDirectories=' + ','.join(f'{s}x{s}/places' for s in sizes) + '\n'
         + ''.join(f'\n[{s}x{s}/places]\nSize={s}\nType=Fixed\nContext=Places\n' for s in sizes))
-    for icon, asset in THEME_ICONS.items():
+    for icon, asset in theme_icons.items():
         for size, image in icons[asset].items():
             (THEME / f'{size}x{size}/places').mkdir(parents=True, exist_ok=True)
             image.save(THEME / f'{size}x{size}/places/{icon}.png')

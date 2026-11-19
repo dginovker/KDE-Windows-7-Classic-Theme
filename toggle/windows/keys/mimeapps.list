@@ -1,3 +1,5 @@
 # Folders open in Explorer in Windows mode.
 [Default Applications]
 inode/directory=org.win7classic.explorer.desktop;
+# Keep KDE's Restore and Empty Trash actions when opening trash:/ from the desktop.
+x-scheme-handler/trash=org.kde.dolphin.desktop;

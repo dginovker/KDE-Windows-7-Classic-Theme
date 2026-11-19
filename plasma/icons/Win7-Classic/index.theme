@@ -1,6 +1,6 @@
 [Icon Theme]
 Name=Windows 7 Classic
-Comment=Windows 7 folder and place icons; everything else comes from Breeze
+Comment=Windows 7 folder, place and Recycle Bin icons; everything else comes from Breeze
 Inherits=breeze,hicolor
 Directories=16x16/places,24x24/places,32x32/places,48x48/places,64x64/places,96x96/places,256x256/places
 
