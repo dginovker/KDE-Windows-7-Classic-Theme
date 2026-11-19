@@ -152,9 +152,10 @@ def main():
         toggle('current', packaged=args.packaged)
         assert user('xdg-mime query default inode/directory') == before
         open_folder(f'file://{base}/Ordinary')
-        wait_for(lambda: 'Ordinary' in captions('org.kde.dolphin'), 'current opens the same fixture in stock Dolphin')
+        wait_for(lambda: 'Ordinary — Dolphin' in captions('org.kde.dolphin'), 'current opens the same fixture in stock Dolphin')
         assert not captions(), 'current launched Classic Explorer'
         capture(args.out, 'current-dolphin')
+        key('KEY_LEFTALT', 'KEY_F4')
     finally:
         toggle('current', packaged=args.packaged)
         user(f'pkill -x win7-explorer || true; kscreen-doctor output.{output}.scale.1')
