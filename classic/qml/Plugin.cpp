@@ -3,6 +3,7 @@
 #include "ClassicColors.h"
 
 void registerTaskWindowIcon(const char *uri);
+void registerPopupMenuShadow(const char *uri);
 class ClassicPluginV2 : public QQmlExtensionPlugin {
     Q_OBJECT
     Q_PLUGIN_METADATA(IID QQmlExtensionInterface_iid)
@@ -10,6 +11,7 @@ public:
     void registerTypes(const char *uri) override { qmlRegisterType<ClassicV2::ClassicItem>(uri,1,0,"Raster");
         qmlRegisterSingletonType<ClassicV2::ClassicColors>(uri,1,0,"Palette",[](QQmlEngine *,QJSEngine *) -> QObject * { return new ClassicV2::ClassicColors; });
         registerTaskWindowIcon(uri);
+        registerPopupMenuShadow(uri);
     }
 };
 #include "Plugin.moc"

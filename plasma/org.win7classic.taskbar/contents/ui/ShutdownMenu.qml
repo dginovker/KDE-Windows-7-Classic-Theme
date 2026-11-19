@@ -28,6 +28,9 @@ PlasmaCore.Dialog {
     location: PlasmaCore.Types.Floating
     onVisibleChanged: if (!visible) dismissed(returnToStart)
 
+    // NoBackground leaves this window outside Plasma's theme-shadow ownership.
+    readonly property Classic.PopupMenuShadow compositorShadow: Classic.PopupMenuShadow { target: menu }
+
     function available(index) {
         return ready && session[actions[index].capability] && (index !== 0 || (switchUserSupported && session.canLock));
     }
