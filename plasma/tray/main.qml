@@ -19,6 +19,7 @@ ContainmentItem {
     property var hiddenEntries: []
     readonly property var notifierItems: notifiers?.items ?? []
     readonly property var stockApplets: Containment.applets
+    property var appletHosts: new Map()
     readonly property var configured: Plasmoid.configuration
     readonly property bool hasOverflow: hiddenEntries.length > 0
 
@@ -29,14 +30,29 @@ ContainmentItem {
     }
     onHasOverflowChanged: if (!hasOverflow) overflow.visible = false
     onNotifierItemsChanged: queueEntries()
-    onStockAppletsChanged: queueEntries()
+    onStockAppletsChanged: Qt.callLater(updateHosts)
     Component.onCompleted: {
-        updateEntries();
+        updateHosts();
         console.info("Classic notification area ready:", Plasmoid.id);
     }
 
     // Applets can publish a new status as they are reparented into a visible cell.
     function queueEntries() { Qt.callLater(updateEntries); }
+    function updateHosts() {
+        // Rebuilding existing holders would restore their old geometry bindings over the new ones.
+        for (const [applet, host] of appletHosts) {
+            if (!stockApplets.includes(applet)) {
+                appletHosts.delete(applet);
+                host.destroy();
+            }
+        }
+        for (const applet of stockApplets) {
+            if (!appletHosts.has(applet)) {
+                appletHosts.set(applet, hostComponent.createObject(tray, {modelData: applet}));
+            }
+        }
+        queueEntries();
+    }
     function updateEntries() {
         const same = (old, next) => old.length === next.length && next.every((entry, i) =>
             entry.applet === old[i].applet && entry.notifier === old[i].notifier);
@@ -177,6 +193,7 @@ ContainmentItem {
         id: cellComponent
         Item {
             id: cell
+            clip: true
             required property var modelData
             width: tray.pitch
             height: tray.pitch
@@ -281,9 +298,9 @@ ContainmentItem {
         }
     }
 
-    Repeater {
-        model: Containment.applets
-        delegate: Item {
+    Component {
+        id: hostComponent
+        Item {
             id: hosted
             required property var modelData
             Connections {
