@@ -990,13 +990,15 @@ class DetailsPane : public QWidget
 public:
     QIcon icon;
     QString name, type, modified, size, created;
+    bool mixed = false;
     DetailsPane() { setFixedHeight(48); }
 
     void setItems(const KFileItemList &items, bool filesOnly, int total, const QIcon &folderIcon)
     {
         const qsizetype count = items.size();
         const auto item = count ? items.first() : KFileItem();
-        icon = count ? QIcon::fromTheme(item.iconName()) : folderIcon;
+        mixed = std::ranges::any_of(items, &KFileItem::isDir) && std::ranges::any_of(items, &KFileItem::isFile);
+        icon = count && !mixed ? QIcon::fromTheme(item.iconName()) : folderIcon;
         name = count == 1 ? item.text() : count ? tr("%n items selected", nullptr, count)
                                                : total == 1 ? tr("1 item") : tr("%n items", nullptr, total);
         type = count == 1 ? (item.isDir() ? tr("File folder") : item.mimeComment()) : QString();
@@ -1022,7 +1024,10 @@ protected:
         QPainter p(this);
         p.fillRect(rect(), classic::light);
         p.setPen(classic::text);
-        p.drawPixmap(17, -2, icon.pixmap(QSize(48, 48), devicePixelRatioF()));
+        if (mixed)
+            p.drawPixmap(17, -2, asset(QStringLiteral("mixed-selection")));
+        else
+            p.drawPixmap(17, -2, icon.pixmap(QSize(48, 48), devicePixelRatioF()));
         const QFontMetricsF metrics(p.font());
         auto advance = [&metrics](const QString &text) { return int(std::ceil(metrics.horizontalAdvance(text))); };
         auto draw = [&](int x, int y, const QString &text, int available) {

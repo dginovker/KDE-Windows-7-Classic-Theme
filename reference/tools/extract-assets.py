@@ -128,6 +128,10 @@ def main():
     shutil.rmtree(ASSETS, ignore_errors=True)
     shutil.rmtree(THEME, ignore_errors=True)
     ASSETS.mkdir(parents=True)
+    # Preserve the native glyph against Explorer’s identical white Details background.
+    mixed = Image.new("RGB", (48, 48), "white")
+    mixed.paste(shot("explorer-mixed-details"), (0, 2))
+    mixed.save(ASSETS / "mixed-selection.png")
     for name, (image, box) in NAV.items():
         image.crop(box).save(ASSETS / f'{name}.png')
 
