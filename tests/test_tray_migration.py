@@ -1,5 +1,14 @@
 import unittest
-from migrate import transform
+from importlib.machinery import SourceFileLoader
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+
+WINDOWS = Path(__file__).resolve().parents[1] / 'toggle/windows'
+sys.path.insert(0, str(WINDOWS))
+MIGRATION = WINDOWS / 'migrate-tray'
+transform = SourceFileLoader('migrate_tray', str(MIGRATION)).load_module().transform
 
 PANEL = '''[Containments][2]
 plugin=org.kde.panel
@@ -13,7 +22,7 @@ pinned=applications:dolphin.desktop,applications:kate.desktop
 plugin=org.win7classic.trayframe
 [Containments][2][Applets][7]
 plugin=org.kde.plasma.systemtray
-[Containments][2][Applets][7][Configuration][General]
+[Containments][2][Applets][7][General]
 extraItems=org.kde.plasma.volume,org.kde.plasma.battery,org.example.tray
 knownItems=org.kde.plasma.volume,org.kde.plasma.battery,org.example.tray
 reverseIconOrder=true
@@ -48,6 +57,18 @@ class Migration(unittest.TestCase):
     def test_ignore_current_and_unrelated(self):
         current = PANEL.replace('plugin=org.win7classic.trayframe', 'plugin=org.kde.plasma.panelspacer')
         self.assertEqual(transform(current), current)
+
+    def test_staged_cli_round_trip(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            staged = Path(scratch) / 'layout'
+            original = PANEL.replace('\n', '\r\n').encode()
+            staged.write_bytes(original)
+            subprocess.run([MIGRATION, '--check', staged], check=True)
+            self.assertEqual(staged.read_bytes(), original)
+            subprocess.run([MIGRATION, staged], check=True)
+            self.assertEqual(staged.read_bytes(), original.replace(b'plugin=org.kde.plasma.systemtray', b'plugin=org.win7classic.tray', 1))
+            subprocess.run([MIGRATION, '--undo', staged], check=True)
+            self.assertEqual(staged.read_bytes(), original)
 
     def test_legacy_fail_loud(self):
         legacy = PANEL + '[Containments][2][Applets][7][Configuration]\nSystrayContainmentId=23\n'

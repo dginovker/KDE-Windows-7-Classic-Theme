@@ -158,10 +158,12 @@ switch_to() {
         [[ $target != current ]] || qdbus6 org.kde.KWin /KWin reconfigure
         log "already in $target mode"; return 0;
     }
-    local decoration_cursor=""
+    local decoration_cursor="" tray_cursor=""
     if [[ $target == windows ]]; then
         decoration_cursor=$(journalctl --user -b -u plasma-kwin_wayland -n0 --show-cursor --no-pager | sed -n 's/^-- cursor: //p')
         [[ -n $decoration_cursor ]] || die "cannot read KWin's journal cursor; decoration activation cannot be verified"
+        tray_cursor=$(journalctl --user -b -u plasma-plasmashell -n0 --show-cursor --no-pager | sed -n 's/^-- cursor: //p')
+        [[ -n $tray_cursor ]] || die "cannot read plasmashell's journal cursor; tray activation cannot be verified"
     fi
     log "switching $from -> $target"
     stop_shell
@@ -252,6 +254,18 @@ switch_to() {
             failure_status=$?
             problem="querying $target panel widgets failed (exit $failure_status)"
         fi
+    fi
+    if [[ -z $problem && $target == windows ]]; then
+        local trays ready tray_id
+        if trays=$(shell 'print(panels().flatMap(p => p.widgets()).filter(w => w.type === "org.win7classic.tray").map(w => w.id).join(" "))') &&
+           ready=$(journalctl --user -b -u plasma-plasmashell --after-cursor "$tray_cursor" --no-pager -o cat); then
+            for tray_id in $trays; do
+                if ! grep -qE "Classic notification area ready: ${tray_id}$" <<< "$ready"; then
+                    problem="Classic notification area $tray_id failed to initialize (see plasmashell journal)"
+                    break
+                fi
+            done
+        else problem="could not verify startup of the Classic notification area"; fi
     fi
     if [[ -z $problem && $target == windows ]]; then
         systemd-run --user --wait --pipe --collect -q "$probe" >> "$state/switch.log" || problem="effective Win7Classic style/palette check failed (see switch.log)"

@@ -15,8 +15,10 @@ ContainmentItem {
     property int expandedChildren: 0
     readonly property var ownedBackend: Plasmoid
     readonly property var notifiers: ownedBackend.statusNotifiers
-    readonly property var visibleEntries: entriesAt(2)
-    readonly property var hiddenEntries: entriesAt(1)
+    property var visibleEntries: []
+    property var hiddenEntries: []
+    readonly property var notifierItems: notifiers?.items ?? []
+    readonly property var stockApplets: Containment.applets
     readonly property var configured: Plasmoid.configuration
     readonly property bool hasOverflow: hiddenEntries.length > 0
 
@@ -26,13 +28,37 @@ ContainmentItem {
         }
     }
     onHasOverflowChanged: if (!hasOverflow) overflow.visible = false
+    onNotifierItemsChanged: queueEntries()
+    onStockAppletsChanged: queueEntries()
+    Component.onCompleted: {
+        updateEntries();
+        console.info("Classic notification area ready:", Plasmoid.id);
+    }
+
+    // Applets can publish a new status as they are reparented into a visible cell.
+    function queueEntries() { Qt.callLater(updateEntries); }
+    function updateEntries() {
+        const same = (old, next) => old.length === next.length && next.every((entry, i) =>
+            entry.applet === old[i].applet && entry.notifier === old[i].notifier);
+        const shown = entriesAt(2);
+        const hidden = entriesAt(1);
+        if (!same(visibleEntries, shown)) visibleEntries = shown;
+        if (!same(hiddenEntries, hidden)) hiddenEntries = hidden;
+    }
+    Connections {
+        target: tray.configured
+        function onShowAllItemsChanged() { tray.queueEntries(); }
+        function onShownItemsChanged() { tray.queueEntries(); }
+        function onHiddenItemsChanged() { tray.queueEntries(); }
+        function onDisabledStatusNotifiersChanged() { tray.queueEntries(); }
+    }
     readonly property var categoryOrder: ["UnknownCategory", "ApplicationStatus", "Communications", "SystemServices", "Hardware"]
 
     function entriesAt(position) {
-        const rows = Containment.applets.filter(a => placement(a) === position).map(a => ({
+        const rows = stockApplets.filter(a => placement(a) === position).map(a => ({
             applet: a, name: a.title, category: ownedBackend.category(a)
         }));
-        for (const n of notifiers?.items ?? []) {
+        for (const n of notifierItems) {
             if (notifierPlacement(n) === position) {
                 rows.push({ notifier: n, name: n.Title, category: n.Category });
             }
@@ -263,6 +289,10 @@ ContainmentItem {
         delegate: Item {
             id: hosted
             required property var modelData
+            Connections {
+                target: hosted.modelData
+                function onStatusChanged() { tray.queueEntries(); }
+            }
             readonly property var nativeItem: tray.itemFor(modelData)
             readonly property var slot: tray.hostedCell(visibleCells, modelData, tray.cellRevision)
                                         || (overflow.visible ? tray.hostedCell(hiddenCells, modelData, tray.cellRevision) : null)
