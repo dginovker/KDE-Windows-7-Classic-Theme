@@ -158,58 +158,64 @@ private:
         return action;
     }
 
-    static QString templateOverride(const QString &file)
+    static bool hasIndistinguishableShortcut(const QString &name)
     {
-        // These are KIO's two on-disk template locations; a same-name entry can replace a resource.
-        const auto shared = QStandardPaths::locate(QStandardPaths::GenericDataLocation, u"templates/"_s + file);
-        if (!shared.isEmpty()) return shared;
-        const auto home = QStandardPaths::writableLocation(QStandardPaths::TemplatesLocation);
-        const auto path = QDir(home).filePath(file);
-        return !home.isEmpty() && home != QDir::homePath() && QFileInfo::exists(path) ? path : QString();
+        auto dirs = QStandardPaths::locateAll(QStandardPaths::GenericDataLocation, u"templates"_s, QStandardPaths::LocateDirectory);
+        dirs.append(QStandardPaths::standardLocations(QStandardPaths::TemplatesLocation).value(0));
+        for (const auto &dir : dirs) {
+            if (dir.isEmpty() || dir.startsWith(QDir::homePath())) continue; // KIO puts these in Home, never Links.
+            const auto file = QDir(dir).filePath(u"linkPath.desktop"_s);
+            if (!QFileInfo::exists(file)) continue;
+            const KDesktopFile entry(file);
+            if (entry.noDisplay() || entry.readName().remove(u'&') != name) continue;
+            // KIO rejects unreadable targets before deduplicating by basename. Unlike the
+            // resource-backed Text Document, the symlink sentinel can be deduplicated away.
+            QString target = file;
+            const QUrl url(entry.readUrl());
+            if (entry.readType() == u"Link"_s && !url.isEmpty()) {
+                target = url.isLocalFile() ? url.toLocalFile() : url.toString();
+                if (target == u"__CREATE_SYMLINK__"_s) continue;
+                if (url.isRelative() && !target.startsWith(u'/') && !target.startsWith(u"__"_s))
+                    target = QDir(dir).filePath(target);
+            }
+            if (QFileInfo(target).isReadable()) return true;
+        }
+        return false;
     }
 
     static void addNewActions(QMenu &submenu, KNewFileMenu *create)
     {
         const auto actions = create->menu()->actions();
-        auto builtin = [](QAction *action, const KDesktopFile &entry) {
-            return action->actionGroup() && !action->isSeparator()
-                && action->text().remove(u'&') == entry.readName().remove(u'&');
-        };
-        const auto matches = [&](QAction *action, const QString &file) {
-            return builtin(action, KDesktopFile(u":/kio5/newfile-templates/"_s + file));
-        };
-        const auto n = actions.size();
-        QAction *folder = nullptr, *shortcut = nullptr, *text = nullptr;
-        if (n > 1 && !actions[0]->data().isValid() && actions[1]->isSeparator()
-            && templateOverride(u"Directory.desktop"_s).isEmpty() && matches(actions[0], u"Directory.desktop"_s))
-            folder = actions[0];
-
-        const auto override = templateOverride(u"linkPath.desktop"_s);
-        const bool linkNeighbors = templateOverride(u"linkURL.desktop"_s).isEmpty()
-            && templateOverride(u"linkProgram.desktop"_s).isEmpty();
-        const KDesktopFile path(u":/kio5/newfile-templates/linkPath.desktop"_s);
-        // KIO 6.31 dispatches by the indexed template target, not the translated label. With
-        // no filename shadowing, only these resource filenames occupy the final Links section.
-        if (override.isEmpty() && linkNeighbors && path.readType() == u"Link"_s && path.readUrl() == u"__CREATE_SYMLINK__"_s
-            && n >= 4 && actions[n - 4]->isSeparator() && matches(actions[n - 3], u"linkURL.desktop"_s)
-            && builtin(actions[n - 2], path) && matches(actions[n - 1], u"linkProgram.desktop"_s))
-            shortcut = actions[n - 2];
-        if (!shortcut)
-            qCritical().noquote() << "Classic desktop menu: cannot verify KIO Shortcut target;" <<
-                (override.isEmpty() ? u"unexpected link templates"_s : u"template may shadow linkPath.desktop: "_s + override);
-
-        // Home templates precede System; the last section headed by this pair is System,
-        // even when a home override has removed Shortcut from the Links section.
-        if (linkNeighbors && templateOverride(u"TextFile.desktop"_s).isEmpty() && templateOverride(u"EmptyFile.desktop"_s).isEmpty()) {
-            for (qsizetype i = n - 2; i > 0; --i) {
-                if (actions[i - 1]->isSeparator() && matches(actions[i], u"TextFile.desktop"_s)
-                    && matches(actions[i + 1], u"EmptyFile.desktop"_s)) {
-                    text = actions[i];
-                    break;
+        QList<QList<QAction *>> sections(1);
+        for (auto *action : actions) {
+            if (action->isSeparator()) sections.emplaceBack();
+            else sections.last().append(action);
+        }
+        const auto identify = [](const QList<QAction *> &section, const QString &file, const QString &url, bool indexed) -> QAction * {
+            const KDesktopFile resource(u":/kio5/newfile-templates/"_s + file);
+            if (resource.readType() != u"Link"_s || resource.readUrl() != url) return nullptr;
+            const auto name = resource.readName().remove(u'&');
+            QAction *match = nullptr;
+            for (auto *action : section) {
+                if (action->actionGroup() && action->data().isValid() == indexed && action->text().remove(u'&') == name) {
+                    if (match) return nullptr;
+                    match = action;
                 }
             }
-        }
-        if (!folder || !text) qWarning("Classic desktop menu: cannot verify KIO Folder or Text Document template identity");
+            return match;
+        };
+        // KIO orders Directory, optional Home, System and Links in separate sections.
+        // QAction::data is only an index; only an unambiguous match within its section identifies
+        // a resource action. Other sections and rejected templates cannot impersonate it.
+        auto *folder = identify(sections.first(), u"Directory.desktop"_s, u".source/EmptyDir"_s, false);
+        auto *shortcut = sections.size() >= 3
+            ? identify(sections.last(), u"linkPath.desktop"_s, u"__CREATE_SYMLINK__"_s, true) : nullptr;
+        auto *text = sections.size() >= 3
+            ? identify(sections[sections.size() - 2], u"TextFile.desktop"_s, u".source/TextFile.txt"_s, true) : nullptr;
+        if (shortcut && hasIndistinguishableShortcut(shortcut->text().remove(u'&'))) shortcut = nullptr;
+        if (!folder) qWarning("Classic desktop menu: cannot verify the KIO Folder action");
+        if (!shortcut) qCritical("Classic desktop menu: cannot verify the KIO Shortcut action");
+        if (!text) qWarning("Classic desktop menu: cannot verify the KIO Text Document action");
 
         const auto add = [&submenu, create](const QString &label, QAction *source) {
             auto *entry = submenu.addAction(source->icon(), label, create, [create, action = QPointer(source)] {
