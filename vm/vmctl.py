@@ -3,6 +3,7 @@
 import argparse
 import base64
 import json
+import os
 from pathlib import Path
 import re
 import shlex
@@ -11,7 +12,8 @@ import sys
 import tempfile
 import time
 
-VMS = {'lab': 'archlinux-1-1', 'w7': 'win7-classic-reference'}
+# Parallel lanes each boot their own linked clone of the lab disk.
+VMS = {'lab': os.environ.get('W7_LAB_VM', 'archlinux-1-1'), 'w7': 'win7-classic-reference'}
 VIRSH = ['virsh', '-c', 'qemu:///session']
 # Commands run as the desktop user need its session bus and Wayland socket.
 USER_ENV = 'export XDG_RUNTIME_DIR=/run/user/1001 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1001/bus WAYLAND_DISPLAY=wayland-1 QT_QPA_PLATFORM=wayland'
