@@ -149,10 +149,16 @@ PlasmoidItem {
                     readonly property bool plainExplorerPin: launcher && Plasmoid.configuration.plainExplorerPin
                         && model.AppId === "org.win7classic.explorer"
                     readonly property bool active: model.IsActive === true && model.IsMinimized !== true
-                    readonly property bool sunken: (active && !launcher) || mouse.pressed || (taskMenu.visible && taskMenu.taskButton === task)
+                    readonly property bool ownsMenu: taskMenu.visible && taskMenu.taskButton === task
+                    // Giving the jump list keyboard focus temporarily clears the task's live activation role.
+                    readonly property bool cueActive: ownsMenu ? taskMenu.activeOnOpen : active
+                    readonly property bool sunken: (cueActive && !launcher) || mouse.pressed || ownsMenu
                     readonly property int shift: sunken ? 1 : 0
                     width: launcher ? root.launcherWidth : area.windowWidth
                     height: root.buttonHeight
+                    // Keep Dialog's center offset integral even when the task width is odd.
+                    readonly property alias popupAnchor: popupAnchor
+                    Item { id: popupAnchor; y: -4; width: 2; height: 1 }
 
                     Item {
                         width: task.width; height: task.height
@@ -166,7 +172,7 @@ PlasmoidItem {
                             anchors.fill: parent
                             visible: !task.launcher || mouse.containsMouse || mouse.pressed
                             sunken: task.sunken
-                            fill: task.active && !task.launcher ? Classic.Palette.highlight3D : Classic.Palette.face
+                            fill: task.cueActive && !task.launcher ? Classic.Palette.highlight3D : Classic.Palette.face
                         }
                         Kirigami.Icon {
                             x: (task.launcher ? (task.width - root.taskIconSize) / 2 : 3) + task.shift
@@ -182,7 +188,7 @@ PlasmoidItem {
                             verticalAlignment: Text.AlignVCenter
                             elide: Text.ElideRight
                             text: task.model.display
-                            font.family: "Tahoma"; font.pixelSize: 11; font.bold: task.active
+                            font.family: "Tahoma"; font.pixelSize: 11; font.bold: task.cueActive
                             color: "black"
                             renderType: Text.NativeRendering
                         }

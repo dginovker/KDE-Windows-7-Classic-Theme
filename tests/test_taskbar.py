@@ -116,7 +116,10 @@ def main():
     vmctl.pointer(VM, 640, 600)
     time.sleep(1)
     shot(OUT / '1-jumplist.png')
-    jump = Image.open(OUT / '1-jumplist.png').convert('RGB').crop((113, 662, 343, 756))
+    jump = Image.open(OUT / '1-jumplist.png').convert('RGB').crop((78, 662, 308, 756))
+    before = Image.open(OUT / '1-taskbar.png').convert('RGB')
+    opened = Image.open(OUT / '1-jumplist.png').convert('RGB')
+    assert before.crop((153, 762, 270, 796)) == opened.crop((153, 762, 270, 796)), 'opening the jump list changed the white face or bold caption'
     native_jump = Image.open(ROOT / 'reference/screenshots/w7-explorer-jumplist.png').convert('RGB').crop((78, 662, 308, 756))
     jump_diff = ImageChops.difference(jump, native_jump)
     # Our action-only popup has its own top border; native has the Frequent section above this block.
@@ -211,7 +214,7 @@ def main():
     shot(OUT / '8-jumplist.png')
     menu = Image.open(OUT / '8-jumplist.png').convert('RGB')
     # The action block has the genuine reference's 230px width, 22px rows and black frame.
-    left, top = 163, 662
+    left, top = 128, 662
     assert menu.getpixel((left, top + 10)) == (0, 0, 0), 'task right-click did not open the Classic jump list'
     reference_actions = Image.open(ROOT / 'reference/screenshots/w7-explorer-jumplist.png').convert('RGB').crop((78, 662, 308, 756))
     actions = menu.crop((left, top, left + 230, 756))
@@ -242,13 +245,13 @@ def main():
     vmctl.pointer(VM, 187, 778, 'right')
     time.sleep(0.4)
     shot(OUT / '9-launcher-jumplist.png')
-    click(163 + 80, 756 - 72 + 27)
+    click(72 + 80, 756 - 72 + 27)
     wait_for(lambda: explorer() is not None, 'jump-list application entry launches Explorer')
     vmctl.keys(VM, 'KEY_LEFTCTRL', 'KEY_W')
     wait_for(lambda: explorer() is None, 'launched Explorer closes with Ctrl+W')
     vmctl.pointer(VM, 187, 778, 'right')
     time.sleep(0.4)
-    click(163 + 80, 756 - 72 + 49)
+    click(72 + 80, 756 - 72 + 49)
     wait_for(lambda: 'org.win7classic.explorer.desktop' not in launchers(), 'launcher unpinned by jump list')
     user('systemd-run --user --collect -q ~/.local/bin/win7-explorer ~/Classic-demo')
     wait_for(lambda: explorer() is not None, 'unpinned Explorer running')

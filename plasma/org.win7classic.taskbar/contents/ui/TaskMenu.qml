@@ -1,6 +1,5 @@
 import QtQuick
 import "../../../../../win7-classic/primitives2" as Classic
-import QtQuick.Window
 import org.kde.plasma.core as PlasmaCore
 import org.kde.plasma.plasmoid
 import org.kde.kirigami as Kirigami
@@ -12,18 +11,28 @@ PlasmaCore.Dialog {
     property Item taskButton: null
     readonly property bool launcher: taskButton !== null && taskButton.launcher
     readonly property bool pinned: taskButton !== null && (launcher || taskButton.model.HasLauncher === true)
+    property bool activeOnOpen: false
     property int current: -1
     type: PlasmaCore.Dialog.PopupMenu
     flags: Qt.WindowStaysOnTopHint
     backgroundHints: PlasmaCore.Dialog.NoBackground
     hideOnWindowDeactivate: true
     location: PlasmaCore.Types.Floating
-    x: taskButton ? Math.min(taskButton.mapToGlobal(0, 0).x, taskButton.Screen.virtualX + taskButton.Screen.width - body.width) : 0
-    y: taskButton ? taskButton.mapToGlobal(0, 0).y - 4 - body.height : 0
+    visualParent: taskButton ? taskButton.popupAnchor : null
     onTaskButtonChanged: if (!taskButton) visible = false
 
     function open(button) {
+        // On Wayland QScreen's available geometry does not exclude Plasma's reserved panels.
+        const containment = Plasmoid.containment;
+        const work = containment.availableScreenRect;
+        const left = containment.screenGeometry.x + work.x;
+        const halfWidth = body.width / 2;
+        const origin = button.mapToGlobal(0, 0).x;
+        const center = Math.round(origin + button.width / 2);
+        const clampedCenter = Math.max(left + halfWidth, Math.min(center, left + work.width - halfWidth));
+        button.popupAnchor.x = clampedCenter - origin - button.popupAnchor.width / 2;
         taskButton = button;
+        activeOnOpen = button.active;
         current = -1;
         visible = true;
         requestActivate();

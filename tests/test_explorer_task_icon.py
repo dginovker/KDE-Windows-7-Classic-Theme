@@ -112,10 +112,9 @@ def main():
         vmctl.pointer(VM, 190, 778, 'right')
         vmctl.pointer(VM, 640, 695)
         menu = capture('100-jumplist')
-        assert crop(menu, (122, 680), 16) == crop(REF, (87, 680), 16), 'jump-list launch icon is not native'
-        check_native(menu, (117, 764), FACE)
+        assert crop(menu, (87, 680), 16) == crop(REF, (87, 680), 16), 'jump-list launch icon is not native'
+        check_native(menu, (117, 764), WHITE)
         vmctl.keys(VM, 'KEY_ESC')
-        vmctl.pointer(VM, 190, 778, 'left')  # restore/activate if the menu stole focus
         if explorer_windows()[0][2] != 'true':
             vmctl.pointer(VM, 190, 778, 'left')
         vmctl.pointer(VM, 640, 695)
