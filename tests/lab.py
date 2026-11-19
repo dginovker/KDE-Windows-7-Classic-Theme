@@ -22,8 +22,31 @@ def user(script, timeout=180, check=True):
     return out.strip()
 
 
-def toggle(target, expect_ok=True):
-    code, out, err = vmctl.run(VM, f'{vmctl.USER_ENV}\nexec runuser -u tester -- ~tester/.local/bin/win7-classic {target}', 180)
+def clipboard():
+    return user('export WAYLAND_DISPLAY=$(systemctl --user show-environment | sed -n "s/^WAYLAND_DISPLAY=//p"); '
+                'wl-paste --no-newline')
+
+
+def executable(name, packaged=False):
+    return f'{"/usr/bin" if packaged else "/home/tester/.local/bin"}/{name}'
+
+
+def explorer_identity(pid, expected, out):
+    script = f'''set -eu
+exe=$(readlink /proc/{pid}/exe)
+printf 'pid=%s\nexe=%s\n' {pid} "$exe"
+sha256sum /proc/{pid}/exe {expected}
+'''
+    identity = user(script)
+    (out / 'explorer-executable.txt').write_text(identity + '\n')
+    print(identity, flush=True)
+    _, path, running, installed = identity.splitlines()
+    assert path == f'exe={expected}' and running.split()[0] == installed.split()[0], identity
+
+
+def toggle(target, expect_ok=True, *, packaged=False):
+    tool = executable('win7-classic', packaged)
+    code, out, err = vmctl.run(VM, f'{vmctl.USER_ENV}\nexec runuser -u tester -- {tool} {target}', 180)
     if (code == 0) != expect_ok:
         raise AssertionError(f'win7-classic {target} exit {code}:\n{err}')
     return err

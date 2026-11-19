@@ -1376,8 +1376,10 @@ private:
                 const KFileItemList selection = files->selectedItems();
                 if (!canIncludeInLibrary(selection))
                     return;
-                auto *job = KIO::link(selection.isEmpty() ? QList<QUrl>{files->url()} : selection.urlList(),
-                                      QUrl::fromLocalFile(QStandardPaths::writableLocation(location)));
+                // KDirOperator appends a slash; KIO names the link using QUrl::fileName().
+                const auto sources = selection.isEmpty() ? QList<QUrl>{files->url().adjusted(QUrl::StripTrailingSlash)}
+                                                         : selection.urlList();
+                auto *job = KIO::link(sources, QUrl::fromLocalFile(QStandardPaths::writableLocation(location)));
                 job->setUiDelegate(KIO::createDefaultJobUiDelegate(KJobUiDelegate::AutoHandlingEnabled, this));
             });
         auto *share = new QMenu(this);
@@ -1805,6 +1807,7 @@ private:
             auto *openItem = menu.addAction(QStringLiteral("&Open"), this, [this, items] { openItems(items); });
             menu.setDefaultAction(openItem);
             if (!localTextPath(items).isEmpty()) {
+                menu.addAction(print);
                 const auto editors = KApplicationTrader::queryByMimeType(QStringLiteral("text/plain"), [](const KService::Ptr &service) {
                     return service->categories().contains(QStringLiteral("TextEditor"));
                 });
@@ -1815,7 +1818,6 @@ private:
                         job->setUiDelegate(KIO::createDefaultJobUiDelegate(KJobUiDelegate::AutoHandlingEnabled, this));
                         job->start();
                     });
-                menu.addAction(print);
             }
             openWith.setItemListProperties(KFileItemListProperties(items));
             openWith.setParentWidget(this);

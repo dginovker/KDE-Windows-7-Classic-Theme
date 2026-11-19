@@ -9,14 +9,14 @@ import subprocess
 
 from PIL import Image
 
-from lab import VM, install, kwin_query, shot, toggle, user, vmctl, wait_for
+from lab import VM, clipboard, executable, explorer_identity, install, kwin_query, shot, toggle, user, vmctl, wait_for
 from test_explorer import EXPLORER, click, key
 from test_explorer_details import read_text
 from test_explorer_empty import stop_unit
 from test_explorer_selection import activate, app_windows, unit_pid
 
 
-def exercise(out, scale, root):
+def exercise(out, scale, root, explorer):
     out.mkdir(parents=True)
     config = f'{root}/config'
     folder = f'{root}/Open-fixture'
@@ -28,7 +28,7 @@ def exercise(out, scale, root):
     owned_chooser = None
     wide = (40, 40, 768, 440)
     narrow = (40, 40, 265, 440)
-    assert not app_windows(), 'requires an unused Explorer/Kate session'
+    assert not app_windows() and not user('pgrep -x kwrite || true'), 'requires an unused Explorer/editor session'
     user(f'''mkdir -p {config} {root}/cache {root}/kate {folder}/Documents
 cp ~/.config/kdeglobals {config}/
 cp ~/.config/kdeglobals {root}/kate/
@@ -122,19 +122,19 @@ file --mime-type {folder}/RefusalMarker''')
     def recorder_exists():
         return user(f'if test -e {argv}; then echo present; fi') == 'present'
 
-    def chooser_label(tag, label):
+    def label_point(tag, label, box, psm=11):
         path = out / f'{tag}.png'
         frame = snap(tag)
-        area = frame.crop((0, 100, 1080, 420))
+        area = frame.crop(box)
         ocr = path.with_name(f'{tag}-ocr.png')
         area.resize((area.width * 3, area.height * 3), Image.Resampling.LANCZOS).save(ocr)
-        words = subprocess.check_output(['tesseract', str(ocr), 'stdout', '--psm', '11', 'tsv'],
+        words = subprocess.check_output(['tesseract', str(ocr), 'stdout', '--psm', str(psm), 'tsv'],
                                         text=True, stderr=subprocess.DEVNULL)
         matches = [row for row in csv.DictReader(words.splitlines(), delimiter='\t') if row.get('text') == label]
         if len(matches) != 1:
             return None
         left, top, width, height = (int(matches[0][field]) for field in ('left', 'top', 'width', 'height'))
-        return (left + width // 2) // 3, 100 + (top + height // 2) // 3
+        return box[0] + (left + width // 2) // 3, box[1] + (top + height // 2) // 3
 
     def choose(tag, existing):
         nonlocal owned_chooser
@@ -158,7 +158,7 @@ file --mime-type {folder}/RefusalMarker''')
 
         def app_visible():
             nonlocal target
-            target = chooser_label(tag + '-chooser', 'Recorder')
+            target = label_point(tag + '-chooser', 'Recorder', (0, 100, 1080, 420))
             return target
 
         wait_for(app_visible, 'fixture app is visible in the real chooser')
@@ -185,6 +185,36 @@ file --mime-type {folder}/RefusalMarker''')
         key('KEY_O')
         choose(tag, existing)
 
+    def item_popup(label, tag):
+        origin = point(459, 150)
+        click(origin, 'right')
+        x, y = origin
+        x += round(21 * scale)  # Exclude icons from label OCR.
+        crop = snap(tag).crop((x, y, x + round(120 * scale), y + round(139 * scale)))
+        ocr = out / f'{tag}-ocr.png'
+        crop.resize((crop.width * 3, crop.height * 3)).save(ocr)
+        tsv = subprocess.check_output(['tesseract', str(ocr), 'stdout', '--psm', '6', 'tsv'],
+                                      text=True, stderr=subprocess.DEVNULL)
+        (out / f'{tag}.tsv').write_text(tsv)
+        lines = {}
+        for row in csv.DictReader(tsv.splitlines(), delimiter='\t'):
+            if row['text']:
+                ident = tuple(row[k] for k in ('block_num', 'par_num', 'line_num'))
+                lines.setdefault(ident, []).append(row)
+        matches = [line for line in lines.values() if ' '.join(
+            ''.join(c for c in word['text'] if c.isalpha()) for word in line).strip().casefold() == label]
+        assert len(matches) == 1, (label, tsv)
+        word = next(w for w in matches[0] if w['text'].isalpha())
+        return x + (int(word['left']) + int(word['width']) // 2) // 3, y + (int(word['top']) + int(word['height']) // 2) // 3
+
+    def verify_editor(tag):
+        snap(tag)
+        key('KEY_LEFTCTRL', 'KEY_A')
+        key('KEY_LEFTCTRL', 'KEY_C')
+        copied = clipboard()
+        assert copied == 'owned document', (tag, copied)
+        (out / f'{tag}-copied.txt').write_text(copied + '\n')
+
     def overflow():
         click(point(102, 74))
         observed = text('overflow-menu', (*point(75, 87), *point(275, 185)))
@@ -199,11 +229,46 @@ file --mime-type {folder}/RefusalMarker''')
         kate = unit_pid(unit + '-kate')
         wait_for(lambda: any(pid == kate and c.startswith('Control.txt') for pid, _, c in app_windows()), 'owned Kate control')
         user(f'systemd-run --user --collect -q --unit={unit} --setenv=LC_ALL=en_US.UTF-8 --setenv=XDG_CONFIG_HOME={config} '
-             f'--setenv=XDG_CACHE_HOME={root}/cache ~/.local/bin/win7-explorer {folder}')
+             f'--setenv=XDG_CACHE_HOME={root}/cache {explorer} {folder}')
         parent = unit_pid(unit)
         wait_for(lambda: (parent, EXPLORER, 'Open-fixture') in app_windows(), 'owned Explorer')
+        explorer_identity(parent, explorer, out)
+        activate(parent, wide)
+        wait_for(lambda: 'Read.txt' in text('fixture-loaded', (*point(400, 185), *point(512, 220)), 7),
+                 'KIO listed the text item before pointer input')
+        select(459, 'Read.txt')
+        click(item_popup('open', 'context-open-menu'))
+        wait_for(lambda: any(pid == kate and c.startswith('Read.txt') for pid, _, c in app_windows()),
+                 'item popup Open delivered the selected file to Kate')
+        activate(kate)
+        verify_editor('context-open-kate')
+        key('KEY_LEFTCTRL', 'KEY_W')
+        wait_for(lambda: any(pid == kate and c.startswith('Control.txt') for pid, _, c in app_windows()),
+                 'Kate closed the selected document')
         activate(parent, wide)
         select(459, 'Read.txt')
+        click(item_popup('open with', 'context-open-with-menu'))
+        target = None
+
+        def kwrite_offered():
+            nonlocal target
+            target = label_point('context-open-with-submenu', 'KWrite', (*point(646, 224), *point(745, 278)), 6)
+            return target
+
+        wait_for(kwrite_offered, 'text-item Open With submenu offers KWrite')
+        click(target)
+        wait_for(lambda: user('pgrep -x kwrite || true'), 'item popup Open With launched KWrite')
+        (kwrite,) = map(int, user('pgrep -x kwrite').splitlines())
+        wait_for(lambda: kwin_query(f'''const w = workspace.activeWindow;
+            if (w && w.pid == {kwrite} && w.caption.startsWith('Read.txt')) emit(w.pid);'''),
+                 'KWrite shows the selected document')
+        verify_editor('context-open-with-kwrite')
+        selected = user(f'''tr '\\0' '\\n' </proc/{kwrite}/cmdline | grep -Fx -e {folder}/Read.txt -e file://{folder}/Read.txt''')
+        (out / 'context-open-with-kwrite-path.txt').write_text(selected + '\n')
+        print(f'{scale:g}x item popup Open: Kate displayed selected document; Open With: KWrite received {selected}', flush=True)
+        key('KEY_LEFTALT', 'KEY_F4')
+        wait_for(lambda: not user('pgrep -x kwrite || true'), 'KWrite closed')
+        activate(parent, wide)
         click(point(146, 74))
         snap('toolbar-open-with-menu')
         open_with('toolbar-open-with')
@@ -284,6 +349,7 @@ file --mime-type {folder}/RefusalMarker''')
                 wait_for(lambda: all(other != pid for other, *_ in app_windows()), f'owned window {pid} closed')
         stop_unit(unit)
         stop_unit(unit + '-kate')
+        user('pkill -x kwrite || true')
         after = user(manifest)
         (out / 'fixtures-after.txt').write_text(after + '\n')
         assert after == before, 'Open changed fixture data or permissions'
@@ -292,29 +358,33 @@ file --mime-type {folder}/RefusalMarker''')
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('out', type=Path)
-    parser.add_argument('--installed', action='store_true')
+    installed = parser.add_mutually_exclusive_group()
+    installed.add_argument('--installed', action='store_true', help='use the existing development install')
+    installed.add_argument('--packaged', action='store_true', help='use the installed system package instead of the development install')
     parser.add_argument('--scales', nargs='+', type=float, choices=(1, 1.5), default=(1, 1.5))
     args = parser.parse_args()
     vmctl.start(VM)
-    if not args.installed:
+    if not (args.installed or args.packaged):
         install(reset=False)
-    initial_mode = user('~/.local/bin/win7-classic status')
+    explorer = executable('win7-explorer', args.packaged)
+    tool = executable('win7-classic', args.packaged)
+    initial_mode = user(f'{tool} status')
     output = json.loads(user('kscreen-doctor -j'))['outputs'][0]
     try:
         if initial_mode != 'windows':
-            toggle('windows')
+            toggle('windows', packaged=args.packaged)
         for scale in args.scales:
             user(f'kscreen-doctor output.{output["name"]}.scale.{scale}')
             root = user('mktemp -d /tmp/w7-open.XXXXXXXX')
             try:
-                exercise(args.out / f'scale-{scale:g}', scale, root)
+                exercise(args.out / f'scale-{scale:g}', scale, root, explorer)
             finally:
                 user(f'rm -f ~/.local/share/applications/{Path(root).name}.desktop; kbuildsycoca6; '
                      f'rm -r {shlex.quote(root)}')
     finally:
         user(f'kscreen-doctor output.{output["name"]}.scale.{output["scale"]}')
         if initial_mode != 'windows':
-            toggle(initial_mode)
+            toggle(initial_mode, packaged=args.packaged)
     print('PASS: real Explorer Open and Open With, overflow, mixed targets, refusal and error UI')
 
 
