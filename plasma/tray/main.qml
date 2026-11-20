@@ -91,7 +91,7 @@ ContainmentItem {
             }
         }
         rows.sort((a, b) => {
-            const last = entry => entry.applet?.pluginName === "org.kde.plasma.notifications" ? 1 : 0;
+            const last = entry => entry.applet?.pluginName === "org.win7classic.notifications" ? 1 : 0;
             const rank = entry => Math.max(0, categoryOrder.indexOf(entry.category));
             return last(a) - last(b) || rank(a) - rank(b) || (a.name || "").localeCompare(b.name || "");
         });
@@ -103,7 +103,9 @@ ContainmentItem {
     Layout.minimumHeight: 24
 
     function placement(applet) {
-        const id = applet.pluginName;
+        const id = ownedBackend.settingsId(applet);
+        if (id === "org.kde.plasma.notifications" && !configured.extraItems.includes(id))
+            return 0;
         if (configured.showAllItems || configured.shownItems.includes(id)) {
             return 2;
         }
@@ -223,6 +225,7 @@ ContainmentItem {
     }
 
     readonly property Item notificationArea: tray
+    readonly property Item hiddenIconsAnchor: marker.visible ? marker : tray
 
     // Consumers can anchor to a real mapped cell, never activate the applet through this API.
     function cellForPlugin(pluginId) {
@@ -383,7 +386,7 @@ ContainmentItem {
                     return "";
                 }
                 switch (modelData.pluginName) {
-                case "org.kde.plasma.volume":
+                case "org.win7classic.volume":
                     return tray.ownedBackend.speakerArt;
                 case "org.kde.plasma.networkmanagement":
                     return modelData.icon === "network-wired-disconnected-symbolic" ? "ethernet-disconnected.png" : "";
@@ -407,6 +410,12 @@ ContainmentItem {
                 smooth: false
                 visible: hosted.art.length > 0
                 source: hosted.art ? Qt.resolvedUrl(hosted.art) : ""
+            }
+            Binding {
+                target: hosted.nativeItem
+                property: "trayHost"
+                value: tray
+                when: !!hosted.nativeItem && hosted.modelData.pluginName === "org.win7classic.notifications"
             }
             Binding { target: hosted.nativeItem; property: "parent"; value: hosted.holder; when: !!hosted.nativeItem }
             Binding { target: hosted.nativeItem; property: "x"; value: 1; when: !!hosted.nativeItem }

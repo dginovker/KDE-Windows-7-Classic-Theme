@@ -23,6 +23,15 @@
 #include <algorithm>
 #include <utility>
 
+using namespace Qt::StringLiterals;
+
+// Keep the stock configuration and shortcut owner IDs; only the applet implementation changes.
+static const QMap<QString, QString> popupReplacements{
+    {u"org.kde.plasma.notifications"_s, u"org.win7classic.notifications"_s},
+    {u"org.kde.plasma.volume"_s, u"org.win7classic.volume"_s},
+};
+static const auto notificationId = u"org.kde.plasma.notifications"_s;
+
 class ClassicTray final : public Plasma::Containment
 {
     Q_OBJECT
@@ -67,7 +76,8 @@ public:
         QVariantList result;
         for (const auto &meta : m_catalog) {
             result.append(QVariantMap{{QStringLiteral("id"), meta.pluginId()},
-                                      {QStringLiteral("name"), meta.name()}});
+                                      {QStringLiteral("name"), meta.name()},
+                                      {QStringLiteral("mandatory"), meta.pluginId() == notificationId}});
         }
         return result;
     }
@@ -77,9 +87,15 @@ public:
         m_itemsWindow = window;
     }
 
+    Q_INVOKABLE QString settingsId(Plasma::Applet *applet) const
+    {
+        const auto id = applet->pluginName();
+        return popupReplacements.key(id, id);
+    }
+
     Q_INVOKABLE QString category(Plasma::Applet *applet) const
     {
-        return applet->pluginMetaData().value(u"X-Plasma-NotificationAreaCategory");
+        return m_catalog.value(settingsId(applet)).value(u"X-Plasma-NotificationAreaCategory");
     }
 
     Q_INVOKABLE void configureTray()
@@ -277,6 +293,8 @@ private:
                 }
             }
         }
+        // The notification service must remain alive even if its icon was disabled in the stock tray.
+        enabled.append(notificationId);
         QSet<QString> wanted;
         for (const auto &id : enabled) {
             if (!m_catalog.contains(id)) {
@@ -290,24 +308,26 @@ private:
             }
         }
         for (auto *applet : applets()) {
-            if (!wanted.remove(applet->pluginName())) {
+            if (!wanted.remove(settingsId(applet))) {
                 // Do not destroy() the settings: a service may come back under the same applet ID.
                 applet->deleteLater();
             }
         }
         for (const auto &id : wanted) {
+            const auto implementation = popupReplacements.value(id, id);
             if (immutability() != Plasma::Types::Mutable) {
                 qCritical().noquote() << "Classic tray: cannot load" << id << "in immutable layout";
                 continue;
             }
             uint savedId = 0;
             for (const auto &name : m_groups.groupList()) {
-                if (m_groups.group(name).readEntry("plugin", QString()) == id) {
+                const auto saved = m_groups.group(name).readEntry("plugin", QString());
+                if (saved == id || saved == implementation) {
                     savedId = name.toUInt();
                     break;
                 }
             }
-            auto applet = Plasma::PluginLoader::self()->loadApplet(id, savedId, {});
+            auto applet = Plasma::PluginLoader::self()->loadApplet(implementation, savedId, {});
             if (!applet || !applet->pluginMetaData().isValid()) {
                 qCritical().noquote() << "Classic tray: could not load configured applet" << id;
                 continue;

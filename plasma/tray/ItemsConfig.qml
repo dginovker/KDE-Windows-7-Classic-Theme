@@ -88,7 +88,7 @@ Controls.ScrollView {
             width: page.availableWidth
             required property var modelData
             readonly property var applet: modelData.notifier ? null
-                : page.backend?.applets.find(candidate => candidate.pluginName === modelData.id) ?? null
+                : page.backend?.applets.find(candidate => page.backend.settingsId(candidate) === modelData.id) ?? null
             Controls.Label {
                 Layout.fillWidth: true
                 text: row.modelData.name
@@ -97,7 +97,7 @@ Controls.ScrollView {
             Controls.ComboBox {
                 id: visibility
                 Accessible.name: row.modelData.name
-                model: page.options
+                model: row.modelData.mandatory ? [...page.options.slice(0, 3), qsTr("Hide icon")] : page.options
                 currentIndex: page.policy(row.modelData)
                 onActivated: value => {
                     const {id, notifier} = row.modelData;

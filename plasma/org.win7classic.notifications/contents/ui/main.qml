@@ -20,13 +20,17 @@ PlasmoidItem {
     Plasmoid.onActivated: root.toggleHistory()
     Plasmoid.icon: !NM.Server.valid || inhibited ? "notifications-disabled-symbolic"
         : history.unreadNotificationsCount > 0 ? "notification-active-symbolic" : "notification-inactive-symbolic"
-    Plasmoid.status: !NM.Server.valid || inhibited || history.unreadNotificationsCount > 0 || history.activeJobsCount > 0
-        || history.dismissedResidentNotificationsCount > 0 ? PlasmaCore.Types.ActiveStatus : PlasmaCore.Types.PassiveStatus
+    Plasmoid.status: PlasmaCore.Types.ActiveStatus
     toolTipMainText: qsTr("Notifications")
     toolTipSubText: !NM.Server.valid ? qsTr("Plasma notification service unavailable")
         : inhibited ? qsTr("Do not disturb") : qsTr("%n unread notification(s)", "", history.unreadNotificationsCount)
 
     readonly property Item anchorItem: compactRepresentationItem
+    property Item trayHost
+    readonly property Item balloonAnchor: trayHost?.cellForPlugin(Plasmoid.pluginName) ?? trayHost?.hiddenIconsAnchor
+    readonly property bool frontendReady: NM.Server.valid && !!trayHost
+    onFrontendReadyChanged: if (frontendReady) console.info("Classic notification frontend ready")
+    onBalloonAnchorChanged: Qt.callLater(positionPopups)
     readonly property bool anchored: policy.popupPosition === NM.Settings.CloseToWidget
     readonly property rect workArea: Plasmoid.containment ? Qt.rect(
         Plasmoid.containment.screenGeometry.x + Plasmoid.containment.availableScreenRect.x,
@@ -200,10 +204,10 @@ PlasmoidItem {
 
     function positionPopups() {
         const area = workArea;
-        if (!anchorItem?.Window.window || area.width <= 0 || area.height <= 0)
+        if (!balloonAnchor?.Window.window || area.width <= 0 || area.height <= 0)
             return;
 
-        const anchor = anchorItem.mapToGlobal(anchorItem.width / 2, anchorItem.height / 2);
+        const anchor = balloonAnchor.mapToGlobal(balloonAnchor.width / 2, balloonAnchor.height / 2);
         const pos = policy.popupPosition;
         const above = anchored ? anchor.y >= area.y + area.height / 2 : pos >= NM.Settings.BottomLeft;
         const towardsLeft = pos === NM.Settings.TopLeft || pos === NM.Settings.BottomLeft;

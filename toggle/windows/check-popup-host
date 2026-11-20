@@ -1,0 +1,27 @@
+#!/usr/bin/env python3
+"""Refuse layouts whose notification frontend cannot be substituted safely."""
+from pathlib import Path
+import sys
+
+from layout import Layout
+
+
+def check(text):
+    layout = Layout(text)
+    trays = [group for group in layout.groups if layout.get(group, 'plugin') == 'org.win7classic.tray']
+    if len(trays) != 1:
+        raise ValueError('Classic popups require exactly one owned notification area')
+    tray, = trays
+    for group in layout.groups:
+        plugin = layout.get(group, 'plugin')
+        if plugin == 'org.kde.plasma.systemtray':
+            raise ValueError(f'Cannot replace notification frontend in another stock System Tray: {group}')
+        if plugin in {'org.kde.plasma.notifications', 'org.win7classic.notifications'} and group[:-2] != tray:
+            raise ValueError(f'Cannot replace standalone notification frontend without losing settings: {group}')
+
+
+if __name__ == '__main__':
+    try:
+        check(Path(sys.argv[1]).read_text())
+    except (OSError, ValueError) as error:
+        sys.exit(f'Classic popup host: {error}')

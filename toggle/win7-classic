@@ -264,6 +264,9 @@ switch_to() {
             problem="System Tray migration check failed (exit $failure_status): $tray_layout"
         fi
     fi
+    if [[ -z $problem && $target == windows ]] && ! out=$("$share/windows/check-popup-host" "$layout_path" 2>&1); then
+        problem="$out"
+    fi
     local tried_target=false
     if [[ -z $problem ]]; then
         tried_target=true
@@ -291,6 +294,9 @@ switch_to() {
                 fi
             done
         else problem="could not verify startup of the Classic notification area"; fi
+        if [[ -z $problem && $(grep -cFx 'Classic notification frontend ready' <<< "$ready") != 1 ]]; then
+            problem="could not verify exactly one Classic notification frontend (see plasmashell journal)"
+        fi
     fi
     if [[ -z $problem && $target == windows ]]; then
         systemd-run --user --wait --pipe --collect -q "$probe" >> "$state/switch.log" || problem="effective Win7Classic style/palette check failed (see switch.log)"
