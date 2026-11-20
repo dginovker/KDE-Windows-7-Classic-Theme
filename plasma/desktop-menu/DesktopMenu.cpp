@@ -1,13 +1,15 @@
 #include <KConfig>
 #include <KConfigGroup>
-#include <KDesktopFile>
 #include <KDirModel>
-#include <KFileItem>
 #include <KIO/CopyJob>
 #include <KIO/FileUndoManager>
 #include <KIO/JobUiDelegateFactory>
+#include <KIO/StatJob>
+#include <KIO/StoredTransferJob>
+#include <KNameAndUrlInputDialog>
 #include <KNewFileMenu>
 #include <KPluginFactory>
+#include <KProtocolInfo>
 #include <KUrlMimeData>
 #include <Plasma/Containment>
 #include <Plasma/ContainmentActions>
@@ -20,7 +22,8 @@
 #include <QFileInfo>
 #include <QMenu>
 #include <QPointer>
-#include <QStandardPaths>
+#include <QInputDialog>
+#include <QMessageBox>
 #include <algorithm>
 #include <memory>
 
@@ -158,66 +161,52 @@ private:
         return action;
     }
 
-    static bool hasIndistinguishableShortcut(const QString &name)
+    static QUrl newItemUrl(const QUrl &directory, const QString &name)
     {
-        auto dirs = QStandardPaths::locateAll(QStandardPaths::GenericDataLocation, u"templates"_s, QStandardPaths::LocateDirectory);
-        dirs.append(QStandardPaths::standardLocations(QStandardPaths::TemplatesLocation).value(0));
-        for (const auto &dir : dirs) {
-            if (dir.isEmpty() || dir.startsWith(QDir::homePath())) continue; // KIO puts these in Home, never Links.
-            const auto file = QDir(dir).filePath(u"linkPath.desktop"_s);
-            if (!QFileInfo::exists(file)) continue;
-            const KDesktopFile entry(file);
-            if (entry.noDisplay() || entry.readName().remove(u'&') != name) continue;
-            // KIO rejects unreadable targets before deduplicating by basename. Unlike the
-            // resource-backed Text Document, the symlink sentinel can be deduplicated away.
-            QString target = file;
-            const QUrl url(entry.readUrl());
-            if (entry.readType() == u"Link"_s && !url.isEmpty()) {
-                target = url.isLocalFile() ? url.toLocalFile() : url.toString();
-                if (target == u"__CREATE_SYMLINK__"_s) continue;
-                if (url.isRelative() && !target.startsWith(u'/') && !target.startsWith(u"__"_s))
-                    target = QDir(dir).filePath(target);
-            }
-            if (QFileInfo(target).isReadable()) return true;
+        if (name.trimmed().isEmpty() || name == u"."_s || name == u".."_s || name.contains(u'/')) {
+            QMessageBox::warning(nullptr, u"Create New"_s, u"Enter a single file name, not a path."_s);
+            return {};
         }
-        return false;
+        return QUrl::fromLocalFile(QDir(directory.toLocalFile()).filePath(name));
+    }
+
+    static void createShortcut(const QUrl &directory, KNewFileMenu *create)
+    {
+        auto *dialog = new KNameAndUrlInputDialog(u"Name for new link:"_s, u"Path to file or directory:"_s, directory, nullptr);
+        dialog->setAttribute(Qt::WA_DeleteOnClose);
+        dialog->setWindowTitle(u"Create Symlink"_s);
+        QObject::connect(dialog, &QDialog::accepted, create, [dialog, directory] {
+            const auto target = dialog->url();
+            if (!target.isLocalFile() || !QDir::isAbsolutePath(target.toLocalFile())) {
+                QMessageBox::warning(nullptr, u"Create Symlink"_s, u"Choose a local file or directory for the shortcut."_s);
+                return;
+            }
+            const auto dest = newItemUrl(directory, dialog->name());
+            if (!dest.isValid()) return;
+            auto *job = KIO::linkAs(target, dest);
+            job->setUiDelegate(KIO::createDefaultJobUiDelegate(KJobUiDelegate::AutoHandlingEnabled, nullptr));
+            KIO::FileUndoManager::self()->recordCopyJob(job);
+        });
+        dialog->show();
+    }
+
+    static void createTextDocument(const QUrl &directory)
+    {
+        bool accepted = false;
+        auto name = QInputDialog::getText(nullptr, u"Create Text Document"_s, u"Name for new text document:"_s,
+                                          QLineEdit::Normal, u"New Text Document.txt"_s, &accepted);
+        if (!accepted) return;
+        const auto dest = newItemUrl(directory, name);
+        if (!dest.isValid()) return;
+        auto *job = KIO::storedPut(QByteArray{}, dest, -1);
+        job->setUiDelegate(KIO::createDefaultJobUiDelegate(KJobUiDelegate::AutoHandlingEnabled, nullptr));
+        KIO::FileUndoManager::self()->recordJob(KIO::FileUndoManager::Put, {}, dest, job);
     }
 
     static void addNewActions(QMenu &submenu, KNewFileMenu *create)
     {
         const auto actions = create->menu()->actions();
-        QList<QList<QAction *>> sections(1);
-        for (auto *action : actions) {
-            if (action->isSeparator()) sections.emplaceBack();
-            else sections.last().append(action);
-        }
-        const auto identify = [](const QList<QAction *> &section, const QString &file, const QString &url, bool indexed) -> QAction * {
-            const KDesktopFile resource(u":/kio5/newfile-templates/"_s + file);
-            if (resource.readType() != u"Link"_s || resource.readUrl() != url) return nullptr;
-            const auto name = resource.readName().remove(u'&');
-            QAction *match = nullptr;
-            for (auto *action : section) {
-                if (action->actionGroup() && action->data().isValid() == indexed && action->text().remove(u'&') == name) {
-                    if (match) return nullptr;
-                    match = action;
-                }
-            }
-            return match;
-        };
-        // KIO orders Directory, optional Home, System and Links in separate sections.
-        // QAction::data is only an index; only an unambiguous match within its section identifies
-        // a resource action. Other sections and rejected templates cannot impersonate it.
-        auto *folder = identify(sections.first(), u"Directory.desktop"_s, u".source/EmptyDir"_s, false);
-        auto *shortcut = sections.size() >= 3
-            ? identify(sections.last(), u"linkPath.desktop"_s, u"__CREATE_SYMLINK__"_s, true) : nullptr;
-        auto *text = sections.size() >= 3
-            ? identify(sections[sections.size() - 2], u"TextFile.desktop"_s, u".source/TextFile.txt"_s, true) : nullptr;
-        if (shortcut && hasIndistinguishableShortcut(shortcut->text().remove(u'&'))) shortcut = nullptr;
-        if (!folder) qWarning("Classic desktop menu: cannot verify the KIO Folder action");
-        if (!shortcut) qCritical("Classic desktop menu: cannot verify the KIO Shortcut action");
-        if (!text) qWarning("Classic desktop menu: cannot verify the KIO Text Document action");
-
-        const auto add = [&submenu, create](const QString &label, QAction *source) {
+        const auto addStock = [&submenu, create](const QString &label, QAction *source) {
             auto *entry = submenu.addAction(source->icon(), label, create, [create, action = QPointer(source)] {
                 // A filesystem watcher can invalidate KIO's indices while the popup is open.
                 create->checkUpToDate();
@@ -226,13 +215,42 @@ private:
             });
             entry->setEnabled(source->isEnabled());
             entry->setVisible(source->isVisible());
+            entry->setShortcuts(source->shortcuts());
+            entry->setShortcutContext(source->shortcutContext());
         };
-        if (folder) add(u"&Folder"_s, folder);
-        if (shortcut) add(u"&Shortcut"_s, shortcut);
-        else submenu.addAction(u"Shortcut unavailable (KIO template conflict)"_s)->setEnabled(false);
+        // Only KIO's directory constructor has no template index.
+        auto it = std::find_if(actions.cbegin(), actions.cend(), [](QAction *action) {
+            return action->actionGroup() && !action->data().isValid();
+        });
+        QAction *folder = it == actions.cend() ? nullptr : *it;
+        if (folder) addStock(u"&Folder"_s, folder);
+        else qWarning("Classic desktop menu: cannot verify the KIO Folder action");
+
+        // Cached template actions expose only indices, not the operations behind them.
+        // Keep those templates under their own labels and invoke the two known KIO jobs directly.
+        const auto directory = create->workingDirectory();
+        const bool local = directory.isLocalFile() || KProtocolInfo::protocolClass(directory.scheme()) == u":local"_s;
+        const auto addLocal = [&submenu, create, directory, local](const QString &label, const QIcon &icon, bool shortcut) {
+            auto *entry = submenu.addAction(icon, label, create, [create, directory, shortcut] {
+                auto *job = KIO::mostLocalUrl(directory);
+                QObject::connect(job, &KJob::result, create, [job, create, shortcut] {
+                    const auto dest = job->mostLocalUrl();
+                    if (job->error() || !dest.isLocalFile()) {
+                        QMessageBox::warning(nullptr, u"Create New"_s, u"The desktop location is not a local folder."_s);
+                        return;
+                    }
+                    if (shortcut) createShortcut(dest, create);
+                    else createTextDocument(dest);
+                });
+            });
+            entry->setEnabled(local);
+        };
+        addLocal(u"&Shortcut"_s, QIcon::fromTheme(u"emblem-symbolic-link"_s), true);
+        addLocal(u"&Text Document"_s, QIcon::fromTheme(u"text-plain"_s), false);
+        submenu.addSeparator();
         for (auto *action : actions) {
-            if (action == text) add(u"&Text Document"_s, action);
-            else if (action != folder && action != shortcut) submenu.addAction(action);
+            if (action->isSeparator()) submenu.addSeparator();
+            else if (action != folder) addStock(action->text(), action);
         }
     }
 
