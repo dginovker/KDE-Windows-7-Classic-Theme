@@ -225,7 +225,7 @@ class DetailsNameDelegate : public KFileItemDelegate
 {
 public:
     explicit DetailsNameDelegate(QTreeView *tree, KDirLister *lister)
-        : KFileItemDelegate(tree), plainFolders(lister)
+        : KFileItemDelegate(tree), tree(tree), plainFolders(lister)
     {
         plainFolders.setSourceModel(tree->model());
         connect(&modeWatcher, &QFileSystemWatcher::fileChanged, this, [this, tree] { updateMode(tree); });
@@ -245,7 +245,9 @@ public:
 
     QSize sizeHint(const QStyleOptionViewItem &option, const QModelIndex &index) const override
     {
-        auto size = KFileItemDelegate::sizeHint(option, index);
+        // KIO reads DecorationRole even for the first row's layout, before paint().
+        const auto cell = !sharesReady && usePlainFolder(index) ? plainFolders.mapFromSource(index) : index;
+        const auto size = KFileItemDelegate::sizeHint(option, cell);
         return QSize(size.width() + 14, qMax(22, size.height()));
     }
 
@@ -253,17 +255,37 @@ public:
     {
         auto cell = option;
         cell.rect = QStyle::visualRect(option.direction, option.rect, option.rect.adjusted(14, 0, 0, 0));
-        if (windowsMode && index.data(KDirModel::FileItemRole).value<KFileItem>().isDir()) {
+        if (usePlainFolder(index)) {
             plainFolders.iconSize = cell.decorationSize;
             plainFolders.dpr = painter->device()->devicePixelRatioF();
             KFileItemDelegate::paint(painter, cell, plainFolders.mapFromSource(index));
+            if (!sharesReady && !initializingShares && !plainFolders.deferredItem.isNull()) {
+                initializingShares = true;
+                // Let the backing store finish this frame first. KIO owns GUI-thread share watchers.
+                QTimer::singleShot(0, this, [this] {
+                    initializingShares = false;
+                    if (!windowsMode)
+                        return;
+                    if (!sharesReady) {
+                        plainFolders.deferredItem.overlays();
+                        sharesReady = true;
+                    }
+                    plainFolders.deferredItem = {};
+                    tree->viewport()->update();
+                });
+            }
         } else {
             KFileItemDelegate::paint(painter, cell, index);
         }
     }
 
 private:
-    // KDirModel puts previews and plain icons in the same role. Only change the paint-time read:
+    bool usePlainFolder(const QModelIndex &index) const
+    {
+        return windowsMode && index.data(KDirModel::FileItemRole).value<KFileItem>().isDir();
+    }
+
+    // KDirModel puts previews and plain icons in the same role. Only substitute the delegate's read:
     // clearing the live role would lose Large Icons montages which KIO can't regenerate at 16px.
     class PlainFolderDecoration : public QIdentityProxyModel
     {
@@ -272,6 +294,7 @@ private:
         QSet<QUrl> cut;
         QSize iconSize;
         qreal dpr = 1;
+        mutable KFileItem deferredItem;
 
         QVariant data(const QModelIndex &index, int role) const override
         {
@@ -289,9 +312,13 @@ private:
             bool slow = root.isSlow();
             for (auto parent = index.parent(); !slow && parent.isValid(); parent = parent.parent())
                 slow = parent.data(KDirModel::FileItemRole).value<KFileItem>().isSlow();
-            if (!slow)
-                icon = KIconUtils::addOverlays(icon, item.overlays());
-            if (cut.contains(item.url())) {
+            if (!slow) {
+                if (sharesReady || !item.isMostLocalUrl().local)
+                    icon = KIconUtils::addOverlays(icon, item.overlays());
+                else
+                    deferredItem = item;
+            }
+            if (cut.contains(item.url()) && iconSize.isValid()) {
                 auto pixmap = icon.pixmap(iconSize, dpr);
                 KIconEffect::toDisabled(pixmap);
                 icon = QIcon(pixmap);
@@ -329,8 +356,11 @@ private:
         }
     }
 
+    QTreeView *const tree;
     QFileSystemWatcher modeWatcher;
     mutable PlainFolderDecoration plainFolders;
+    mutable bool initializingShares = false;
+    inline static bool sharesReady = false;
     bool windowsMode = false;
 };
 
