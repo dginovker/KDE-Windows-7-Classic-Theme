@@ -113,6 +113,9 @@ def set_keys(path, groups, *, prune=True):
 APPLET = r'\[Containments\]\[\d+\](?:\[Applets\]\[\d+\])+'
 MODE_KEYS = {'popupWidth', 'popupHeight', 'DialogWidth', 'DialogHeight', 'ConfigDialogWidth', 'ConfigDialogHeight'}
 CLASSIC_KEYS = {('org.win7classic.taskbar', '[Configuration][General]', 'launchers')}
+# The stock tray points into its own layout, not the other mode's containment tree.
+TRAY_PLUGIN = 'org.kde.plasma.systemtray'
+TRAY_LINK = '[Configuration]\tSystrayContainmentId'
 
 
 def applet_content(path):
@@ -138,7 +141,8 @@ def applet_content(path):
             for key, value in keys.items():
                 name = key.partition('[')[0].rstrip()
                 if (name in MODE_KEYS or ('[ConfigDialog]' in tail and name.lower() in {'width', 'height'})
-                        or (plugin, config + tail, name) in CLASSIC_KEYS):
+                        or (plugin, config + tail, name) in CLASSIC_KEYS
+                        or (plugin == TRAY_PLUGIN and config + tail + '\t' + name == TRAY_LINK)):
                     continue
                 content[config + tail + '\t' + key] = value
     policy = {re.sub(r'\[\$[^\]]*\]', '', group) for group in groups if '[$' in group}
@@ -170,6 +174,8 @@ def carry_applets(source, target, baseline, outgoing, incoming, compare):
         left_edits, right_edits, conflicts = [], [], []
         merged = right.copy()
         for key in sorted(left.keys() | right.keys() | (old_left or {}).keys() | (old_right or {}).keys()):
+            if plugin == TRAY_PLUGIN and key == TRAY_LINK:
+                continue  # Older baselines may still include this layout reference.
             a, b = left.get(key), right.get(key)
             a_edit = old_left is not None and a != old_left.get(key)
             b_edit = old_right is not None and b != old_right.get(key)

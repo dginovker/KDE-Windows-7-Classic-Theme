@@ -342,12 +342,35 @@ switch_to() {
                 mv --no-copy -T "$windows_profile" "$retired/windows"; then :
         else problem="could not retire the old Windows profile"; fi
     fi
-    if [[ -z $problem ]] && ! mv -fT "${shared_applets%.json}.new" "$shared_applets"; then
-        problem="could not commit shared applet settings baseline"
+    local commit_dir="" baseline_committed=false
+    if [[ -z $problem ]]; then
+        # Keep the previous baseline until publishing mode, the last fallible step of the switch.
+        if commit_dir=$(mktemp -d "$state/.switch.XXXXXX") &&
+                { [[ ! -f $shared_applets && ! -L $shared_applets ]] || ln -P "$shared_applets" "$commit_dir/baseline"; } &&
+                mv -fT "${shared_applets%.json}.new" "$shared_applets"; then
+            baseline_committed=true
+        else problem="could not commit shared applet settings baseline"; fi
+    fi
+    if [[ -z $problem ]]; then
+        local mode_file=$state/mode
+        if printf '%s\n' "$target" > "$commit_dir/mode" &&
+                { [[ ! -e $mode_file && ! -L $mode_file ]] ||
+                  { [[ -f $mode_file && -w $mode_file ]] && chmod --reference="$mode_file" "$commit_dir/mode"; }; } &&
+                mv -fT "$commit_dir/mode" "$mode_file"; then :
+        else problem="could not write mode"; fi
     fi
     if [[ -n $problem ]]; then
         rm -f "${shared_applets%.json}.new" || true
         log "rolling back to $from: $problem"
+        if $baseline_committed; then
+            if [[ -e $commit_dir/baseline || -L $commit_dir/baseline ]]; then
+                mv -fT "$commit_dir/baseline" "$shared_applets" ||
+                    { log "ERROR: previous baseline retained at $commit_dir/baseline"; commit_dir=""; }
+            else
+                rm -f "$shared_applets" || log "ERROR: could not remove the new baseline at $shared_applets"
+            fi
+        fi
+        [[ -z $commit_dir ]] || rm -rf "$commit_dir" || log "WARNING: could not remove $commit_dir"
         if [[ -n $retired ]]; then
             if [[ -e $retired/windows || -L $retired/windows ]]; then
                 mv --no-copy -T "$retired/windows" "$windows_profile" || log "ERROR: old Windows profile retained at $retired/windows"
@@ -368,7 +391,7 @@ switch_to() {
         log "ERROR: switch to $target failed ($problem); still in $from mode"
         return "$failure_status"
     fi
-    echo "$target" > "$state/mode"
+    rm -rf "$commit_dir" || log "WARNING: could not remove $commit_dir"
     [[ $target != current ]] || clear_tray_shortcuts
     [[ -z $carried ]] || log "$carried"
     log "now in $target mode: $(digest "$config")"
@@ -393,9 +416,9 @@ restore() {
     fi
     copy_files "$state/profiles/current" "$config"
     load_appearance current "$state/profiles/current"
-    echo current > "$state/mode"
     start_shell || die "plasmashell did not start after restore"
     clear_tray_shortcuts
+    echo current > "$state/mode" || die "Current is running; could not write mode"
     log "restored current: $(digest "$config")"
     rm -f "$shared_applets" || die "Current is running; could not clear the shared applet baseline at $shared_applets"
 }

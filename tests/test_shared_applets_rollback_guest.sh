@@ -68,6 +68,21 @@ case "$1" in
         test ! -e "$S/shared-applets.new"
         test -z "$(find "$S/profiles" -maxdepth 1 -name '.rebuild.*' -print)"
         ;;
+    mode)
+        cp -a "$W" "$D/windows"
+        cp -p "$B" "$D/baseline"
+        cp -p "$S/mode" "$D/mode"
+        chmod a-w "$S/mode"
+        trap 'chmod --reference="$D/mode" "$S/mode"; rm -rf "$D"' EXIT
+        test -r "$S/mode" && test ! -w "$S/mode"
+        fail rebuild 'could not write mode'
+        assert_current
+        cmp "$D/mode" "$S/mode"
+        diff -r "$W" "$D/windows"
+        cmp "$B" "$D/baseline"
+        test ! -e "$S/shared-applets.new"
+        test -z "$(find "$S" -type d \( -name '.switch.*' -o -name '.rebuild.*' \) -print)"
+        ;;
     qualified)
         cp -p "$W/$F" "$D/windows"
         trap 'cp -p "$D/windows" "$W/$F"; rm -rf "$D"' EXIT
