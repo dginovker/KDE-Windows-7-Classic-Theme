@@ -70,12 +70,12 @@ for line in open(sys.argv[1]).read().splitlines():
 PY
 mkdir -p "$data/win7-classic/lockscreen"
 cp -r "$src/toggle/win7-classic" "$src/toggle/kconfig-keys" "$src/toggle/windows" "$data/win7-classic/"
-cp -r "$src/plasma/lockscreen/LockScreen.qml" "$src/plasma/logon/"{*.qml,art} "$data/win7-classic/lockscreen/"
+cp -r "$src/plasma/lockscreen/"*.qml "$src/plasma/logon/"{*.qml,art} "$data/win7-classic/lockscreen/"
 if [[ ${1:-} == --prefix ]]; then
     # The login screen is system-wide: installed here, selected by the administrator (see README).
     rm -rf "$data/sddm/themes/win7-classic"
     mkdir -p "$data/sddm/themes/win7-classic"
-    cp -r "$src/plasma/sddm/"{Main.qml,metadata.desktop} "$src/plasma/logon/"{*.qml,art} "$data/sddm/themes/win7-classic/"
+    cp -r "$src/plasma/sddm/"{*.qml,metadata.desktop} "$src/plasma/logon/"{*.qml,art} "$data/sddm/themes/win7-classic/"
     cp "$src/plasma/sddm/art/"*.png "$data/sddm/themes/win7-classic/art/"
 fi
 ln -sfn "$(realpath -m --relative-to="$bin" "$data/win7-classic/win7-classic")" "$bin/win7-classic"

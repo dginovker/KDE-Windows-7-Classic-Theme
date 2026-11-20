@@ -30,9 +30,7 @@ def bitmap(file, number):
 
 def main(imageres, authui, basebrd):
     shared = PLASMA / 'logon/art'
-    sddm = PLASMA / 'sddm/art'
     shared.mkdir(exist_ok=True)
-    sddm.mkdir(exist_ok=True)
     jpg = subprocess.check_output(['wrestool', '-x', '--raw', '-t', '+IMAGE', '-n', '5035', imageres])
     with Image.open(io.BytesIO(jpg)) as image:
         if image.format != 'JPEG' or image.size != (1440, 900):
@@ -44,8 +42,6 @@ def main(imageres, authui, basebrd):
         'button': 12263, 'button-down': 12262,
     }.items():
         bitmap(authui, number).save(shared / f'{name}.png')
-    for name, number in {'power': 12316, 'power-down': 12317, 'power-icon': 12215}.items():
-        bitmap(authui, number).save(sddm / f'{name}.png')
 
 
 if __name__ == '__main__':

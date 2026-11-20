@@ -21,6 +21,8 @@ Item {
     property bool busy: false
 
     function submit(password) {
+        // Keep the authentication result reachable even if the keyboard covers the bottom of the screen.
+        keyboard.item?.hide();
         busy = true;
         authenticator.respond(password);
     }
@@ -28,16 +30,28 @@ Item {
     Loader {
         id: ui
         anchors.fill: parent
-        source: "LogonUi.qml"
+        source: "LockLogon.qml"
         onStatusChanged: if (status === Loader.Error)
-            console.error("win7-classic: Windows lock screen failed to load; showing the plain password field instead");
+            console.error("win7-classic: Windows lock screen failed to load (requires Plasma 6.8.2 private sessions QML); showing the plain password field instead");
         onLoaded: {
             item.userName = kscreenlocker_userName;
             item.userImage = kscreenlocker_userImage !== "" ? "file://" + kscreenlocker_userImage : "";
             item.subtitle = "Locked";
+            item.busy = Qt.binding(() => root.busy);
             item.submitted.connect(root.submit);
             item.errorDismissed.connect(() => authenticator.startAuthenticating());
         }
+    }
+
+    Loader {
+        id: keyboard
+        active: ui.status === Loader.Ready && !root.busy && ui.item.error === ""
+        anchors.left: parent.left; anchors.bottom: parent.bottom
+        anchors.leftMargin: 34; anchors.bottomMargin: 34
+        source: "LockKeyboard.qml"
+        onLoaded: item.focusPassword = () => ui.item.focusPassword()
+        onStatusChanged: if (status === Loader.Error)
+            console.error("win7-classic: could not load the lock screen virtual keyboard control")
     }
 
     Rectangle {
@@ -84,7 +98,6 @@ Item {
                 plainField.clear();
                 authenticator.startAuthenticating();
             } else {
-                ui.item.busy = false;
                 ui.item.showError(message);
             }
         }

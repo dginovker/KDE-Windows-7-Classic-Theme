@@ -5,7 +5,9 @@ T.Button {
     id: button
     property string artwork: "button"
     property string fallbackLabel: text
-    readonly property bool sliced: artwork !== "submit"
+    property bool staticArtwork: false
+    readonly property bool artworkFailed: art.status === BorderImage.Error
+    readonly property bool sliced: artwork === "button"
     implicitWidth: Math.max(108, label.implicitWidth + 30)
     implicitHeight: 28
     focusPolicy: Qt.StrongFocus
@@ -19,14 +21,20 @@ T.Button {
             radius: button.sliced ? 3 : 15
             color: button.down ? "#122c49" : "#204e7b"
             border.color: "#c0daf2"
-            visible: art.status !== BorderImage.Ready
+            visible: !button.staticArtwork && art.status !== BorderImage.Ready
         }
         BorderImage {
             id: art
             anchors.fill: parent
-            source: "art/" + button.artwork + (button.down ? "-down.png" : ".png")
+            source: "art/" + button.artwork + (button.down && !button.staticArtwork ? "-down.png" : ".png")
             border.left: button.sliced ? 9 : 0
             border.right: border.left
+        }
+        Rectangle {
+            anchors.fill: parent
+            color: "black"
+            opacity: 0.18
+            visible: button.staticArtwork && button.down && art.status === BorderImage.Ready
         }
         Rectangle {
             anchors.fill: parent
@@ -38,17 +46,11 @@ T.Button {
         }
     }
     contentItem: Item {
-        Image {
-            id: glyph
-            anchors.centerIn: parent
-            source: button.artwork === "power" ? "art/power-icon.png" : ""
-        }
         Text {
             id: label
             anchors.centerIn: parent
             text: button.fallbackLabel
-            visible: button.artwork === "button" || (button.artwork === "power" ? glyph.status !== Image.Ready
-                                                                              : art.status !== BorderImage.Ready)
+            visible: !button.staticArtwork && (button.sliced || art.status !== BorderImage.Ready)
             color: "white"
             font.pixelSize: 13
             style: Text.Outline; styleColor: "#23354b"

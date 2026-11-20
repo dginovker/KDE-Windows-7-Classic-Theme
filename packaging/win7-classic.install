@@ -18,7 +18,7 @@ pre_remove() {
 
 post_install() {
     echo "==> Switch with: win7-classic windows"
-    echo "    Windows 7 login screen (system-wide, optional): printf '[Theme]\\nCurrent=win7-classic\\n' > /etc/sddm.conf.d/win7-classic.conf"
+    echo "    Windows 7 login screen (system-wide, optional): printf '[Theme]\\nCurrent=win7-classic\\n[General]\\nInputMethod=qtvirtualkeyboard\\n' > /etc/sddm.conf.d/win7-classic.conf"
     rm -rf /usr/share/kwin/decorations/win7classic /usr/share/win7-classic/primitives
     local home owner
     for home in /home/*; do

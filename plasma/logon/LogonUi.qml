@@ -10,12 +10,17 @@ Item {
     property bool showUser: true
     property bool busy: false
     property string error: ""
+    property real keyboardHeight: 0
+    readonly property real promptHeight: height - keyboardHeight
     readonly property alias password: field.text
+    readonly property alias passwordFocused: field.activeFocus
+    property alias passwordFocusOnPress: field.activeFocusOnPress
     signal submitted(string password)
     signal switchUserClicked()
     signal errorDismissed()
 
-    function clear() { field.text = ""; field.forceActiveFocus(); }
+    function focusPassword() { field.forceActiveFocus(); }
+    function clear() { field.text = ""; focusPassword(); }
     function showError(message) { error = message; okButton.forceActiveFocus(); }
     function dismissError() { error = ""; clear(); errorDismissed(); }
 
@@ -29,11 +34,11 @@ Item {
     Image {
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.bottom: parent.bottom
-        anchors.bottomMargin: 23
+        anchors.bottomMargin: 23 + logon.keyboardHeight
         width: Math.min(350, parent.width)
         height: 50
         fillMode: Image.PreserveAspectFit
-        visible: status === Image.Ready && logon.height >= 420
+        visible: status === Image.Ready && logon.promptHeight >= 420
         source: "art/branding.png"
     }
 
@@ -42,9 +47,9 @@ Item {
         visible: logon.showUser
         width: Math.min(300, parent.width)
         anchors.horizontalCenter: parent.horizontalCenter
-        readonly property bool compact: logon.height < 420
-        y: Math.max(compact ? 0 : 26, Math.min(logon.height / 2 - (logon.subtitle ? 127 : 97),
-                    logon.height - (compact ? 275 : 412)))
+        readonly property bool compact: logon.promptHeight < 420
+        y: Math.max(compact ? 0 : 26, Math.min(logon.promptHeight / 2 - (logon.subtitle ? 127 : 97),
+                    logon.promptHeight - (compact ? 275 : 412)))
 
         LogonTile {
             anchors.horizontalCenter: parent.horizontalCenter
@@ -137,5 +142,5 @@ Item {
         }
     }
 
-    Component.onCompleted: if (showUser) field.forceActiveFocus()
+    Component.onCompleted: if (showUser) focusPassword()
 }
