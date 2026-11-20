@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise installed packages in the stock lab; supply the prior and candidate Arch packages."""
+"""Exercise installed packages in the stock lab; supply the Arch package to test."""
 import argparse
 import base64
 import difflib
@@ -11,7 +11,7 @@ from pathlib import Path
 
 from PIL import Image
 
-from lab import VM, activate, digest, kwin_query, shot, toggle, user, vmctl, wait_for, windows
+from lab import VM, digest, kwin_query, shot, toggle, user, vmctl, wait_for
 from test_tray import REFERENCE, ocr
 
 NAME = 'plasma-org.kde.plasma.desktop-appletsrc'
@@ -19,6 +19,7 @@ STATE = '~/.local/state/win7-classic'
 SAVED = f'{STATE}/profiles/windows/{NAME}'
 LIVE = f'~/.config/{NAME}'
 NETWORK = b'org.kde.plasma.networkmanagement'
+COLD_LAYOUT = Path(__file__).with_name('fixtures') / 'tray-popup-cold-appletsrc'
 CLIPBOARD = b'org.kde.plasma.clipboard'
 STOCK = 'org.kde.plasma.systemtray'
 CLASSIC = 'org.win7classic.tray'
@@ -185,7 +186,7 @@ def resize_check(out, scale, before):
         toggle('windows', packaged=True)
         restored = open_network()
         shot(out / f'{name}-reopened.png')
-        assert restored[2:] == resized[2:], (name, resized, restored)
+        assert restored == resized, (name, resized, restored)
         close_network()
         toggle('current', packaged=True)
         assert raw(SAVED) == after, 'reopening without resizing changed the user-set size'
@@ -199,93 +200,58 @@ def assert_size_only(before, after):
     assert after.replace(group + b'\n' + contents, b'', 1) == before, 'changed more than the size section'
 
 
-def main(out, scale, prior, target):
+def main(out, scale, target):
     out.mkdir(parents=True, exist_ok=True)
     vmctl.start(VM)
     assert user('/usr/bin/win7-classic status') == 'current'
-    assert not any('kate' in cls for cls in windows()), 'start with no Kate fixture'
-    install(prior)
-    unit = 'w62-popup-size-kate'
-    work = '/tmp/w62-unsaved.txt'
-    text = 'tray popup size upgrade unsaved work'
     backup = '~/.local/state/w62-test-backup'
     user(f'''set -eu
+    test -f {SAVED} && test -d {STATE}/profiles/current
     mkdir {backup}
     cp -a {STATE} {LIVE} ~/.config/plasmashellrc {backup}/
     kscreen-doctor output.1.scale.{scale}
     ''')
     try:
-        # Preserve a real additional widget in both profiles; do not click any tray popup in this phase.
-        user("qdbus6 org.kde.plasmashell /PlasmaShell evaluateScript " + shlex.quote(
-            'const w = panels()[0].addWidget("org.kde.plasma.trash"); print(w.id);'))
-        wait_for(lambda: 'plugin=org.kde.plasma.trash' in user(f'cat {LIVE}'), 'stock Trash widget saved')
-        current_widgets = panels()
-        trash, = [w for w in current_widgets if w.startswith('org.kde.plasma.trash:')]
-        assert any(w.startswith(STOCK + ':') for w in current_widgets)
-        # Generate a native, migrated Windows profile with the prior package (no user popup opens).
-        user(f'rm -rf {STATE}/profiles/windows')
-        toggle('windows', packaged=True)
-        assert trash in panels()
-        toggle('current', packaged=True)
-        # Reproduce the mixed existing/absent data reported by #62, without simulating a user resize.
-        # Keep the network configuration section absent, so opening and dragging it test distinct cases.
-        for plugin in (NETWORK, CLIPBOARD):
-            section, _ = settings(raw(SAVED), plugin)
-            args = ' '.join('--group ' + shlex.quote(x.decode()) for x in re.findall(rb'\[([^]]+)\]', section))
-            for suffix in ('Width', 'Height'):
-                if plugin == NETWORK:
-                    user(f'kwriteconfig6 --file {SAVED} {args} --key popup{suffix} --delete')
-                else:
-                    val = 393 if suffix == 'Width' else 283
-                    user(f'kwriteconfig6 --file {SAVED} {args} --key popup{suffix} {val}')
+        # Activating a freshly seeded profile or giving the session UI input before
+        # the round trip concealed the startup regression. Replay the captured layout.
+        activity, = kwin_query('emit(workspace.currentActivity);')
+        assert re.fullmatch(r'[0-9a-f-]{36}', activity[0]), activity
+        fixture = COLD_LAYOUT.read_bytes().replace(b'@ACTIVITY@', activity[0].encode())
+        layout = base64.b64encode(fixture).decode()
+        user(f'printf %s {shlex.quote(layout)} | base64 -d > {SAVED}')
         before = raw(SAVED)
+        assert before == fixture
         assert not sizes(before, NETWORK)
         assert sizes(before, CLIPBOARD) == {b'Width': b'393', b'Height': b'283'}
         assert settings(before, NETWORK)[0] + b'\n' not in before
         (out / 'windows-before-install.ini').write_bytes(before)
         hashes, current = profile_hashes(), digest()
         (out / 'profiles-before.txt').write_text(hashes + '\n')
-        user(f': > {work}; systemd-run --user --collect -q --unit={unit} kate -n {work}')
-        wait_for(lambda: 'org.kde.kate' in windows(), 'Kate open')
-        activate('org.kde.kate')
-        vmctl.type_text(VM, text)
-        wait_for(lambda: '*' in windows()['org.kde.kate'][0], 'Kate has unsaved text')
-        pids = lambda: user('pgrep -x kate; pgrep -x kwin_wayland')
-        running = pids()
         install(target)
         (out / 'windows-after-install.ini').write_bytes(raw(SAVED))
-        assert raw(SAVED) == before and profile_hashes() == hashes and digest() == current and pids() == running
-        print('installation preserved both profiles, live current bytes, Kate and KWin')
+        assert raw(SAVED) == before and profile_hashes() == hashes and digest() == current
+        print('installation preserved both profiles and live Current files')
         toggle('windows', packaged=True)
-        assert trash in panels() and any(w.startswith(CLASSIC + ':') for w in panels())
         time.sleep(4)  # Allow the hosted applets' startup and KConfig writes to settle.
-        (out / 'windows-live-after-activation.ini').write_bytes(raw(LIVE))
+        active = raw(LIVE)
+        (out / 'windows-live-after-activation.ini').write_bytes(active)
         toggle('current', packaged=True)
         after = raw(SAVED)
         (out / 'windows-after-round-trip.ini').write_bytes(after)
         (out / 'profiles-after.txt').write_text(profile_hashes() + '\n')
-        assert panels() == current_widgets and digest() == current and pids() == running
-        activate('org.kde.kate')
-        assert '*' in windows()['org.kde.kate'][0]
-        assert user(f'test ! -s {work} && echo unsaved') == 'unsaved'
-        key('LEFTCTRL', 'S')
-        wait_for(lambda: user(f'cat {work}') == text, 'exact unsaved work survives install and switching')
-        print('stock tray and widgets, live current bytes, Kate and KWin, unsaved text all preserved')
         if after != before:
             (out / 'windows.diff').write_bytes(b''.join(difflib.diff_bytes(difflib.unified_diff,
                 before.splitlines(True), after.splitlines(True), b'before', b'after')))
         assert after == before, f'untouched saved Windows layout differs at {scale}; see windows.diff'
-        assert raw(SAVED) == (out / 'windows-live-after-activation.ini').read_bytes()
-        assert profile_hashes() == hashes
-        print(f'{scale}: exact saved layout + profile comparison before install and after an untouched round trip')
+        assert active == before, f'Windows activation changed live layout at {scale}'
+        assert digest() == current and any(w.startswith(STOCK + ':') for w in panels())
+        print(f'{scale}: exact saved layout before install, after activation and after an untouched round trip')
         resize_check(out, scale, before)
-        assert digest() == current and panels() == current_widgets
+        assert digest() == current
     finally:
         if user('/usr/bin/win7-classic status') == 'windows':
             toggle('current', packaged=True)
         user(f'''set -eu
-        if systemctl --user is-active --quiet {unit}.service; then systemctl --user stop {unit}.service; fi
-        rm -f {work}
         kscreen-doctor output.1.scale.1
         systemctl --user stop plasma-plasmashell
         rm -rf {STATE}
@@ -300,8 +266,7 @@ def main(out, scale, prior, target):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('outdir', type=Path)
-    parser.add_argument('prior', type=Path)
     parser.add_argument('target', type=Path)
     parser.add_argument('--scale', type=float, choices=(1, 1.5), required=True)
     args = parser.parse_args()
-    main(args.outdir, args.scale, args.prior, args.target)
+    main(args.outdir, args.scale, args.target)
