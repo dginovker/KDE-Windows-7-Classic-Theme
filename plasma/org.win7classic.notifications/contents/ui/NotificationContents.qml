@@ -4,6 +4,7 @@ import QtQuick
 import QtQuick.Controls as QQC
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
+import org.kde.plasma.core as PlasmaCore
 import org.kde.notificationmanager as NM
 import org.kde.taskmanager as TaskManager
 
@@ -35,6 +36,8 @@ ColumnLayout {
     readonly property bool pendingReply: replyField.length > 0
     visible: entry !== null
     readonly property bool hasActions: !!entry?.hasDefaultAction || !!entry?.hasReplyAction || (entry?.actionNames.length ?? 0) > 0 || (entry?.configureActionLabel.length ?? 0) > 0
+    readonly property string sourceLabel: [entry?.applicationName, entry?.originName].filter(Boolean).join("\n")
+    readonly property string configureLabel: entry?.configureActionLabel || qsTr("Configure Notifications…")
     readonly property int actionBehavior: entry?.resident ? NM.Notifications.None : NM.Notifications.Close
 
     function index() { return source.index(row, 0); }
@@ -68,7 +71,7 @@ ColumnLayout {
     QQC.Menu {
         id: settingsMenu
         QQC.MenuItem {
-            text: qsTr("Configure Notifications…")
+            text: root.configureLabel
             onTriggered: root.source.configure(root.index())
         }
     }
@@ -93,6 +96,13 @@ ColumnLayout {
             color: "black"
             wrapMode: Text.Wrap
             renderType: Text.NativeRendering
+            Accessible.description: root.sourceLabel
+            PlasmaCore.ToolTipArea {
+                anchors.fill: parent
+                mainText: root.entry?.applicationName ?? ""
+                subText: root.entry?.originName ?? ""
+                textFormat: Text.PlainText
+            }
             TapHandler { enabled: root.entry?.hasDefaultAction || root.matchingWindow?.valid === true; onTapped: root.activateDefaultAction() }
         }
         QQC.ToolButton {
@@ -100,7 +110,12 @@ ColumnLayout {
             Layout.preferredWidth: 12
             Layout.preferredHeight: 15
             visible: !!root.entry?.configurable
-            Accessible.name: qsTr("Configure Notifications…")
+            Accessible.name: root.configureLabel
+            PlasmaCore.ToolTipArea {
+                anchors.fill: parent
+                mainText: root.configureLabel
+                textFormat: Text.PlainText
+            }
             background: Image { source: "balloon-configure.png" }
             onClicked: root.source.configure(root.index())
         }

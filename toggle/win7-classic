@@ -284,7 +284,7 @@ switch_to() {
         fi
     fi
     if [[ -z $problem && $target == windows ]]; then
-        local trays ready tray_id
+        local trays ready tray_id volume
         if trays=$(shell 'var ids = []; for (const p of panels()) for (const w of p.widgets()) if (w.type === "org.win7classic.tray") ids.push(w.id); print(ids.join(" "))') &&
            ready=$(journalctl --user -b -u plasma-plasmashell --after-cursor "$tray_cursor" --no-pager -o cat); then
             for tray_id in $trays; do
@@ -292,6 +292,15 @@ switch_to() {
                     problem="Classic notification area $tray_id failed to initialize (see plasmashell journal)"
                     break
                 fi
+                volume=$(sed -n "s/^Classic volume frontend required: ${tray_id} //p" <<< "$ready")
+                case "$volume" in
+                    yes)
+                        if [[ $(grep -cFx "Classic volume frontend ready: $tray_id" <<< "$ready") != 1 ]]; then
+                            problem="Classic volume frontend for notification area $tray_id failed to initialize (see plasmashell journal)"
+                        fi ;;
+                    no) ;;
+                    *) problem="could not determine whether Classic volume is enabled in notification area $tray_id" ;;
+                esac
             done
         else problem="could not verify startup of the Classic notification area"; fi
         if [[ -z $problem && $(grep -cFx 'Classic notification frontend ready' <<< "$ready") != 1 ]]; then

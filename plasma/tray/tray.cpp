@@ -26,9 +26,10 @@
 using namespace Qt::StringLiterals;
 
 // Keep the stock configuration and shortcut owner IDs; only the applet implementation changes.
+static const auto volumeId = u"org.kde.plasma.volume"_s;
 static const QMap<QString, QString> popupReplacements{
     {u"org.kde.plasma.notifications"_s, u"org.win7classic.notifications"_s},
-    {u"org.kde.plasma.volume"_s, u"org.win7classic.volume"_s},
+    {volumeId, u"org.win7classic.volume"_s},
 };
 static const auto notificationId = u"org.kde.plasma.notifications"_s;
 
@@ -292,6 +293,9 @@ private:
                     qCritical().noquote() << "Classic tray: cannot enumerate services:" << names.error().message();
                 }
             }
+        }
+        if (!m_restored) {
+            qInfo().noquote() << "Classic volume frontend required:" << id() << (enabled.contains(volumeId) ? "yes" : "no");
         }
         // The notification service must remain alive even if its icon was disabled in the stock tray.
         enabled.append(notificationId);

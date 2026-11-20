@@ -85,6 +85,32 @@ def has_shortcut(shortcut):
     return None
 
 
+GLOBAL_ACCEL = 'busctl --user call org.kde.kglobalaccel /kglobalaccel org.kde.KGlobalAccel'
+ACCEL_FILE = '~/.config/kglobalshortcutsrc'
+
+
+def settle_stock_accelerators():
+    # KGlobalAccel first serializes KWin's inverse pairs in this session's hash order.
+    # Flush that stock bookkeeping before sampling bytes, without assigning any key.
+    component = 'win7-classic-tray-test'
+    action = f'4 {component} serialize {component} serialize'
+    section = f'[{component}]'
+
+    def persisted():
+        return section in user(f'cat {ACCEL_FILE}').splitlines()
+
+    assert not persisted(), f'leftover accelerator test component: {component}'
+    user(f'{GLOBAL_ACCEL} doRegister as {action}')
+    try:
+        # NoAutoloading, no keys, not present: a persistent action without any grab.
+        assert user(f'{GLOBAL_ACCEL} setShortcutKeys "asa(ai)u" {action} 0 4') == 'a(ai) 0'
+        wait_for(persisted, 'KGlobalAccel writes the unbound stock test action')
+    finally:
+        assert user(f'{GLOBAL_ACCEL} unregister ss {component} serialize') == 'b true'
+        wait_for(lambda: not persisted(), 'KGlobalAccel flushes removal of the stock test action')
+    print('Stock KGlobalAccel serialization completed before byte snapshot')
+
+
 def main(out, function_key, remove_tray=False):
     keys = ('KEY_LEFTMETA', 'KEY_LEFTSHIFT', 'KEY_' + function_key)
     shortcut = 'Meta+Shift+' + function_key
@@ -92,9 +118,9 @@ def main(out, function_key, remove_tray=False):
     vmctl.start(VM)
     assert user('/usr/bin/win7-classic status') == 'current'
     assert '"scale":1' in user('kscreen-doctor -j').replace(' ', ''), 'start from stock lab at 100%'
+    settle_stock_accelerators()
     before = digest()
-    accel_file = '~/.config/kglobalshortcutsrc'
-    accel = user(f'base64 -w0 {accel_file}')
+    accel = user(f'base64 -w0 {ACCEL_FILE}')
     vol = user(f'wpctl get-volume {SINK}')
     reference = Image.open(REFERENCE).convert('RGB')
 
@@ -187,9 +213,8 @@ def main(out, function_key, remove_tray=False):
         print('Real recorder stages then applies the Notifications shortcut')
         if remove_tray:
             nid = assigned()
-            call = 'busctl --user call org.kde.kglobalaccel /kglobalaccel org.kde.KGlobalAccel'
             binding = f"as 4 plasmashell 'activate widget {nid}' plasmashell 'Activate Notifications Widget'"
-            keys_before_remove = user(f'{call} shortcutKeys {binding}')
+            keys_before_remove = user(f'{GLOBAL_ACCEL} shortcutKeys {binding}')
             assert re.search(r' [1-9]\d*', keys_before_remove), keys_before_remove
             script = ('for (const p of panels()) for (const w of p.widgets()) '
                       'if (w.type === "org.win7classic.tray") w.remove()')
@@ -201,7 +226,7 @@ def main(out, function_key, remove_tray=False):
                                                 'plugin=org.win7classic.volume', 'plugin=org.kde.plasma.volume'})
 
             wait_for(tray_and_popups_removed, 'Plasma finalized tray and child removal')
-            assert user(f'{call} shortcutKeys {binding}') == keys_before_remove, 'dormant registration was not reproduced'
+            assert user(f'{GLOBAL_ACCEL} shortcutKeys {binding}') == keys_before_remove, 'dormant registration was not reproduced'
             snap('tray-removed')
             print(f'Plasma finalized tray removal; KGlobalAccel still holds dormant widget {nid}: {keys_before_remove}')
         else:
@@ -227,9 +252,9 @@ def main(out, function_key, remove_tray=False):
             print(user('/usr/bin/win7-classic current'))
     assert digest() == before, 'current layout bytes changed'
     if remove_tray:
-        after = user(f'{call} shortcutKeys {binding}')
+        after = user(f'{GLOBAL_ACCEL} shortcutKeys {binding}')
         assert after == 'a(ai) 0', f'Windows-only KGlobalAccel action survived tray removal: {after}'
-    assert user(f'base64 -w0 {accel_file}') == accel, 'KGlobalAccel file bytes changed'
+    assert user(f'base64 -w0 {ACCEL_FILE}') == accel, 'KGlobalAccel file bytes changed'
     print('Byte-identical current layout and settled KGlobalAccel metadata')
 
 

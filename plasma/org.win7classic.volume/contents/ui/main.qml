@@ -13,6 +13,7 @@ import "../../../../../win7-classic/popup-backend" as PopupBackend
 PlasmoidItem {
     id: root
     readonly property alias trayGlyph: glyph
+    Component.onCompleted: console.info("Classic volume frontend ready:", Plasmoid.containment.id)
     activationTogglesExpanded: false
     Plasmoid.onActivated: root.togglePopup()
     Plasmoid.icon: root.volumeIcon
