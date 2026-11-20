@@ -120,6 +120,12 @@ def exercise(out, scale, root, message_oracle, toggle, packaged, captions_only):
     open_dialog(OPTIONS)
 
     def stock_caption(tag):
+        # Breeze's translucent corner includes the Explorer content behind it. Keep that
+        # composition fixed even if Qt changes the dialog's preferred size on a style switch.
+        geometry = (300, 164, 360, 220)
+        kwin_script(f'for (const w of workspace.windowList()) if (w.caption === "{OPTIONS}") '
+                    '{ w.frameGeometry = {x: 300, y: 164, width: 360, height: 220}; }')
+        wait_for(lambda: tuple(map(float, frame(OPTIONS)[1:5])) == geometry, 'fixed Breeze comparison geometry')
         _, x, y, w, _, _, cy, *_ = frame(OPTIONS)
         height = float(cy) - float(y)
         assert height > 14, height
