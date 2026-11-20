@@ -30,6 +30,9 @@ def main():
     folder = f'{root}/{unit}'
     cfg = f'{root}/config'
     plugins = '[PreviewSettings]\nPlugins=directorythumbnail,imagethumbnail'
+    appearance_files = ('"${XDG_CONFIG_HOME:-$HOME/.config}/kdeglobals" '
+                        '"${XDG_STATE_HOME:-$HOME/.local/state}/win7-classic/profiles/current/keys.json"')
+    snapshot = False
     x, y = (256, 120) if args.scale == 1 else (42, 24)
     s = args.scale
 
@@ -160,8 +163,11 @@ def main():
         user(f'mkdir -p {cfg} {folder}/AFolder; ln -s "$HOME/.config/kdeglobals" {cfg}/kdeglobals; '
              f'printf "%s\\n" {shlex.quote(plugins)} > {cfg}/dolphinrc')
         if check in ('all', 'mode'):
-            user(f'cp -p ~/.config/kdeglobals {root}/original-kdeglobals; '
-                 'kwriteconfig6 --file kdeglobals --group KDE --key widgetStyle Win7Classic')
+            # Switching saves the forced style to the Current profile as well as the live config.
+            user(f'set -eu; for file in {appearance_files}; do '
+                 f'if test -e "$file"; then cp -p "$file" "{root}/original-${{file##*/}}"; fi; done')
+            snapshot = True
+            user('kwriteconfig6 --file kdeglobals --group KDE --key widgetStyle Win7Classic')
         write_png(f'{folder}/AFolder/Magenta.png', 'magenta')
         write_png(f'{folder}/Cyan.png', 'cyan')
         user(f'kscreen-doctor output.Virtual-1.scale.{s}')
@@ -237,13 +243,29 @@ def main():
         assert user(f'cat {cfg}/dolphinrc') == plugins
         print(f'PASS {s:g}x: packaged Explorer, standalone and pane thumbnails, live policy, options, other views and folder overlays')
     finally:
-        user(f'systemctl --user stop {unit} || true')
-        if user(f'{tool} status') != original:
-            toggle(original, packaged=True)
-        user(f'if test -f {root}/original-kdeglobals; then cp -p {root}/original-kdeglobals ~/.config/kdeglobals; '
-             'dbus-send --session --type=signal /KGlobalSettings org.kde.KGlobalSettings.notifyChange int32:2 int32:0; fi; '
-             f'if test -d {folder}/CLocked; then chmod u+rwx {folder}/CLocked; fi; rm -r {root}; '
-             'kscreen-doctor output.Virtual-1.scale.1')
+        try:
+            user(f'systemctl --user stop {unit} || true')
+            if user(f'{tool} status') != original:
+                toggle(original, packaged=True)
+        finally:
+            if snapshot:
+                print(user(f'''set -eu
+for file in {appearance_files}; do
+    backup="{root}/original-${{file##*/}}"
+    if test -f "$backup"; then
+        cp -p "$backup" "$file"
+        cmp "$backup" "$file"
+        echo "Cleanup verified: $file restored byte-for-byte"
+    else
+        rm -f "$file"
+        test ! -e "$file" && test ! -L "$file" || exit 1
+        echo "Cleanup verified: $file remains absent"
+    fi
+done
+dbus-send --session --type=signal /KGlobalSettings org.kde.KGlobalSettings.notifyChange int32:2 int32:0
+'''), flush=True)
+            user(f'set -eu; if test -d {folder}/CLocked; then chmod u+rwx {folder}/CLocked; fi; rm -r {root}; '
+                 'kscreen-doctor output.Virtual-1.scale.1')
 
 
 if __name__ == '__main__':
