@@ -109,29 +109,22 @@ def main(OUT, packaged):
         assert widget_groups(after, plugin) == widget_groups(before, plugin), f'{plugin} config changed'
     original_tray = widget_groups(before, 'org.kde.plasma.systemtray')
     assert any(group.startswith('[Applets]') for group in original_tray), 'stock tray is missing nested widget groups'
-    expected_tray = {**original_tray, '': [line.replace('plugin=org.kde.plasma.systemtray', 'plugin=org.win7classic.tray')
-                                          for line in original_tray['']]}
+    replacements = {
+        'plugin=org.kde.plasma.systemtray': 'plugin=org.win7classic.tray',
+        'plugin=org.kde.plasma.volume': 'plugin=org.win7classic.volume',
+        'plugin=org.kde.plasma.notifications': 'plugin=org.win7classic.notifications',
+    }
+    expected_tray = {group: [replacements.get(line, line) for line in lines]
+                     if not group or re.fullmatch(r'\[Applets\]\[\d+\]', group) else lines
+                     for group, lines in original_tray.items()}
     classic_tray = widget_groups(after, 'org.win7classic.tray')
-    # The profile recovery copy is from before migration and before Qt sizes the new standalone popups.
+    # The recovery copy predates the migration; the live tray changes the known frontend IDs only.
     state = '~/.local/state/win7-classic'
     recovery = user(f'set -e; f=$(sed -n "s/^.*System Tray original staged profile: //p" {state}/switch.log | tail -1); '
                     'test -n "$f"; cat "$f/plasma-org.kde.plasma.desktop-appletsrc"')
     assert widget_groups(recovery, 'org.kde.plasma.systemtray') == original_tray
-    # Plasma persists runtime geometry for the new overflow window and standalone applet popups.
-    # Require all other groups and settings to match exactly, including geometry in unrelated groups.
-    runtime_geometry = re.compile(r'popup(?:Height|Width)=[1-9][0-9]*')
-    for group in set(classic_tray) | set(expected_tray):
-        actual = classic_tray.get(group, [])
-        expected_settings = expected_tray.get(group, [])
-        if group == '' or re.fullmatch(r'\[Applets\]\[\d+\]\[Configuration\]', group):
-            assert all(not line.startswith(('popupHeight=', 'popupWidth=')) or runtime_geometry.fullmatch(line)
-                       for line in actual), (group, actual)
-            actual = [line for line in actual if not runtime_geometry.fullmatch(line)]
-            expected_settings = [line for line in expected_settings if not runtime_geometry.fullmatch(line)]
-        else:
-            assert (group in classic_tray) == (group in expected_tray), group
-        assert actual == expected_settings, (group, expected_settings, actual)
-    print('Exact stock recovery groups; live tray settings and applet IDs preserved apart from new popup geometry')
+    assert classic_tray == expected_tray, (expected_tray, classic_tray)
+    print('Exact stock recovery groups; live tray settings and applet IDs preserved')
 
     vmctl.pointer(VM, 640, 600)
     time.sleep(1)

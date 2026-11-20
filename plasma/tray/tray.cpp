@@ -13,6 +13,8 @@
 #include <QTimer>
 #include <KPluginFactory>
 #include <Plasma/Containment>
+#include <PlasmaQuick/AppletPopup>
+#include <PlasmaQuick/AppletQuickItem>
 #include <Plasma/PluginLoader>
 #include <PulseAudioQt/Context>
 #include <PulseAudioQt/Server>
@@ -50,6 +52,7 @@ public:
     void init() override
     {
         Containment::init();
+        QCoreApplication::instance()->installEventFilter(this);
         connect(QCoreApplication::instance(), &QCoreApplication::aboutToQuit, this, [this] {
             // Dispose the open config window before Plasma tears down its QML engine and delegate models.
             if (const auto window = m_itemsWindow) {
@@ -169,6 +172,21 @@ Q_SIGNALS:
     void statusNotifiersChanged();
 
 protected:
+    bool eventFilter(QObject *object, QEvent *event) override
+    {
+        if (event->type() != QEvent::Hide) {
+            return false;
+        }
+        auto *popup = qobject_cast<PlasmaQuick::AppletPopup *>(object);
+        if (!popup || popup->handle()) {
+            return false;
+        }
+        auto *item = qobject_cast<PlasmaQuick::AppletQuickItem *>(popup->appletInterface());
+        // Qt can send Hide before the first show. Plasma has added frame padding
+        // to the loaded size but cannot subtract it until the frame is ready.
+        return item && (item->applet() == this || item->applet()->containment() == this);
+    }
+
     void restoreContents(KConfigGroup &group) override
     {
         const auto receipt = QStandardPaths::writableLocation(QStandardPaths::GenericStateLocation)
