@@ -26,7 +26,7 @@ PlasmoidItem {
     readonly property Item anchorItem: trigger
     property Item trayHost
     readonly property Item balloonAnchor: trayHost?.cellForPlugin(Plasmoid.pluginName) ?? trayHost?.hiddenIconsAnchor ?? null
-    readonly property bool frontendReady: NM.Server.valid && !!trayHost
+    readonly property bool frontendReady: NM.Server.valid && !!trayHost && stock.status === Loader.Ready
     onFrontendReadyChanged: if (frontendReady) console.info("Classic notification frontend ready")
     onBalloonAnchorChanged: Qt.callLater(positionPopups)
     readonly property bool anchored: policy.popupPosition === NM.Settings.CloseToWidget

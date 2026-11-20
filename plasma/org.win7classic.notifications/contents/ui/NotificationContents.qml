@@ -31,11 +31,9 @@ ColumnLayout {
         return best;
     }
     property bool replying: false
-    property bool showSettings: false
     readonly property alias editing: replyField.activeFocus
     readonly property bool pendingReply: replyField.length > 0
     visible: entry !== null
-    readonly property bool job: entry?.type === NM.Notifications.JobType
     readonly property bool hasActions: !!entry?.hasDefaultAction || !!entry?.hasReplyAction || (entry?.actionNames.length ?? 0) > 0 || (entry?.configureActionLabel.length ?? 0) > 0
     readonly property int actionBehavior: entry?.resident ? NM.Notifications.None : NM.Notifications.Close
 
@@ -79,9 +77,12 @@ ColumnLayout {
         Layout.fillWidth: true
         Kirigami.Icon {
             Layout.alignment: Qt.AlignTop
+            Layout.leftMargin: 6
             Layout.preferredWidth: 16
             Layout.preferredHeight: 16
-            source: root.entry?.image || root.entry?.iconName || root.entry?.applicationIconName
+            readonly property string iconName: root.entry?.iconName ?? ""
+            source: root.entry?.image || (iconName === "dialog-information" || !iconName
+                ? Qt.resolvedUrl("balloon-information.png") : iconName)
             visible: source !== undefined && source !== ""
         }
         Text {
@@ -96,10 +97,19 @@ ColumnLayout {
         }
         QQC.ToolButton {
             Layout.alignment: Qt.AlignTop
-            Layout.preferredWidth: 18
-            Layout.preferredHeight: 18
+            Layout.preferredWidth: 12
+            Layout.preferredHeight: 15
+            visible: !!root.entry?.configurable
+            Accessible.name: qsTr("Configure Notifications…")
+            background: Image { source: "balloon-configure.png" }
+            onClicked: root.source.configure(root.index())
+        }
+        QQC.ToolButton {
+            Layout.alignment: Qt.AlignTop
+            Layout.preferredWidth: 12
+            Layout.preferredHeight: 15
             visible: !!root.entry?.closable || !!root.entry?.dismissable
-            text: "×"
+            background: Image { source: "balloon-close.png" }
             Accessible.name: root.entry?.closable ? qsTr("Close notification") : qsTr("Dismiss notification")
             onClicked: {
                 if (root.entry?.closable)
@@ -112,6 +122,7 @@ ColumnLayout {
 
     Text {
         Layout.fillWidth: true
+        Layout.leftMargin: 28
         visible: text.length > 0
         text: root.entry?.body ?? ""
         // The canonical model supplies the server-sanitized notification body.
@@ -126,13 +137,6 @@ ColumnLayout {
         }
     }
 
-    QQC.ProgressBar {
-        Layout.fillWidth: true
-        visible: root.job
-        from: 0; to: 100
-        value: root.job ? root.entry?.percentage : 0
-    }
-
     Flow {
         Layout.fillWidth: true
         spacing: 3
@@ -145,20 +149,6 @@ ColumnLayout {
                 onClicked: root.source.invokeAction(root.index(), root.entry?.actionNames[index], root.actionBehavior)
             }
         }
-        Repeater {
-            model: root.entry?.urls
-            QQC.Button {
-                required property url modelData
-                text: qsTr("Open attachment")
-                onClicked: {
-                    Qt.openUrlExternally(modelData);
-                    if (root.entry?.resident)
-                        root.entry.expired = true;
-                    else
-                        root.source.close(root.index());
-                }
-            }
-        }
         QQC.Button {
             visible: !!root.entry?.hasReplyAction && !root.replying
             text: root.entry?.replyActionLabel || qsTr("Reply")
@@ -167,26 +157,7 @@ ColumnLayout {
                 replyField.forceActiveFocus();
             }
         }
-        QQC.Button {
-            visible: !!root.entry?.configurable && (root.showSettings || (root.entry?.configureActionLabel.length ?? 0) > 0)
-            text: root.entry?.configureActionLabel || qsTr("Settings")
-            onClicked: root.source.configure(root.index())
-        }
-        QQC.Button {
-            visible: root.job && root.entry?.suspendable && root.entry?.jobState !== NM.Notifications.JobStateStopped
-            text: root.entry?.jobState === NM.Notifications.JobStateSuspended ? qsTr("Resume") : qsTr("Pause")
-            onClicked: {
-                if (root.entry?.jobState === NM.Notifications.JobStateSuspended)
-                    root.source.resumeJob(root.index());
-                else
-                    root.source.suspendJob(root.index());
-            }
-        }
-        QQC.Button {
-            visible: root.job && root.entry?.killable && root.entry?.jobState !== NM.Notifications.JobStateStopped
-            text: qsTr("Cancel")
-            onClicked: root.source.killJob(root.index())
-        }
+
     }
 
     RowLayout {

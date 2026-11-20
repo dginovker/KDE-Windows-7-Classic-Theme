@@ -23,7 +23,7 @@ PlasmaCore.Dialog {
 
     readonly property int tailHeight: tail ? 10 : 0
     readonly property int timeout: !entry ? 0 : entry.timeout === -1 ? settings.popupTimeout + (entry.urls.length > 0 ? 5000 : 0)
-        : (entry.type === NM.Notifications.JobType && !settings.permanentJobPopups ? settings.popupTimeout : entry.timeout)
+        : entry.timeout
     readonly property double updatedAt: Number(new Date(entry?.updated))
 
     type: critical ? PlasmaCore.Dialog.CriticalNotification : PlasmaCore.Dialog.Notification
@@ -33,9 +33,7 @@ PlasmaCore.Dialog {
     visible: false
 
     function expire() {
-        if (entry.type === NM.Notifications.JobType && !settings.permanentJobPopups)
-            entry.dismissed = true;
-        else if (entry.resident || (contents.hasActions && !entry.transient))
+        if (entry.resident || (contents.hasActions && !entry.transient))
             entry.expired = true;
         else
             source.expire(source.index(row, 0));
@@ -62,9 +60,9 @@ PlasmaCore.Dialog {
                 PathQuad { x: surface.width - 0.5; y: 4.5; controlX: surface.width - 0.5; controlY: 0.5 }
                 PathLine { x: surface.width - 0.5; y: surface.bodyHeight - 4.5 }
                 PathQuad { x: surface.width - 4.5; y: surface.bodyHeight - 0.5; controlX: surface.width - 0.5; controlY: surface.bodyHeight - 0.5 }
-                PathLine { x: popup.tailOffset + 9; y: surface.bodyHeight - 0.5 }
+                PathLine { x: popup.tailOffset + 3; y: surface.bodyHeight - 0.5 }
                 PathLine { x: popup.tailOffset; y: surface.height - 0.5 }
-                PathLine { x: popup.tailOffset - 9; y: surface.bodyHeight - 0.5 }
+                PathLine { x: popup.tailOffset - 12; y: surface.bodyHeight - 0.5 }
                 PathLine { x: 4.5; y: surface.bodyHeight - 0.5 }
                 PathQuad { x: 0.5; y: surface.bodyHeight - 4.5; controlX: 0.5; controlY: surface.bodyHeight - 0.5 }
                 PathLine { x: 0.5; y: 4.5 }
@@ -73,9 +71,9 @@ PlasmaCore.Dialog {
         }
 
         Flickable {
-            x: 6
-            y: (popup.tailAtBottom ? 0 : popup.tailHeight) + 5
-            width: surface.width - 12
+            x: 5
+            y: (popup.tailAtBottom ? 0 : popup.tailHeight) + 7
+            width: surface.width - 14
             height: surface.bodyHeight - 10
             contentWidth: width
             contentHeight: contents.implicitHeight

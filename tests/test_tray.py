@@ -9,7 +9,7 @@ import time
 
 from PIL import Image, ImageChops
 
-from lab import ROOT, VM, digest, shot, user, vmctl, wait_for
+from lab import ROOT, VM, digest, kwin_query, shot, user, vmctl, wait_for
 from test_calendar import is_open
 from test_taskbar import FACE, SHADOW, WHITE, tray_left
 
@@ -78,7 +78,7 @@ def label(words, name, where=lambda x, y: True):
 def has_shortcut(shortcut):
     layout = user(f'cat {APPLET_CONFIG}')
     # Assert the shortcut belongs to Notifications itself, not the tray or another applet.
-    group = re.search(r'(?m)^(\[Containments\].*\[Applets\]\[\d+\])\n[^\[]*?^plugin=org\.kde\.plasma\.notifications$', layout)
+    group = re.search(r'(?m)^(\[Containments\].*\[Applets\]\[\d+\])\n[^\[]*?^plugin=org\.win7classic\.notifications$', layout)
     assert group, 'Notifications is not in the live applet config'
     if f'{group[1]}[Shortcuts]\nglobal={shortcut}' in layout:
         return group[1].split('[')[-1].rstrip(']')
@@ -140,8 +140,17 @@ def main(out, function_key, remove_tray=False):
         wait_for(lambda: snap('overflow-dismissed').crop(crop).tobytes() == image.crop(crop).tobytes(), 'Escape closes overflow')
         click(speaker)
         vmctl.pointer(VM, 820, 690)
-        wait_for(lambda: {'Applications', 'Line', 'Out', 'In'} <= {text for text, _ in words('volume-controls', crop)},
-                 'stock volume controls open')
+        def classic_volume_open():
+            for row in kwin_query('for (const w of workspace.windowList()) if (w.resourceClass === "org.kde.plasmashell" && !w.popupWindow) { const g=w.frameGeometry; emit(g.x,g.y,g.width,g.height); }'):
+                x, y, w, h = map(float, row)
+                if (w, h) == (70, 291) and abs(x + w / 2 - speaker[0]) <= 2:
+                    popup = snap('volume-controls')
+                    box = tuple(map(round, (x, y, x+w, y+h)))
+                    return popup.getpixel((round(x+5), round(y+16))) == (255, 255, 255) and any(
+                        word == 'Mixer' for word, _ in ocr(popup, box))
+            return False
+
+        wait_for(classic_volume_open, 'compact white vertical-slider volume popup opens over its genuine icon')
         click((820, 690))
         wait_for(lambda: snap('volume-click-away').crop(crop).tobytes() == image.crop(crop).tobytes(), 'volume click-away')
         print(user("systemd-run --user --wait --pipe --collect -q /usr/bin/python - <<'PYQT'\n" + QICON + "PYQT"))
@@ -174,7 +183,7 @@ def main(out, function_key, remove_tray=False):
                       'if (w.type === "org.win7classic.tray") w.remove()')
             user(f"qdbus6 org.kde.plasmashell /PlasmaShell evaluateScript '{script}'")
             wait_for(lambda: 'plugin=org.win7classic.tray\n' not in user(f'cat {APPLET_CONFIG}') + '\n'
-                     and 'plugin=org.kde.plasma.notifications\n' not in user(f'cat {APPLET_CONFIG}') + '\n',
+                     and 'plugin=org.win7classic.notifications\n' not in user(f'cat {APPLET_CONFIG}') + '\n',
                      'Plasma finalized tray and child removal')
             assert user(f'{call} shortcutKeys {binding}') == keys_before_remove, 'dormant registration was not reproduced'
             snap('tray-removed')
@@ -184,7 +193,7 @@ def main(out, function_key, remove_tray=False):
             time.sleep(3)
             key(*keys)
             wait_for(lambda: {'disturb', 'W39-Shortcut'} <= {
-                word for word, _ in words('shortcut-history', (880, 320, 1065, 580))
+                word for word, _ in words('shortcut-history', (800, 280, 1275, 754))
             }, 'real history, not just a toast, opened by the saved shortcut')
             click((810, 540))
             print('Hardware chord opens native notification history')
