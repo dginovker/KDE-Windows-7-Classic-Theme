@@ -2029,13 +2029,15 @@ private:
         // generator belongs to the view; recreate it while the listing is empty.
         auto *old = files->view();
         const bool focused = old->hasFocus();
+        const int size = old->iconSize().width();
         const bool detailsView = viewIndex == Details;
         const auto columns = detailsView ? static_cast<QTreeView *>(old)->header()->saveState() : QByteArray();
         auto *splitter = qobject_cast<QSplitter *>(old->parentWidget());
         const auto sizes = splitter ? splitter->sizes() : QList<int>();
         files->setInlinePreviewShown(thumbnails && viewIndex != Details);
         files->setViewMode(files->viewMode());
-        sizeFileView();
+        setFileIconSize(size);
+        applyGrid();
         if (detailsView) {
             auto *header = static_cast<QTreeView *>(files->view())->header();
             const QSignalBlocker block(header);
@@ -2299,11 +2301,16 @@ private:
     {
         static constexpr int sizes[] = {256, 96, 48, 16, 16, 16, 48, 32};
         const int size = sizes[viewIndex];
+        setFileIconSize(size);
+        iconSize = viewIndex <= Medium ? size : 0;
+        applyGrid();
+    }
+
+    void setFileIconSize(int size)
+    {
         files->setIconSize(size);
         // A new KIO view can start with the preview size despite a matching cached zoom.
         files->view()->setIconSize(QSize(size, size));
-        iconSize = viewIndex <= Medium ? size : 0;
-        applyGrid();
     }
 
     void applyGrid()
@@ -2522,7 +2529,8 @@ private:
         if (foldersInNewWindow)
             prepareVisit(this, listingRoot(url), [url](PreparedVisit visit) { (new Explorer(url, std::move(visit)))->show(); });
         else
-            navigate(url);
+            // Navigation can replace the viewport that is still handling activation.
+            QMetaObject::invokeMethod(this, [this, url] { navigate(url); }, Qt::QueuedConnection);
     }
 
     void openItems(const KFileItemList &items)
