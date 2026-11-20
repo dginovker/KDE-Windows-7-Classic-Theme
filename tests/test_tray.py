@@ -145,7 +145,7 @@ def main(out, function_key, remove_tray=False):
                 x, y, w, h = map(float, row)
                 if (w, h) == (70, 291) and abs(x + w / 2 - speaker[0]) <= 2:
                     popup = snap('volume-controls')
-                    box = tuple(map(round, (x+1, y+h-43, x+w-1, y+h-1)))
+                    box = tuple(map(round, (x+2, y+h-37, x+w-2, y+h-2)))
                     return popup.getpixel((round(x+5), round(y+16))) == (255, 255, 255) and any(
                         word == 'Mixer' for word, _ in ocr(popup, box))
             return False
