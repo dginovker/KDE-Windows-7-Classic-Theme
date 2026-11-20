@@ -154,6 +154,9 @@ def run(out, scale, base, exe, unavailable):
         expect('tester', 'back-still-targets-home')
         live_address('/home/tester')
         if unavailable == 'places':
+            # The Places popup is a Libraries-only hit target; ordinary Home still opens the editor.
+            click(pt(72, 197))
+            expect('Libraries', 'reopen-libraries-before-places')
             show_places('address-places-restored')
             expect(FOLDERS[0], 'places-opens-restored-documents')
             live_address(docs)

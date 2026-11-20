@@ -775,7 +775,7 @@ protected:
         p.drawPixmap(width() - 23, 7, asset(hovered == SearchPart ? QStringLiteral("search-hot") : QStringLiteral("search-normal")));
     }
 
-    bool pressOpens(int part) const override { return part >= HistoryPart && part < parts.size() - 1; }
+    bool pressOpens(int part) const override { return part == LibraryPlacesPart || part >= HistoryPart; }
 
     void enterEvent(QEnterEvent *event) override { trackNavigationTip(event->position().toPoint()); }
     void mouseMoveEvent(QMouseEvent *event) override
@@ -802,7 +802,7 @@ protected:
     }
 
 private:
-    enum { BackPart, ForwardPart, SearchPart, RefreshPart, HistoryPart };  // crumb parts follow HistoryPart
+    enum { BackPart, ForwardPart, SearchPart, RefreshPart, LibraryPlacesPart, EditPart, HistoryPart };  // crumb parts follow HistoryPart
     struct Crumb {
         QString label;
         QUrl url;
@@ -904,30 +904,29 @@ private:
             x = crumb.arrow.left() + 11;
             crumbs.append(crumb);
         }
+        const QRect placesArrow = crumbs.first().arrow;
+        const auto openPlaces = [this, placesArrow] {
+            QMenu menu;
+            for (const auto &[name, url] : places())
+                menu.addAction(name, this, [this, url] { go(url); });
+            menu.exec(mapToGlobal(QPoint(placesArrow.left(), 28)));
+        };
         parts = {
             {QRect(2, 2, 30, 32), [this] { back(); }, backEnabled},
             {QRect(32, 2, 28, 32), [this] { forward(); }, forwardEnabled},
             {QRect(width() - 23, 7, 21, 21), [this] { search->setFocus(); }},
             {QRect(box.right() - 21, 8, 21, 20), [this] { refresh(); }},
+            // Only Libraries gives Places priority over the published click-to-edit area.
+            {placesArrow, openPlaces, location == librariesUrl},
+            {box.adjusted(0, 0, -41, 0), [this] { editAddress(); }},
             {QRect(box.right() - 41, 8, 19, 20), [this, box] { menuOf(history(), QRect(box.left(), box.bottom(), 0, 0)); }, backEnabled || forwardEnabled},
+            {placesArrow, openPlaces, location != librariesUrl},
         };
-        for (int i = 0; i < crumbs.size(); ++i) {
+        for (int i = 1; i < crumbs.size(); ++i) {
             const Crumb crumb = crumbs[i];
-            if (i)
-                parts.insert(HistoryPart + 1, {crumb.text.adjusted(-3, -2, 3, 2), [this, crumb] { go(crumb.url); }});
-            parts.insert(HistoryPart + 1, {crumb.arrow, [this, i, crumb] {
-                                               if (!i) {
-                                                   QMenu menu;
-                                                   for (const auto &[name, url] : places())
-                                                       menu.addAction(name, this, [this, url] { go(url); });
-                                                   menu.exec(mapToGlobal(QPoint(crumb.arrow.left(), 28)));
-                                                   return;
-                                               }
-                                               subfolderMenu(crumb.url, QPoint(crumb.arrow.left(), 28));
-                                           }});
+            parts.insert(HistoryPart + 1, {crumb.text.adjusted(-3, -2, 3, 2), [this, crumb] { go(crumb.url); }});
+            parts.insert(HistoryPart + 1, {crumb.arrow, [this, crumb] { subfolderMenu(crumb.url, QPoint(crumb.arrow.left(), 28)); }});
         }
-        // The editable background overlaps the places and breadcrumb controls, which must win hit testing.
-        parts.append({box.adjusted(0, 0, -41, 0), [this] { editAddress(); }});
         update();
     }
 
