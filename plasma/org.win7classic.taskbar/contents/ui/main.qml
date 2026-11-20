@@ -52,6 +52,7 @@ PlasmoidItem {
     TaskManager.ActivityInfo { id: activityInfo }
     TaskManager.TasksModel {
         id: tasksModel
+        onActiveTaskChanged: taskMenu.cancelPending()
         groupMode: TaskManager.TasksModel.GroupDisabled
         sortMode: TaskManager.TasksModel.SortManual
         // Windows 7 puts a running app's window button where its pinned launcher was.
@@ -279,6 +280,9 @@ PlasmoidItem {
                                 Qt.callLater(() => { task.hoverReentered = mouse.containsMouse; });
                         }
                         onExited: {
+                            // Wayland does not tell the panel what was clicked after the pointer leaves it.
+                            if (taskMenu.taskButton === task)
+                                taskMenu.cancelPending();
                             task.hoverReentered = false;
                             task.cancelHover();
                             tooltip.visible = false;
@@ -288,6 +292,7 @@ PlasmoidItem {
                         property bool dragged: false
                         property real pressX: 0
                         onPressed: (event) => {
+                            taskMenu.cancelPending();
                             task.cancelHover();
                             tooltip.visible = false;
                             if (hoverRow.item)

@@ -2,6 +2,8 @@
 // and drawn with Windows' own art (explorer/assets, see reference/tools/extract-assets.py), around KDE's KIO file
 // widgets, which do the actual file management.
 #include "ClassicPrimitives.h"
+#include "ExplorerFrequent.h"
+#include "ExplorerPrivacy.h"
 #include "FolderProperties.h"
 #include <KApplicationTrader>
 #include <KConfig>
@@ -36,6 +38,10 @@
 #include <QCommandLineParser>
 #include <QCryptographicHash>
 #include <QDateTime>
+#include <QDBusConnection>
+#include <QDBusMessage>
+#include <QDBusPendingReply>
+#include <QDBusServiceWatcher>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QDir>
@@ -45,6 +51,7 @@
 #include <QFileInfo>
 #include <QFileSystemWatcher>
 #include <QFontMetricsF>
+#include <QFutureWatcher>
 #include <QGroupBox>
 #include <QHeaderView>
 #include <QIdentityProxyModel>
@@ -62,10 +69,12 @@
 #include <QPrintDialog>
 #include <QPrinter>
 #include <QPointer>
+#include <QPromise>
 #include <QRadioButton>
 #include <QRegularExpression>
 #include <QScreen>
 #include <QScopedValueRollback>
+#include <QSemaphore>
 #include <QSortFilterProxyModel>
 #include <QScrollBar>
 #include <QSignalBlocker>
@@ -80,6 +89,7 @@
 #include <QTextDocument>
 #include <QTabWidget>
 #include <QTimer>
+#include <QThreadPool>
 #include <QTreeView>
 #include <QVBoxLayout>
 
@@ -467,6 +477,8 @@ public:
     using KDirOperator::KDirOperator;
     std::function<void(const KFileItem &, const QPoint &)> onMenu;
     std::function<void(const QUrl &)> onOpenFolder;
+    std::function<void(const QUrl &, bool)> navigate;
+    void setUrl(const QUrl &url, bool clearForward) override { navigate(url, clearForward); }
     int presentation = Large;
     void syncSelectionActions() { updateSelectionDependentActions(); }
 
@@ -1386,10 +1398,136 @@ private:
     }
 };
 
+class ActivityChanges : public QObject
+{
+    Q_OBJECT
+public:
+    explicit ActivityChanges(QObject *parent) : QObject(parent)
+    {
+        const auto query = ExplorerPrivacy::activityQuery();
+        auto bus = QDBusConnection::sessionBus();
+        subscribed = bus.connect(query.service(), query.path(), query.interface(),
+            QStringLiteral("CurrentActivityChanged"), this, SLOT(invalidate()));
+        auto *service = new QDBusServiceWatcher(query.service(), bus, QDBusServiceWatcher::WatchForOwnerChange, this);
+        connect(service, &QDBusServiceWatcher::serviceOwnerChanged, this, &ActivityChanges::invalidate);
+    }
+    quint64 generation() const { return subscribed ? epoch : 0; }
+
+private slots:
+    void invalidate() { ++epoch; }
+
+private:
+    bool subscribed;
+    quint64 epoch = 1;
+};
+
+static ActivityChanges &activityChanges()
+{
+    static auto *monitor = new ActivityChanges(qApp);
+    return *monitor;
+}
+
+struct FrequentVisit {
+    static inline QSemaphore slotsAvailable{32};
+    QUrl url;
+    quint64 activityGeneration;
+    std::unique_ptr<ExplorerPrivacy> permit;
+    ~FrequentVisit() { slotsAvailable.release(); }
+};
+
+static QThreadPool &frequentPool(bool preparing)
+{
+    struct Pool : QThreadPool { explicit Pool(int threads) { setMaxThreadCount(threads); } };
+    static Pool prepare(2), record(1);
+    return preparing ? prepare : record;
+}
+
+static QUrl listingRoot(QUrl url)
+{
+    // KDirLister cleans paths even when KDirOperator's startup URL still contains dot segments.
+    url.setPath(QDir::cleanPath(url.path()));
+    return url.adjusted(QUrl::StripTrailingSlash);
+}
+
+using PreparedVisit = std::shared_ptr<FrequentVisit>;
+
+static void prepareVisit(QObject *context, const QUrl &url, std::function<void(PreparedVisit)> ready)
+{
+    if (!ExplorerFrequent::candidate(url)) {
+        ready({});
+        return;
+    }
+    const auto generation = activityChanges().generation();
+    if (!generation) {
+        qWarning("win7-explorer: cannot watch Activity changes; visit not recorded");
+        ready({});
+        return;
+    }
+    auto promise = std::make_shared<QPromise<PreparedVisit>>();
+    auto future = promise->future();
+    promise->start();
+    if (!frequentPool(true).tryStart([promise, url, generation] {
+        if (FrequentVisit::slotsAvailable.tryAcquire()) {
+            auto visit = std::make_shared<FrequentVisit>();
+            visit->url = url;
+            visit->activityGeneration = generation;
+            visit->permit = std::make_unique<ExplorerPrivacy>();
+            if (!visit->permit->visitActivity().isEmpty() && visit->permit->bindDestination(url.toLocalFile()))
+                promise->addResult(std::move(visit));
+        } else {
+            qWarning("win7-explorer: Frequent recorder is busy; visit not recorded");
+        }
+        promise->finish();
+    })) {
+        qWarning("win7-explorer: Frequent policy worker is busy; visit not recorded");
+        ready({});
+        return;
+    }
+    // Navigation waits only for a bounded preflight, never for an I/O request to return.
+    // Once navigation has started without a permit, a late result cannot authorize it.
+    auto *deadline = new QTimer(context);
+    deadline->setSingleShot(true);
+    deadline->setTimerType(Qt::PreciseTimer);
+    auto *watch = new QFutureWatcher<PreparedVisit>(deadline);
+    QObject::connect(deadline, &QTimer::timeout, deadline, [deadline, watch, ready] {
+        QObject::disconnect(watch, nullptr, deadline, nullptr);
+        watch->future().cancel();
+        deadline->deleteLater();
+        qWarning("win7-explorer: Frequent preflight timed out; visit not recorded");
+        ready({});
+    });
+    QObject::connect(watch, &QFutureWatcher<PreparedVisit>::finished, deadline, [deadline, watch, ready] {
+        deadline->stop();
+        const auto permit = watch->future().resultCount() ? watch->result() : PreparedVisit{};
+        deadline->deleteLater();
+        ready(permit);
+    });
+    watch->setFuture(future);
+    deadline->start(180);
+}
+
+static void completeVisit(PreparedVisit visit)
+{
+    if (activityChanges().generation() != visit->activityGeneration)
+        return;
+    // A reply on the same bus fences Activity signals already sent when KIO finished.
+    // A sample alone would miss a public → private → public transition during listing.
+    auto *watch = new QDBusPendingCallWatcher(
+        QDBusConnection::sessionBus().asyncCall(ExplorerPrivacy::activityQuery(), 100), qApp);
+    QObject::connect(watch, &QDBusPendingCallWatcher::finished, watch, [watch, visit = std::move(visit)] {
+        const QDBusPendingReply<QString> reply = *watch;
+        watch->deleteLater();
+        if (activityChanges().generation() != visit->activityGeneration || reply.isError()
+            || reply.value() != visit->permit->visitActivity())
+            return;
+        frequentPool(false).start([visit] { ExplorerFrequent::record(visit->url, *visit->permit); });
+    });
+}
+
 class Explorer : public QMainWindow
 {
 public:
-    explicit Explorer(const QUrl &start)
+    explicit Explorer(const QUrl &start, PreparedVisit visit = {})
     {
         setAttribute(Qt::WA_DeleteOnClose);
         auto *central = new QWidget;
@@ -1399,6 +1537,9 @@ public:
         setCentralWidget(central);
 
         files = new Files(isOverviewUrl(start) ? QUrl::fromLocalFile(QDir::homePath()) : start, this);
+        if (visit && visit->url == listingRoot(files->url()))
+            pendingVisit = std::move(visit);
+        files->navigate = [this](const QUrl &url, bool clearForward) { navigate(url, clearForward); };
         auto *properties = files->action(KDirOperator::Properties);
         // Keep KDirOperator's action state and shortcut, but use Explorer's native-dialog subclass.
         disconnect(properties, &QAction::triggered, files, nullptr);
@@ -1487,14 +1628,23 @@ public:
                 invalidateListing();
         };
         connect(lister, &KDirLister::started, this, invalidateCurrent);
-        connect(lister, &KDirLister::listingDirCanceled, this, invalidateCurrent);
+        connect(lister, &KDirLister::listingDirCanceled, this, [this, invalidateCurrent](const QUrl &url) {
+            invalidateCurrent(url);
+            if (pendingVisit && pendingVisit->url == listingRoot(url))
+                pendingVisit.reset();
+        });
+        connect(lister, &KDirLister::jobError, this, [this] { pendingVisit.reset(); });
         connect(lister, &KDirLister::listingDirCompleted, this, [this](const QUrl &url) {
             if (listingRoot(url) == listingRoot(files->url())) {
                 listedUrl = listingRoot(url);
+                if (pendingVisit && pendingVisit->url == listedUrl)
+                    completeVisit(std::exchange(pendingVisit, {}));
                 QMetaObject::invokeMethod(this, &Explorer::updateDetails, Qt::QueuedConnection);
             }
         });
         connect(lister, &KDirLister::redirection, this, [this](const QUrl &oldUrl, const QUrl &newUrl) {
+            // KDirOperator also emits urlEntered for a root rename, which isn't a visit.
+            pendingVisit.reset();
             // A root rename keeps the rows and does not list again; other root redirects emit clear first.
             if (listedUrl == listingRoot(oldUrl) && listingRoot(newUrl) == listingRoot(files->url())) {
                 listedUrl = listingRoot(newUrl);
@@ -1592,6 +1742,8 @@ public:
         }
     }
 
+    bool isAt(const QUrl &url) const { return listingRoot(files->url()) == listingRoot(url); }
+
 protected:
     // KDirOperator's icon view sizes its grid from the font after every resize; Explorer's grid is reapplied after it.
     bool eventFilter(QObject *watched, QEvent *event) override
@@ -1643,34 +1795,6 @@ private:
         return true;
     }
 
-    void navigate(const QUrl &url)
-    {
-        if (canNavigateTo(url))
-            openLocation(url);
-    }
-
-    void openLocation(const QUrl &url)
-    {
-        if (isOverviewUrl(url)) {
-            entered(url);
-            return;
-        }
-        if (inOverview()) {
-            // Match KDirOperator's early return, which does not emit urlEntered.
-            auto normalized = url.isValid() ? url.adjusted(QUrl::NormalizePathSegments) : QUrl::fromLocalFile(QDir::homePath());
-            const auto path = normalized.path();
-            if (!path.isEmpty() && !path.endsWith(QLatin1Char('/'))) {
-                normalized.setPath(path + QLatin1Char('/'));
-            }
-            if (normalized.matches(files->url(), QUrl::StripTrailingSlash)) {
-                entered(files->url());
-                return;
-            }
-        }
-        QScopedValueRollback opening(openingFolder, true);
-        files->setUrl(url, true);
-    }
-
     void refresh()
     {
         if (inOverview()) {
@@ -1689,6 +1813,8 @@ private:
     QMenu *openMenu = new QMenu(this);
     QLabel *empty;
     QUrl listedUrl;
+    PreparedVisit pendingVisit;
+    quint64 navigation = 0;
     QActionGroup *views = new QActionGroup(this);
     QActionGroup *backgroundViews = new QActionGroup(this);
     QMenuBar *fileMenuBar = new QMenuBar;
@@ -2058,8 +2184,44 @@ private:
         }
     }
 
+    void navigate(const QUrl &url, bool clearForward = true, qsizetype target = -1)
+    {
+        if (!canNavigateTo(url))
+            return;
+        const auto request = ++navigation;
+        const auto normalized = url.isValid() ? url : QUrl::fromLocalFile(QDir::homePath());
+        const auto folder = listingRoot(normalized);
+        const auto move = [this, target](auto &&open) {
+            const auto previous = position;
+            stepping = target >= 0;
+            if (stepping)
+                position = target;
+            open();
+            if (std::exchange(stepping, false))
+                position = previous;
+        };
+        if (isOverviewUrl(url)) {
+            pendingVisit.reset();
+            move([&] { entered(url); });
+        } else if (folder == listingRoot(files->url())) {
+            // The hidden folder is already listed; KIO will not emit urlEntered again.
+            if (inOverview())
+                move([&] { entered(files->url()); });
+        } else {
+            prepareVisit(this, folder, [this, request, url, clearForward, move](PreparedVisit visit) {
+                if (request != navigation)
+                    return;
+                pendingVisit = std::move(visit);
+                QScopedValueRollback opening(openingFolder, true);
+                move([&] { files->KDirOperator::setUrl(url, clearForward); });
+            });
+        }
+    }
+
     void entered(const QUrl &url)
     {
+        if (pendingVisit && pendingVisit->url != listingRoot(url))
+            pendingVisit.reset();
         const bool special = isOverviewUrl(url);
         if (special != inOverview()) {
             for (auto *a : folderCommands)
@@ -2108,14 +2270,7 @@ private:
     {
         if (position + by < 0 || position + by >= history.size())
             return;
-        const QUrl target = history[position + by];
-        if (!canNavigateTo(target))
-            return;
-        position += by;
-        stepping = true;
-        openLocation(target);
-        if (std::exchange(stepping, false))
-            position -= by;
+        navigate(history[position + by], true, position + by);
     }
 
     // Windows draws no focus rectangle until the keyboard is used, but loading and focusing the view make the first
@@ -2131,13 +2286,6 @@ private:
     }
 
     QSortFilterProxyModel *proxy() const { return static_cast<QSortFilterProxyModel *>(files->view()->model()); }
-
-    static QUrl listingRoot(QUrl url)
-    {
-        // KDirLister cleans paths even when KDirOperator's startup URL still contains dot segments.
-        url.setPath(QDir::cleanPath(url.path()));
-        return url.adjusted(QUrl::StripTrailingSlash);
-    }
 
     void updateDetails()
     {
@@ -2200,9 +2348,9 @@ private:
     void openFolder(const QUrl &url)
     {
         if (foldersInNewWindow)
-            (new Explorer(url))->show();
+            prepareVisit(this, listingRoot(url), [url](PreparedVisit visit) { (new Explorer(url, std::move(visit)))->show(); });
         else
-            files->setUrl(url, true);
+            navigate(url);
     }
 
     void openItems(const KFileItemList &items)
@@ -2364,10 +2512,48 @@ int main(int argc, char **argv)
     // Matches the .desktop file, so the taskbar groups windows under it and shows its icon.
     app.setDesktopFileName(QStringLiteral("org.win7classic.explorer"));
     QCommandLineParser args;
+    const QCommandLineOption frequent(QStringLiteral("frequent-folder"), QStringLiteral("Open a Frequent folder"), QStringLiteral("path"));
+    args.addOption(frequent);
     args.addPositionalArgument(QStringLiteral("url"), QStringLiteral("Folder to open (default: home)"));
     args.process(app);
     const QStringList urls = args.positionalArguments();
-    for (const QString &u : urls.isEmpty() ? QStringList{QDir::homePath()} : urls)
-        (new Explorer(QUrl::fromUserInput(u, QDir::currentPath(), QUrl::AssumeLocalFile)))->show();
-    return app.exec();
+    if (args.isSet(frequent)) {
+        const auto path = args.value(frequent);
+        const auto url = QUrl::fromLocalFile(path);
+        const auto error = [](const QString &message) {
+            QMessageBox::warning(nullptr, QStringLiteral("Windows Explorer"), message);
+            return 1;
+        };
+        if (!urls.isEmpty() || !ExplorerFrequent::available(path))
+            return error(QStringLiteral("This folder is no longer available."));
+        if (ExplorerFrequent::listing({path}) != ExplorerFrequent::Listing::Valid)
+            return error(QStringLiteral("This folder is no longer in Explorer Frequent history."));
+        QTimer::singleShot(0, &app, [&app, path, url, error] {
+            prepareVisit(&app, listingRoot(url), [&app, path, url, error](PreparedVisit visit) {
+                auto *window = new Explorer(url, std::move(visit));
+                if (!window->isAt(url) || !ExplorerFrequent::available(path)) {
+                    delete window;
+                    app.exit(error(QStringLiteral("This folder is no longer available.")));
+                } else if (ExplorerFrequent::listing({path}) != ExplorerFrequent::Listing::Valid) {
+                    delete window;
+                    app.exit(error(QStringLiteral("This folder is no longer in Explorer Frequent history.")));
+                } else {
+                    window->show();
+                }
+            });
+        });
+    } else if (urls.isEmpty()) {
+        (new Explorer(QUrl::fromLocalFile(QDir::homePath())))->show();
+    } else {
+        for (const auto &u : urls) {
+            const auto url = QUrl::fromUserInput(u, QDir::currentPath(), QUrl::AssumeLocalFile);
+            prepareVisit(&app, listingRoot(url), [url](PreparedVisit visit) { (new Explorer(url, std::move(visit)))->show(); });
+        }
+    }
+    const int result = app.exec();
+    frequentPool(true).waitForDone();
+    frequentPool(false).waitForDone();
+    return result;
 }
+
+#include "main.moc"

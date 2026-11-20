@@ -17,9 +17,14 @@ Window {
     y: Screen.virtualY + (Screen.height - height) / 2
 
     function show(action, error, member) {
-        title = action;
-        message = action + " failed.\n\n" + error.name + "\n" + error.message;
-        console.error("win7-classic: logind." + member + ": " + message);
+        const msg = action + " failed.\n\n" + error.name + "\n" + error.message;
+        console.error("win7-classic: logind." + member + ": " + msg);
+        showFailure(action, msg);
+    }
+
+    function showFailure(heading, msg) {
+        title = heading;
+        message = msg;
         visible = true;
         requestActivate();
         body.forceActiveFocus();

@@ -6,19 +6,25 @@ import time
 
 from PIL import Image
 
-from lab import VM, activate, install, kwin_script, shot, toggle, user, vmctl, wait_for, windows
+from lab import VM, activate, executable, install, kwin_script, shot, toggle, user, vmctl, wait_for, windows
 from test_upgrade import output_name
+from explorer_frequent_fixture import fixture, stash
+from test_explorer_frequent import PROFILE, STATE, panel
 
 EXPLORER = 'org.win7classic.explorer'
 OTHER = 'org.kde.konsole'
 FACE, WHITE, BLACK, NAVY = (212, 208, 200), (255, 255, 255), (0, 0, 0), (10, 36, 106)
 
 
-def run(out, scale):
+def run(out, scale, *, packaged):
     tag = f'{scale:g}x'
     px = lambda x: round(x * scale)
     move = lambda x, y, button=None: vmctl.pointer(VM, px(x), 800 - px(y), button)
-    toggle('windows')
+    toggle('windows', packaged=packaged)
+    panel('w.writeConfig("launchers", ["applications:org.kde.kate.desktop", '
+          '"applications:org.win7classic.explorer.desktop"]);')
+    wait_for(lambda: 'launchers=applications:org.kde.kate.desktop,applications:org.win7classic.explorer.desktop'
+             in user('grep ^launchers= ~/.config/plasma-org.kde.plasma.desktop-appletsrc'), 'test pins saved')
 
     def capture(name):
         time.sleep(.45)
@@ -27,17 +33,20 @@ def run(out, scale):
         return Image.open(path).convert('RGB')
 
     def frame(name, left, height):
+        time.sleep(.22)  # Leave the task only after the menu has had time to map.
         move(640 / scale, 150)
         img = capture(name)
         bottom = 800 - px(44)
-        y = bottom - px(10)
-        # Match a wide black-sided run of ButtonFace, not merely one dark pixel.
-        row = [img.getpixel((x, y)) for x in range(1280)]
-        edges = [i for i, c in enumerate(row) if c == BLACK]
-        matches = [(a, b) for a, b in zip(edges, edges[1:]) if abs(b - a + 1 - px(230)) <= 2
-                   and all(c == FACE for c in row[a+2:b-1])]
+        top = bottom - px(height)
+        # The first interior scanline is above all action text and artwork, even in the compact menu.
+        matches = set()
+        for y in range(top + 1, top + px(3) + 1):
+            row = [img.getpixel((x, y)) for x in range(1280)]
+            edges = [i for i, c in enumerate(row) if c == BLACK]
+            matches.update((a, b) for a, b in zip(edges, edges[1:]) if abs(b - a + 1 - px(230)) <= 2
+                           and all(c == FACE for c in row[a+2:b-1]))
         assert len(matches) == 1, (name, 'jump list edges', matches)
-        a, b = matches[0]
+        (a, b), = matches
         assert abs(a - px(left)) <= 1, (name, 'wrong left edge', a, px(left))
         for logical_y in (44, 44 + height):
             expected = 800 - px(logical_y)
@@ -53,10 +62,10 @@ def run(out, scale):
     frame('left-clamped', 0, 72)
     vmctl.keys(VM, 'KEY_ESC')
     move(137, 21, 'right')
-    frame('closed-pin', 22, 72)
+    frame('closed-pin', 22, 50)
     vmctl.keys(VM, 'KEY_DOWN')
     hot = capture('keyboard-selection')
-    assert hot.getpixel((px(220), 800 - px(90))) == NAVY, 'Down did not select the launch action'
+    assert hot.getpixel((px(220), 800 - px(77))) == NAVY, 'Down did not select the launch action'
     vmctl.keys(VM, 'KEY_ENTER')
     wait_for(lambda: EXPLORER in windows(), 'keyboard launches actual Explorer')
     user('systemd-run --user --collect -q konsole')
@@ -72,7 +81,7 @@ def run(out, scale):
     before = capture('active-before')
     face(before, WHITE)
     move(193, 21, 'right')
-    active = frame('active-open', 78, 94)
+    active = frame('active-open', 78, 72)
     face(active, WHITE)
     caption = (px(153), 800-px(36), px(239), 800-px(8))
     assert active.crop(caption) == before.crop(caption), 'jump list changed the active caption'
@@ -84,7 +93,7 @@ def run(out, scale):
 
     activate(EXPLORER)
     move(193, 21, 'right')
-    reopened = frame('active-reopened', 78, 94)
+    reopened = frame('active-reopened', 78, 72)
     face(reopened, WHITE)
     assert reopened.crop(caption) == before.crop(caption)
     vmctl.pointer(VM, px(600), px(220), 'left')
@@ -96,18 +105,18 @@ def run(out, scale):
     assert away.crop(caption) == regular.crop(caption), 'click-away did not restore the regular caption'
 
     move(193, 21, 'right')
-    face(frame('inactive-open', 78, 94), FACE)
+    face(frame('inactive-open', 78, 72), FACE)
     assert windows()[EXPLORER][1:] == (False, False), 'opening the list changed an inactive window'
     vmctl.keys(VM, 'KEY_ESC')
     activate(EXPLORER)
     move(193, 21, 'left')
     wait_for(lambda: windows()[EXPLORER][2], 'Explorer minimized')
     move(193, 21, 'right')
-    face(frame('minimized-open', 78, 94), FACE)
+    face(frame('minimized-open', 78, 72), FACE)
     assert windows()[EXPLORER][2], 'opening the list restored a minimized window'
     vmctl.keys(VM, 'KEY_ESC')
     user('pkill -x win7-explorer; pkill -x konsole; true')
-    toggle('current')
+    toggle('current', packaged=packaged)
     print(f'{tag}: left clamp, centered pin/running list, real keyboard launch, Escape, '
           'active-to-inactive face and caption on click-away, inactive/minimized unchanged', flush=True)
 
@@ -115,25 +124,30 @@ def run(out, scale):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('out', type=Path)
+    parser.add_argument('--packaged', action='store_true')
     args = parser.parse_args()
     args.out.mkdir(parents=True, exist_ok=True)
     vmctl.start(VM)
-    install()
+    if not args.packaged:
+        install()
     output = output_name()
-    user('qdbus6 org.kde.plasmashell /PlasmaShell evaluateScript "for (const w of panels()[0].widgets()) '
-         'if (w.type == \\"org.kde.plasma.icontasks\\") { w.currentConfigGroup = [\\"General\\"]; '
-         'w.writeConfig(\\"launchers\\", [\\"applications:org.kde.kate.desktop\\", '
-         '\\"applications:org.kde.dolphin.desktop\\"]); }"')
+    with fixture('jump-list') as restore:
+        stash(restore, PROFILE, 'profile')
+        stash(restore, STATE, 'history')
+        exercise(args.out, output, packaged=args.packaged)
+
+
+def exercise(out, output, *, packaged):
     try:
         for scale in (1, 1.5):
             user(f'kscreen-doctor output.{output}.scale.{scale}')
             time.sleep(2)
-            run(args.out, scale)
+            run(out, scale, packaged=packaged)
     finally:
         user('pkill -x win7-explorer; pkill -x konsole; true')
         user(f'kscreen-doctor output.{output}.scale.1')
-        if user('~/.local/bin/win7-classic status') == 'windows':
-            toggle('current')
+        if user(f'{executable("win7-classic", packaged)} status') == 'windows':
+            toggle('current', packaged=packaged)
 
 
 if __name__ == '__main__':
