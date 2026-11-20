@@ -11,10 +11,17 @@ Stock.FullRepresentation {
     readonly property bool inhibited: Stock.Globals.inhibited
 
     anchors.fill: parent
+    readonly property bool hasAnchor: !!appletInterface?.compactRepresentationItem
+    onHasAnchorChanged: {
+        if (hasAnchor)
+            Stock.Globals.adopt(appletInterface);
+        else
+            Stock.Globals.forget(appletInterface);
+    }
+
     Component.onCompleted: {
         // Use KDE's unmodified history, DND, and shortcuts, but only one toast renderer.
         Stock.Globals.popupInstantiator.active = false;
-        Stock.Globals.adopt(history.appletInterface);
     }
     Component.onDestruction: Stock.Globals.forget(history.appletInterface)
 }
