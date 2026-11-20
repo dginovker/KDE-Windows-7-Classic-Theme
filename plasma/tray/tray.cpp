@@ -1,9 +1,14 @@
+#include "background_apps.h"
 #include "notifier_menu.h"
 #include "status_notifiers.h"
 #include <KConfigGroup>
 #include <KConfigLoader>
+#include <QCoreApplication>
 #include <QDBusConnection>
 #include <QDBusConnectionInterface>
+#include <QEvent>
+#include <QFile>
+#include <QStandardPaths>
 #include <QRegularExpression>
 #include <QTimer>
 #include <KPluginFactory>
@@ -22,6 +27,7 @@ class ClassicTray final : public Plasma::Containment
 {
     Q_OBJECT
     Q_PROPERTY(QVariantList appletChoices READ appletChoices NOTIFY appletChoicesChanged)
+    Q_PROPERTY(BackgroundApps *backgroundApps READ backgroundApps CONSTANT)
     Q_PROPERTY(QString speakerArt READ speakerArt NOTIFY speakerArtChanged)
     Q_PROPERTY(StatusNotifiers *statusNotifiers READ statusNotifiers NOTIFY statusNotifiersChanged)
 public:
@@ -34,6 +40,15 @@ public:
     void init() override
     {
         Containment::init();
+        connect(QCoreApplication::instance(), &QCoreApplication::aboutToQuit, this, [this] {
+            // Dispose the open config window before Plasma tears down its QML engine and delegate models.
+            if (const auto window = m_itemsWindow) {
+                window->close();
+                if (window) {
+                    QCoreApplication::sendPostedEvents(window, QEvent::DeferredDelete);
+                }
+            }
+        });
         connect(this, &Containment::appletAdded, this, [this](Plasma::Applet *applet) {
             disconnect(applet, &Applet::activated, this, &Applet::activated);
         });
@@ -55,6 +70,11 @@ public:
                                       {QStringLiteral("name"), meta.name()}});
         }
         return result;
+    }
+
+    Q_INVOKABLE void trackItemsWindow(QWindow *window)
+    {
+        m_itemsWindow = window;
     }
 
     Q_INVOKABLE QString category(Plasma::Applet *applet) const
@@ -95,6 +115,14 @@ public:
         if (auto *configure = applet->internalAction(QStringLiteral("configure"))) {
             menu->addAction(configure);
         }
+        // The overflow button is absent if every item is visible.
+        if (auto *configure = internalAction(QStringLiteral("configure")); configure && configure->isEnabled()) {
+            if (!menu->isEmpty()) {
+                menu->addSeparator();
+            }
+            auto *configureArea = menu->addAction(tr("Configure Notification Area…"));
+            connect(configureArea, &QAction::triggered, configure, &QAction::trigger);
+        }
         if (menu->isEmpty()) {
             delete menu;
             return;
@@ -104,6 +132,7 @@ public:
         menu->popup(anchor->mapToGlobal(QPointF(0, 0)).toPoint());
     }
 
+    BackgroundApps *backgroundApps() { return &m_backgroundApps; }
     StatusNotifiers *statusNotifiers() const { return m_notifiers; }
 
     QString speakerArt() const
@@ -125,8 +154,13 @@ Q_SIGNALS:
 protected:
     void restoreContents(KConfigGroup &group) override
     {
+        const auto receipt = QStandardPaths::writableLocation(QStandardPaths::GenericStateLocation)
+            + QStringLiteral("/win7-classic/current-tray-accelerators.json");
+        if (QFile::exists(receipt)) {
+            m_shortcutIds = receipt + QStringLiteral(".ids/");
+        }
         const auto shortcut = group.group(QStringLiteral("Shortcuts")).readEntry("global", QString());
-        if (!shortcut.isEmpty()) {
+        if (!shortcut.isEmpty() && recordShortcutOwner(id())) {
             setGlobalShortcut(QKeySequence(shortcut));
         }
         m_groups = group.group(QStringLiteral("Applets"));
@@ -166,6 +200,20 @@ private Q_SLOTS:
     }
 
 private:
+    bool recordShortcutOwner(uint appletId) const
+    {
+        if (m_shortcutIds.isEmpty()) {
+            return true;
+        }
+        // Plasma can discard an applet's entire config while KGlobalAccel retains its dormant action.
+        QFile entry(m_shortcutIds + QString::number(appletId));
+        if (entry.open(QIODevice::WriteOnly | QIODevice::NewOnly) || entry.exists()) {
+            return true;
+        }
+        qCritical().noquote() << "Classic tray: cannot record shortcut ownership for applet" << appletId << entry.errorString();
+        return false;
+    }
+
     void refreshCatalog()
     {
         m_catalog.clear();
@@ -263,7 +311,9 @@ private:
                 qCritical().noquote() << "Classic tray: could not load configured applet" << id;
                 continue;
             }
-            addApplet(std::move(applet));
+            if (recordShortcutOwner(applet->id())) {
+                addApplet(std::move(applet));
+            }
         }
     }
 
@@ -281,12 +331,15 @@ private:
         Q_EMIT speakerArtChanged();
     }
 
+    BackgroundApps m_backgroundApps{this};
     StatusNotifiers *m_notifiers = nullptr;
     PulseAudioQt::Server *m_server = nullptr;
     QPointer<PulseAudioQt::Sink> m_sink;
     QMap<QString, KPluginMetaData> m_catalog;
     QMap<QString, QRegularExpression> m_services;
     KConfigGroup m_groups;
+    QString m_shortcutIds;
+    QPointer<QWindow> m_itemsWindow;
     bool m_restored = false;
     bool m_syncing = false;
 };

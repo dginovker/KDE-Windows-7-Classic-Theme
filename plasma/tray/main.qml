@@ -17,6 +17,11 @@ ContainmentItem {
     readonly property var notifiers: ownedBackend.statusNotifiers
     property var visibleEntries: []
     property var hiddenEntries: []
+    readonly property var backgroundApps: ownedBackend.backgroundApps
+    readonly property var backgroundItems: {
+        const withNotifier = new Set(notifierItems.map(item => item.flatpakInstance));
+        return (backgroundApps?.items ?? []).filter(app => !app.instances.some(id => withNotifier.has(id)));
+    }
     readonly property var notifierItems: notifiers?.items ?? []
     readonly property var stockApplets: Containment.applets
     property var appletHosts: new Map()
@@ -30,6 +35,7 @@ ContainmentItem {
     }
     onHasOverflowChanged: if (!hasOverflow) overflow.visible = false
     onNotifierItemsChanged: queueEntries()
+    onBackgroundItemsChanged: queueEntries()
     onStockAppletsChanged: Qt.callLater(updateHosts)
     Component.onCompleted: {
         updateHosts();
@@ -55,7 +61,7 @@ ContainmentItem {
     }
     function updateEntries() {
         const same = (old, next) => old.length === next.length && next.every((entry, i) =>
-            entry.applet === old[i].applet && entry.notifier === old[i].notifier);
+            entry.applet === old[i].applet && entry.notifierAddress === old[i].notifierAddress && entry.backgroundId === old[i].backgroundId);
         const shown = entriesAt(2);
         const hidden = entriesAt(1);
         if (!same(visibleEntries, shown)) visibleEntries = shown;
@@ -75,8 +81,13 @@ ContainmentItem {
             applet: a, name: a.title, category: ownedBackend.category(a)
         }));
         for (const n of notifierItems) {
-            if (notifierPlacement(n) === position) {
-                rows.push({ notifier: n, name: n.Title, category: n.Category });
+            if (externalPlacement(n.persistentId, n.Status === "Passive") === position) {
+                rows.push({ notifierAddress: n.address, name: n.Title, category: n.Category });
+            }
+        }
+        for (const app of backgroundItems) {
+            if (externalPlacement(app.id, false) === position) {
+                rows.push({ backgroundId: app.id, name: app.name, category: "ApplicationStatus" });
             }
         }
         rows.sort((a, b) => {
@@ -102,15 +113,14 @@ ContainmentItem {
         return configured.hiddenItems.includes(id) || applet.status === PlasmaCore.Types.PassiveStatus ? 1 : 2;
     }
 
-    function notifierPlacement(item) {
-        const id = item.persistentId;
+    function externalPlacement(id, passive) {
         if (configured.showAllItems || configured.shownItems.includes(id)) {
             return 2;
         }
         if (configured.disabledStatusNotifiers.includes(id)) {
             return 0;
         }
-        return configured.hiddenItems.includes(id) || item.Status === "Passive" ? 1 : 2;
+        return configured.hiddenItems.includes(id) || passive ? 1 : 2;
     }
 
     Component {
@@ -122,10 +132,15 @@ ContainmentItem {
             height: tray.pitch
             focusPolicy: Qt.StrongFocus
             Accessible.name: modelData?.Title || modelData?.Id || ""
-            Controls.ToolTip.visible: hovered
-            Controls.ToolTip.text: Accessible.name
+            PlasmaCore.ToolTipArea {
+                anchors.fill: parent
+                location: Plasmoid.location
+                mainText: notifier.modelData?.toolTipTitle || notifier.Accessible.name
+                subText: notifier.modelData?.toolTipSubtitle ?? ""
+                textFormat: Text.PlainText
+            }
             function send(method) {
-                tray.notifiers.trigger(modelData.address, method, notifier);
+                if (modelData) tray.notifiers.trigger(modelData.address, method, notifier);
             }
             onClicked: send("Activate")
             Keys.onReturnPressed: send("Activate")
@@ -160,11 +175,48 @@ ContainmentItem {
                 acceptedButtons: Qt.NoButton
                 onWheel: event => {
                     if (event.angleDelta.y !== 0) {
-                        tray.notifiers.scroll(notifier.modelData.address, event.angleDelta.y, "vertical");
+                        tray.notifiers.scroll(notifier.modelData?.address ?? "", event.angleDelta.y, "vertical");
                     }
                     if (event.angleDelta.x !== 0) {
-                        tray.notifiers.scroll(notifier.modelData.address, event.angleDelta.x, "horizontal");
+                        tray.notifiers.scroll(notifier.modelData?.address ?? "", event.angleDelta.x, "horizontal");
                     }
+                }
+            }
+        }
+    }
+
+    Component {
+        id: backgroundComponent
+        Controls.AbstractButton {
+            id: appButton
+            width: tray.pitch
+            height: tray.pitch
+            focusPolicy: Qt.StrongFocus
+            property var modelData
+            Accessible.name: modelData?.name ?? ""
+            function open() { if (modelData) tray.backgroundApps.open(modelData.id, appButton); }
+            function menu() { if (modelData) tray.backgroundApps.menu(modelData.id, appButton); }
+            onClicked: open()
+            Keys.onReturnPressed: open()
+            Keys.onEnterPressed: open()
+            Keys.onMenuPressed: menu()
+            TapHandler {
+                acceptedButtons: Qt.RightButton
+                onTapped: appButton.menu()
+            }
+            PlasmaCore.ToolTipArea {
+                anchors.fill: parent
+                location: Plasmoid.location
+                mainText: appButton.Accessible.name
+                subText: appButton.modelData?.message ?? ""
+                textFormat: Text.PlainText
+            }
+            contentItem: Item {
+                Kirigami.Icon {
+                    anchors.centerIn: parent
+                    width: 22
+                    height: 22
+                    source: appButton.modelData?.icon ?? ""
                 }
             }
         }
@@ -211,9 +263,15 @@ ContainmentItem {
                 onTapped: tray.ownedBackend.showAppletMenu(cell.modelData.applet, cell)
             }
             Loader {
-                active: !!cell.modelData.notifier
+                active: !!cell.modelData.notifierAddress
                 sourceComponent: sniComponent
-                onLoaded: item.modelData = Qt.binding(() => cell.modelData.notifier)
+                // Keep the button and its hover window mounted when only producer details change.
+                onLoaded: item.modelData = Qt.binding(() => tray.notifierItems.find(n => n.address === cell.modelData.notifierAddress))
+            }
+            Loader {
+                active: !!cell.modelData.backgroundId
+                sourceComponent: backgroundComponent
+                onLoaded: item.modelData = Qt.binding(() => tray.backgroundItems.find(app => app.id === cell.modelData.backgroundId))
             }
         }
     }

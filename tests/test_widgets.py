@@ -5,6 +5,7 @@ Current mode gets a second virtual desktop, a configured pager and a custom widg
 switch they must appear in the Classic taskbar with byte-identical config groups, the pager must switch desktops,
 and switching back must restore current mode exactly. `win7-classic rebuild` must pick up later changes.
 """
+import argparse
 from pathlib import Path
 import re
 import sys
@@ -18,7 +19,6 @@ from lab import ROOT, VM, vmctl, user, toggle, digest, install, shot, wait_for, 
 
 sys.path.insert(0, str(ROOT / 'toggle/windows'))
 seed = SourceFileLoader('seed', str(ROOT / 'toggle/windows/seed')).load_module()
-OUT = Path(sys.argv[1] if len(sys.argv) > 1 else '/tmp/win7-widgets-test')
 APPLETSRC = '~/.config/plasma-org.kde.plasma.desktop-appletsrc'
 SHELL = 'qdbus6 org.kde.plasmashell /PlasmaShell evaluateScript'
 MAGENTA = (255, 0, 255)
@@ -53,7 +53,7 @@ def current_desktop():
     return user('qdbus6 org.kde.KWin /KWin org.kde.KWin.currentDesktop')
 
 
-def main():
+def main(OUT, packaged):
     OUT.mkdir(parents=True, exist_ok=True)
     vmctl.start(VM)
     # A fresh tester account: this test edits the current-mode panel, so leftovers from earlier runs would pile up.
@@ -61,7 +61,9 @@ def main():
     assert code == 0, out + err
     vmctl.start(VM)
     time.sleep(5)
-    install()
+    if not packaged:
+        install()
+    tool = "/usr/bin/win7-classic" if packaged else "~tester/.local/bin/win7-classic"
     for name in ('metadata.json', 'contents/config/main.xml', 'contents/ui/main.qml'):
         vmctl.transfer(VM, 'put', str(ROOT / 'tests/fixture_widget' / name), f'/tmp/note-{name.replace("/", "-")}')
     user('d=~/.local/share/plasma/plasmoids/local.win7test.note; rm -rf $d; mkdir -p $d/contents/ui $d/contents/config; '
@@ -85,11 +87,11 @@ def main():
     before_digest = digest()
     shot(OUT / '1-current.png')
 
-    toggle('windows')
+    toggle('windows', packaged=packaged)
     time.sleep(2)
     types = panel_types()
     expected = ['org.win7classic.taskbar', 'org.kde.plasma.pager', 'local.win7test.note', 'org.win7classic.trayframe',
-                'org.kde.plasma.systemtray', 'org.win7classic.clock']
+                'org.win7classic.tray', 'org.win7classic.clock']
     assert types == expected, f'Windows taskbar widgets {types}, expected {expected}'
     after = user(f'cat {APPLETSRC}')
     pins = widget_groups(after, 'org.win7classic.taskbar')['[Configuration][General]']
@@ -105,12 +107,12 @@ def main():
     print('Quick Launch and its popup folded into deduplicated working taskbar pins; Dolphin opens Explorer')
     for plugin in ('org.kde.plasma.pager', 'local.win7test.note'):
         assert widget_groups(after, plugin) == widget_groups(before, plugin), f'{plugin} config changed'
-    tray = 'org.kde.plasma.systemtray'
-    after_tray = widget_groups(after, tray)
-    for setting in ('reverseIconOrder=true', 'iconSpacing=1'):
-        after_tray['[General]'].remove(setting)
-    assert after_tray == widget_groups(before, tray), 'non-presentation System Tray config changed'
-    print('pager, custom widget and stock tray settings carried over; only the tray presentation defaults changed')
+    original_tray = widget_groups(before, 'org.kde.plasma.systemtray')
+    classic_tray = widget_groups(after, 'org.win7classic.tray')
+    assert any(group.startswith('[Applets]') for group in original_tray), 'stock tray is missing nested widget groups'
+    assert classic_tray == {**original_tray, '': [line.replace('plugin=org.kde.plasma.systemtray', 'plugin=org.win7classic.tray')
+                                                for line in original_tray['']]}, (original_tray, classic_tray)
+    print('pager, custom widget and all nested tray settings carried over; only the tray plugin ID changed')
 
     vmctl.pointer(VM, 640, 600)
     time.sleep(1)
@@ -126,21 +128,21 @@ def main():
     user('qdbus6 org.kde.KWin /KWin org.kde.KWin.setCurrentDesktop 1')
     print('pager switches virtual desktops')
 
-    toggle('current')
+    toggle('current', packaged=packaged)
     assert digest() == before_digest, 'current mode not restored exactly'
     print('current mode restored exactly')
 
     # A widget added in current mode later reaches Windows mode only through rebuild.
     user(f'{SHELL} "panels()[0].addWidget(\\"org.kde.plasma.trash\\")"')
     time.sleep(1)
-    toggle('windows')
+    toggle('windows', packaged=packaged)
     assert 'org.kde.plasma.trash' not in panel_types(), 'saved Windows layout should be reused as-is'
-    code, _, err = vmctl.run(VM, f'{vmctl.USER_ENV}\nexec runuser -u tester -- ~tester/.local/bin/win7-classic rebuild', 300)
+    code, _, err = vmctl.run(VM, f'{vmctl.USER_ENV}\nexec runuser -u tester -- {tool} rebuild', 300)
     assert code == 0, err
     assert 'org.kde.plasma.trash' in panel_types(), 'rebuild did not pick up the new current-mode widget'
     print('win7-classic rebuild carries later current-mode changes over')
 
-    toggle('current')
+    toggle('current', packaged=packaged)
     # Leave a pristine account (one desktop, stock panel) for the other tests.
     code, out, err = vmctl.run(VM, (ROOT / 'vm/prepare-tester.sh').read_text(), 300)
     assert code == 0, out + err
@@ -148,4 +150,8 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('outdir', nargs='?', type=Path, default=Path('/tmp/win7-widgets-test'))
+    parser.add_argument('--installed', action='store_true', help='exercise the installed Arch package')
+    args = parser.parse_args()
+    main(args.outdir, args.installed)

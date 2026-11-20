@@ -10,12 +10,14 @@
 #include <QGuiApplication>
 #include <QFile>
 #include <QFileInfo>
+#include <QSettings>
 #include <QIcon>
 #include <QImage>
 #include <QPixmap>
 #include <QPointer>
 #include <QQuickWindow>
 #include <QScreen>
+#include <QXmlStreamReader>
 #include <qpa/qplatformscreen.h>
 #include <KConfigGroup>
 #include <KSharedConfig>
@@ -36,6 +38,25 @@ QDBusMessage itemCall(const QString &address, const QString &method, const QStri
 {
     const auto slash = address.indexOf(u'/');
     return QDBusMessage::createMethodCall(address.left(slash), address.mid(slash), interface, method);
+}
+
+const auto ItemSignals = {u"NewIcon"_s, u"NewAttentionIcon"_s, u"NewOverlayIcon"_s, u"NewStatus"_s,
+                          u"NewTitle"_s, u"NewToolTip"_s, u"NewMenu"_s};
+
+void readToolTip(QVariantMap &data)
+{
+    const auto tooltip = data.take(u"ToolTip"_s).value<QDBusArgument>();
+    if (tooltip.currentSignature() != u"(sa(iiay)ss)") {
+        return;
+    }
+    QString iconName, title, subtitle;
+    tooltip.beginStructure();
+    tooltip >> iconName;
+    tooltip.asVariant();
+    tooltip >> title >> subtitle;
+    tooltip.endStructure();
+    data.insert(u"toolTipTitle"_s, title);
+    data.insert(u"toolTipSubtitle"_s, subtitle);
 }
 
 QIcon pixmaps(const QVariant &value)
@@ -173,8 +194,7 @@ void StatusNotifiers::registered(const QString &address)
         return;
     }
     auto bus = QDBusConnection::sessionBus();
-    for (const auto &name : {u"NewIcon"_s, u"NewAttentionIcon"_s, u"NewOverlayIcon"_s,
-                            u"NewStatus"_s, u"NewTitle"_s, u"NewToolTip"_s}) {
+    for (const auto &name : ItemSignals) {
         bus.connect(address.left(slash), address.mid(slash), Item, name, this, SLOT(updateItem(QDBusMessage)));
     }
     readItem(address);
@@ -187,8 +207,7 @@ void StatusNotifiers::unregistered(const QString &address)
         return;
     }
     auto bus = QDBusConnection::sessionBus();
-    for (const auto &name : {u"NewIcon"_s, u"NewAttentionIcon"_s, u"NewOverlayIcon"_s,
-                            u"NewStatus"_s, u"NewTitle"_s, u"NewToolTip"_s}) {
+    for (const auto &name : ItemSignals) {
         bus.disconnect(address.left(slash), address.mid(slash), Item, name, this, SLOT(updateItem(QDBusMessage)));
     }
     if (const auto loader = m_loaders.take(address)) {
@@ -230,6 +249,7 @@ void StatusNotifiers::readItem(const QString &address)
             return;
         }
         auto data = reply.value();
+        readToolTip(data);
         auto *loader = m_loaders.value(address).data();
         const auto themePath = data.value(u"IconThemePath"_s).toString();
         if (m_items.value(address).value(u"IconThemePath"_s).toString() != themePath) {
@@ -255,6 +275,15 @@ void StatusNotifiers::readItem(const QString &address)
         if (icon.isNull()) {
             icon = findIcon(data, u"Icon"_s, loader);
         }
+        auto instance = previous.value(u"flatpakInstance"_s).toString();
+        if (previous.isEmpty()) {
+            const auto pid = QDBusConnection::sessionBus().interface()->servicePid(address.section(u'/', 0, 0));
+            if (pid.isValid()) {
+                const QSettings info(u"/proc/%1/root/.flatpak-info"_s.arg(pid.value()), QSettings::IniFormat);
+                instance = info.value(u"Instance/instance-id"_s).toString();
+            }
+        }
+        data.insert(u"flatpakInstance"_s, instance);
         data.insert(u"address"_s, address);
         data.insert(u"icon"_s, icon);
         data.insert(u"overlay"_s, findIcon(data, u"OverlayIcon"_s, loader));
@@ -300,9 +329,8 @@ void StatusNotifiers::trigger(const QString &address, const QString &method, QQu
     }
     const QPointer<QQuickItem> anchorGuard(anchor);
     const auto data = m_items.value(address);
-    const auto menu = data.value(u"Menu"_s).value<QDBusObjectPath>().path();
     const bool wantsMenu = method == u"ContextMenu" || (method == u"Activate" && data.value(u"ItemIsMenu"_s).toBool());
-    const auto send = [this, address, method, wantsMenu, menu, logical, point, anchorGuard](const QString &token) {
+    const auto send = [this, address, method, wantsMenu, logical, point, anchorGuard](const QString &token) {
         if (!m_items.contains(address) || !anchorGuard) {
             return;
         }
@@ -310,26 +338,69 @@ void StatusNotifiers::trigger(const QString &address, const QString &method, QQu
         if (!token.isEmpty()) {
             bus.asyncCall(itemCall(address, u"ProvideXdgActivationToken"_s) << token);
         }
-        const auto context = [this, address, menu, logical, point, anchorGuard, bus] {
+        const auto context = [this, address, logical, point, anchorGuard, bus] {
             if (!anchorGuard || !m_items.contains(address)) {
                 return;
             }
+            const auto menu = m_items.value(address).value(u"Menu"_s).value<QDBusObjectPath>().path();
             if (!menu.isEmpty() && menu != u"/" && menu != u"/NO_DBUSMENU") {
                 Q_EMIT menuRequested(address, menu, anchorGuard, logical.x(), logical.y());
             } else {
                 bus.asyncCall(itemCall(address, u"ContextMenu"_s) << point.x() << point.y());
             }
         };
+        const auto activate = [this, bus, address, method, point, anchorGuard] {
+            if (!anchorGuard || !m_items.contains(address)) {
+                return;
+            }
+            auto *pending = new QDBusPendingCallWatcher(bus.asyncCall(itemCall(address, method) << point.x() << point.y()), this);
+            connect(pending, &QDBusPendingCallWatcher::finished, this, [pending, method, address] {
+                const QDBusPendingReply<void> reply = *pending;
+                pending->deleteLater();
+                if (reply.isError()) {
+                    qWarning().noquote() << "Classic tray:" << method << "failed for" << address << reply.error().message();
+                }
+            });
+        };
         if (wantsMenu) {
             context();
             return;
         }
-        auto *pending = new QDBusPendingCallWatcher(bus.asyncCall(itemCall(address, method) << point.x() << point.y()), this);
-        connect(pending, &QDBusPendingCallWatcher::finished, this, [pending, method, address] {
-            const QDBusPendingReply<void> reply = *pending;
+        const auto menu = m_items.value(address).value(u"Menu"_s).value<QDBusObjectPath>().path();
+        if (method != u"Activate" || menu.isEmpty() || menu == u"/" || menu == u"/NO_DBUSMENU") {
+            activate();
+            return;
+        }
+        // libappindicator advertises its menu without ItemIsMenu or Activate.
+        auto *pending = new QDBusPendingCallWatcher(bus.asyncCall(itemCall(address, u"Introspect"_s,
+            u"org.freedesktop.DBus.Introspectable"_s)), this);
+        connect(pending, &QDBusPendingCallWatcher::finished, this, [pending, address, activate, context] {
+            const QDBusPendingReply<QString> reply = *pending;
             pending->deleteLater();
             if (reply.isError()) {
-                qWarning().noquote() << "Classic tray:" << method << "failed for" << address << reply.error().message();
+                qWarning().noquote() << "Classic tray: cannot inspect notifier activation" << address << reply.error().message();
+                return;
+            }
+            QXmlStreamReader xml(reply.value());
+            bool itemInterface = false;
+            bool canActivate = false;
+            while (!xml.atEnd()) {
+                xml.readNext();
+                if (xml.isStartElement() && xml.name() == u"interface") {
+                    itemInterface = xml.attributes().value(u"name") == Item;
+                } else if (xml.isEndElement() && xml.name() == u"interface") {
+                    itemInterface = false;
+                } else if (itemInterface && xml.isStartElement() && xml.name() == u"method"
+                           && xml.attributes().value(u"name") == u"Activate") {
+                    canActivate = true;
+                }
+            }
+            if (xml.hasError()) {
+                qWarning().noquote() << "Classic tray: invalid notifier introspection" << address << xml.errorString();
+            } else if (canActivate) {
+                activate();
+            } else {
+                context();
             }
         });
     };

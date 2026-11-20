@@ -1,0 +1,84 @@
+#!/usr/bin/env python3
+"""Keep native Classic tray shortcut registrations scoped to the Windows layout."""
+import json
+from pathlib import Path
+import re
+import subprocess
+import sys
+
+SERVICE = 'org.kde.kglobalaccel'
+COMPONENT = 'plasmashell'
+ACTION = re.compile(r'activate widget [0-9]+')
+# KGlobalAccel's setter flags: don't autoload old keys or make the dormant action present.
+NO_AUTOLOADING = 4
+IS_DEFAULT = 8
+
+
+def call(method, signature='', *args, component=False):
+    path, interface = ('/component/plasmashell', SERVICE + '.Component') if component else ('/kglobalaccel', 'org.kde.KGlobalAccel')
+    request = ['busctl', '--user', '--json=short', 'call', SERVICE, path, interface, method]
+    if signature:
+        request += [signature, *map(str, args)]
+    result = subprocess.run(request, text=True, check=True, stdout=subprocess.PIPE).stdout
+    return json.loads(result)['data'][0] if result.strip() else None
+
+
+def metadata():
+    rows = {}
+    for name, title, component, component_title, *_ in call('allShortcutInfos', 's', 'default', component=True):
+        if component == COMPONENT and ACTION.fullmatch(name):
+            rows[name] = [component, name, component_title, title]
+    return rows
+
+
+def registrations(rows, names):
+    return {name: [action, call('shortcutKeys', 'as', 4, *action), call('defaultShortcutKeys', 'as', 4, *action)]
+            for name, action in rows.items() if name in names}
+
+
+def restore(snapshot):
+    ids = Path(str(snapshot) + '.ids')
+    names = set()
+    for entry in ids.iterdir():
+        if not entry.is_file() or not re.fullmatch(r'[0-9]+', entry.name):
+            raise ValueError(f'invalid accelerator owner: {entry}')
+        names.add('activate widget ' + entry.name)
+    if not names:
+        return
+    before = json.loads(snapshot.read_text())
+    live = registrations(metadata(), names)
+    for name in sorted(names):
+        old = before.get(name)
+        if old == live.get(name):
+            continue
+        if old is None:
+            if not call('unregister', 'ss', COMPONENT, name):
+                raise ValueError(f'KGlobalAccel refused to unregister {name}')
+        else:
+            action, keys, defaults = old
+            if len(action) != 4 or action[:2] != [COMPONENT, name]:
+                raise ValueError(f'invalid accelerator receipt for {name}')
+            call('doRegister', 'as', 4, *action)
+            for new_keys, flag in ((defaults, IS_DEFAULT), (keys, 0)):
+                result = call('setShortcutKeys', 'asa(ai)u', 4, *action, len(new_keys),
+                              *(item for (sequence,) in new_keys for item in (len(sequence), *sequence)), NO_AUTOLOADING | flag)
+                if sorted(result) != sorted(new_keys):
+                    raise ValueError(f'KGlobalAccel could not restore the original keys for {name}')
+            call('setInactive', 'as', 4, *action)
+        print(f'{"restored" if old else "unregistered"} Classic tray shortcut: {name}')
+
+
+if __name__ == '__main__':
+    command, receipt, *args = sys.argv[1:]
+    path = Path(receipt)
+    try:
+        if command == 'save' and not args:
+            rows = metadata()
+            # IDs can be assigned during the Windows session; remember pre-existing widget actions only.
+            print(json.dumps(registrations(rows, rows), sort_keys=True))
+        elif command == 'restore' and not args:
+            restore(path)
+        else:
+            raise ValueError('expected save or restore with a receipt')
+    except (OSError, ValueError, subprocess.CalledProcessError) as error:
+        sys.exit(f'Classic tray shortcut metadata: {error}')

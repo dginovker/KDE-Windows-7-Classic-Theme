@@ -18,11 +18,32 @@ SINK = '@DEFAULT_AUDIO_SINK@'
 APPLET_CONFIG = '~/.config/plasma-org.kde.plasma.desktop-appletsrc'
 
 
-def icon_center(image, reference, box):
+QICON = '''from PySide6.QtWidgets import QApplication
+from PySide6.QtGui import QIcon
+app = QApplication([])
+assert QIcon.themeName() == 'Win7-Classic', QIcon.themeName()
+names = ['audio-volume-medium-symbolic', 'audio-volume-muted-symbolic',
+         'network-wired-disconnected-symbolic', 'arrow-up-symbolic']
+def icons():
+    result = []
+    for name in names:
+        icon = QIcon.fromTheme(name)
+        assert not icon.isNull(), name
+        result.append(icon.pixmap(24, 24).toImage())
+    return result
+classic = icons()
+QIcon.setThemeName('breeze')
+for name, themed, stock in zip(names, classic, icons()):
+    assert themed == stock, name
+    print(name + ': exact Breeze pixels at 24px in a Qt Widgets process')
+'''
+
+
+def icon_center(image, reference, box, *, tray_start=None):
     tile = reference.crop(box)
     w, h = tile.size
     expected = tile.tobytes()
-    hits = [(x + w // 2, y + h // 2) for x in range(tray_left(image), 1220)
+    hits = [(x + w // 2, y + h // 2) for x in range(tray_left(image) if tray_start is None else tray_start, 1220)
             for y in range(764, 784) if image.crop((x, y, x + w, y + h)).tobytes() == expected]
     assert len(hits) == 1, f'genuine tile at {box} expected exactly once, found {hits}'
     return hits[0]
@@ -59,10 +80,12 @@ def has_shortcut(shortcut):
     # Assert the shortcut belongs to Notifications itself, not the tray or another applet.
     group = re.search(r'(?m)^(\[Containments\].*\[Applets\]\[\d+\])\n[^\[]*?^plugin=org\.kde\.plasma\.notifications$', layout)
     assert group, 'Notifications is not in the live applet config'
-    return f'{group[1]}[Shortcuts]\nglobal={shortcut}' in layout
+    if f'{group[1]}[Shortcuts]\nglobal={shortcut}' in layout:
+        return group[1].split('[')[-1].rstrip(']')
+    return None
 
 
-def main(out, function_key):
+def main(out, function_key, remove_tray=False):
     keys = ('KEY_LEFTMETA', 'KEY_LEFTSHIFT', 'KEY_' + function_key)
     shortcut = 'Meta+Shift+' + function_key
     out.mkdir(parents=True, exist_ok=True)
@@ -70,6 +93,8 @@ def main(out, function_key):
     assert user('/usr/bin/win7-classic status') == 'current'
     assert '"scale":1' in user('kscreen-doctor -j').replace(' ', ''), 'start from stock lab at 100%'
     before = digest()
+    accel_file = '~/.config/kglobalshortcutsrc'
+    accel = user(f'base64 -w0 {accel_file}')
     vol = user(f'wpctl get-volume {SINK}')
     reference = Image.open(REFERENCE).convert('RGB')
 
@@ -102,11 +127,22 @@ def main(out, function_key):
         for state in (True, False):
             click(speaker, 'middle')
             wait_for(lambda: ('[MUTED]' in user(f'wpctl get-volume {SINK}')) == state, f'volume mute={state}')
-        crop = (875, 600, 1280, 747)
+        crop = (875, 355, 1280, 747)
         click(marker)
         wait_for(lambda: ImageChops.difference(image.crop(crop), snap('overflow-pointer').crop(crop)).getbbox(), 'marker opens overflow')
+        click(marker)
+        vmctl.pointer(VM, 820, 690)
+        wait_for(lambda: snap('overflow-click-closed').crop(crop).tobytes() == image.crop(crop).tobytes(), 'same marker closes overflow')
+        click(marker)
+        wait_for(lambda: ImageChops.difference(image.crop(crop), snap('overflow-open-again').crop(crop)).getbbox(), 'marker reopens overflow')
         key('KEY_ESC')
+        vmctl.pointer(VM, 820, 690)
         wait_for(lambda: snap('overflow-dismissed').crop(crop).tobytes() == image.crop(crop).tobytes(), 'Escape closes overflow')
+        click(speaker)
+        wait_for(lambda: any(text == 'Playback' for text, _ in words('volume-controls', crop)), 'stock volume controls open')
+        click((820, 690))
+        wait_for(lambda: snap('volume-click-away').crop(crop).tobytes() == image.crop(crop).tobytes(), 'volume click-away')
+        print(user("systemd-run --user --wait --pipe --collect -q /usr/bin/python - <<'PYQT'\n" + QICON + "PYQT"))
         print('Genuine marker, speaker, 24px pitch, single sunken frame; native mute and overflow')
 
         click(marker, 'right')
@@ -124,27 +160,49 @@ def main(out, function_key):
         wait_for(assigned, 'stock shortcut editor saves the hosted applet shortcut')
         key('KEY_ESC')
         time.sleep(.7)
-        user('notify-send -a Kate -t 1500 -h string:desktop-entry:org.kde.kate "W39-Shortcut" "Native activation proof"')
-        time.sleep(3)
-        key(*keys)
-        wait_for(lambda: any('W39-Shortcut' in word for word, _ in words('shortcut-history')),
-                 'real history opened by the saved shortcut')
-        click((810, 540))
-        print('Real recorder stages then applies Notifications shortcut; hardware chord opens native history')
+        print('Real recorder stages then applies the Notifications shortcut')
+        if remove_tray:
+            nid = assigned()
+            call = 'busctl --user call org.kde.kglobalaccel /kglobalaccel org.kde.KGlobalAccel'
+            binding = f"as 4 plasmashell 'activate widget {nid}' plasmashell 'Activate Notifications Widget'"
+            keys_before_remove = user(f'{call} shortcutKeys {binding}')
+            assert re.search(r' [1-9]\d*', keys_before_remove), keys_before_remove
+            script = ('for (const p of panels()) for (const w of p.widgets()) '
+                      'if (w.type === "org.win7classic.tray") w.remove()')
+            user(f"qdbus6 org.kde.plasmashell /PlasmaShell evaluateScript '{script}'")
+            wait_for(lambda: 'plugin=org.win7classic.tray\n' not in user(f'cat {APPLET_CONFIG}') + '\n'
+                     and 'plugin=org.kde.plasma.notifications\n' not in user(f'cat {APPLET_CONFIG}') + '\n',
+                     'Plasma finalized tray and child removal')
+            assert user(f'{call} shortcutKeys {binding}') == keys_before_remove, 'dormant registration was not reproduced'
+            snap('tray-removed')
+            print(f'Plasma finalized tray removal; KGlobalAccel still holds dormant widget {nid}: {keys_before_remove}')
+        else:
+            user('notify-send -a Kate -t 1500 -h string:desktop-entry:org.kde.kate "W39-Shortcut" "Native activation proof"')
+            time.sleep(3)
+            key(*keys)
+            wait_for(lambda: {'disturb', 'W39-Shortcut'} <= {
+                word for word, _ in words('shortcut-history', (880, 320, 1065, 580))
+            }, 'real history, not just a toast, opened by the saved shortcut')
+            click((810, 540))
+            print('Hardware chord opens native notification history')
 
-        user('kscreen-doctor output.Virtual-1.scale.1.5')
-        time.sleep(2)
-        click((1200, 770))
-        wait_for(lambda: is_open(snap('scaled-calendar'), 1.5), '150% calendar remains anchored above the tray')
-        key('KEY_ESC')
-        wait_for(lambda: not is_open(snap('scaled-calendar-dismissed'), 1.5), '150% calendar dismissed')
+            user('kscreen-doctor output.Virtual-1.scale.1.5')
+            time.sleep(2)
+            click((1200, 770))
+            wait_for(lambda: is_open(snap('scaled-calendar'), 1.5), '150% calendar remains anchored above the tray')
+            key('KEY_ESC')
+            wait_for(lambda: not is_open(snap('scaled-calendar-dismissed'), 1.5), '150% calendar dismissed')
     finally:
         user(f"wpctl set-volume {SINK} {vol.split()[1]}; wpctl set-mute {SINK} {int('[MUTED]' in vol)}")
         user('kscreen-doctor output.Virtual-1.scale.1')
         if user('/usr/bin/win7-classic status') == 'windows':
             print(user('/usr/bin/win7-classic current'))
     assert digest() == before, 'current layout bytes changed'
-    print('150% calendar and byte-identical current layout')
+    if remove_tray:
+        after = user(f'{call} shortcutKeys {binding}')
+        assert after == 'a(ai) 0', f'Windows-only KGlobalAccel action survived tray removal: {after}'
+    assert user(f'base64 -w0 {accel_file}') == accel, 'KGlobalAccel file bytes changed'
+    print('Byte-identical current layout and settled KGlobalAccel metadata')
 
 
 if __name__ == '__main__':
@@ -152,5 +210,6 @@ if __name__ == '__main__':
     parser.add_argument('out', type=Path)
     parser.add_argument('--key', choices=[f'F{i}' for i in range(1, 13)], default='F10',
                         help='unused Meta+Shift function key for the real recorder')
+    parser.add_argument('--remove-tray', action='store_true', help='finalize removal in the disposable Windows profile')
     args = parser.parse_args()
-    main(args.out, args.key)
+    main(args.out, args.key, args.remove_tray)

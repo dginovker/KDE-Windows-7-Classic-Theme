@@ -8,10 +8,11 @@ import time
 from PIL import Image
 from lab import VM, digest, shot, toggle, user, vmctl, wait_for
 
-SHARE = '~/.local/share/win7-classic'
+ROOT = '/tmp/w39-switch-test'
+SHARE = ROOT + '/share/win7-classic'
 PROFILES = '~/.local/state/win7-classic/profiles'
 APPLETS = 'plasma-org.kde.plasma.desktop-appletsrc'
-TRAY = SHARE + '/windows/tray_layout.py'
+TRAY = SHARE + '/windows/migrate-tray'
 SEED = SHARE + '/windows/seed'
 TRACE = '/tmp/w39-appearance-trace'
 STAGED = '/tmp/w39-failed-layout'
@@ -28,18 +29,19 @@ def write(path, text):
 
 def main(out, switch_edges=False):
     out.mkdir(parents=True, exist_ok=True)
-    assert user('~/.local/bin/win7-classic status') == 'current'
-    toggle('windows')
-    toggle('current')
-    # A genuine saved layout from before this release has neither the marker nor the new settings.
-    user(f"sed -i -e '/^win7ClassicTrayDefaultsApplied=/d' -e '/^reverseIconOrder=/d' -e '/^iconSpacing=/d' {PROFILES}/windows/{APPLETS}")
+    assert user('/usr/bin/win7-classic status') == 'current'
+    toggle('windows', packaged=True)
+    toggle('current', packaged=True)
+    # Reverse only the tray substitution to exercise the supported packaged upgrade input.
+    user(f"/usr/share/win7-classic/windows/migrate-tray --undo {PROFILES}/windows/{APPLETS}")
     windows = profile('windows')
     script = SHARE + '/win7-classic'
-    user(f"cp {script} {script}.real; cp {TRAY} {TRAY}.real; cp {SEED} {SEED}.real; "
+    user(f"mkdir -p {ROOT}/share {ROOT}/bin; cp -a /usr/share/win7-classic {SHARE}; "
+         f"ln -s /usr/bin/win7-classic-probe {ROOT}/bin/; cp {TRAY} {TRAY}.real; cp {SEED} {SEED}.real; "
          f"sed -i '/^load_appearance() {{/a\\    printf \"%s\\\\n\" \"$1\" >>{TRACE}' {script}")
 
     def run():
-        return vmctl.run(VM, f'{vmctl.USER_ENV}\nexec runuser -u tester -- env PATH={BIN}:/usr/bin ~tester/.local/bin/win7-classic toggle', 180)
+        return vmctl.run(VM, f'{vmctl.USER_ENV}\nexec runuser -u tester -- env PATH={BIN}:/usr/bin {script} toggle', 180)
 
     def reject(name, status, diagnostic, appearance='current'):
         before = digest()
@@ -53,7 +55,7 @@ def main(out, switch_edges=False):
         assert digest() == before, f'{name}: live layout changed'
         saved_current = user(f'cd {PROFILES}/current; sha256sum {APPLETS} plasmashellrc plasmarc 2>&1 || true')
         assert saved_current == before, f'{name}: current profile differs from the sampled live layout'
-        assert user('~/.local/bin/win7-classic status') == 'current'
+        assert user('/usr/bin/win7-classic status') == 'current'
         assert user('systemctl --user is-active plasma-plasmashell') == 'active'
         assert 'org.kde.plasma.kickoff' in user("qdbus6 org.kde.plasmashell /PlasmaShell evaluateScript 'print(panels()[0].widgets().map(w=>w.type).join(\",\"))'")
         vmctl.pointer(VM, 640, 400)
@@ -103,18 +105,18 @@ def main(out, switch_edges=False):
         code, stdout, stderr = run()
         (out / 'widget-query-warning.log').write_text(f'exit={code}\n{stdout}{stderr}')
         assert code == 0 and 'lab-widget-query-warning' in stderr, stderr
-        assert user('~/.local/bin/win7-classic status') == 'windows'
+        assert user('/usr/bin/win7-classic status') == 'windows'
         assert user('kreadconfig6 --file kdeglobals --group Icons --key Theme') == 'Win7-Classic'
         shot(out / 'widget-query-warning.png')
         user(f'rm {BIN}/qdbus6 {BIN}/warn')
-        toggle('current')
+        toggle('current', packaged=True)
         assert digest() == before
         print('successful empty widget query with stderr warning still activated Windows; exact current restored')
         before = digest()
         for mode in ('windows', 'current'):
             code, stdout, stderr = run()
             (out / f'toggle-{mode}.log').write_text(f'exit={code}\n{stdout}{stderr}')
-            assert code == 0 and user('~/.local/bin/win7-classic status') == mode, stderr
+            assert code == 0 and user('/usr/bin/win7-classic status') == mode, stderr
             assert user('systemctl --user is-active plasma-plasmashell') == 'active'
             shot(out / f'toggle-{mode}.png')
         assert digest() == before
@@ -124,19 +126,17 @@ def main(out, switch_edges=False):
         if switch_edges:
             ordinary_switch_errors()
             return
-        write(TRAY, 'raise SystemExit(42)\n')
-        reject('silent', 42, 'System Tray layout migration failed (exit 42)')
+        write(TRAY, '#!/bin/bash\n[[ $1 != --check ]] || exec "$0.real" "$@"\nexit 42\n')
+        reject('silent', 42, 'System Tray migration failed (exit 42)')
         assert profile('windows') == windows and not user(f'test -e {STAGED} && echo mutated', check=False)
-        print('silent: exact saved Windows input')
-        write(TRAY, "import contextlib, io, runpy, shutil, sys\n"
-              "with contextlib.redirect_stdout(io.StringIO()):\n"
-              "    runpy.run_path(__file__ + '.real', run_name='__main__')\n"
-              f"shutil.copyfile(sys.argv[1], '{STAGED}')\nraise SystemExit(43)\n")
-        reject('post-replace', 43, 'System Tray layout migration failed (exit 43)')
+        print('silent: real read-only check passed; exact saved Windows input')
+        write(TRAY, '#!/bin/bash\nset -e\n[[ $1 != --check ]] || exec "$0.real" "$@"\n'
+              f'"$0.real" "$@" >/dev/null\ncp "$1" {STAGED}\nexit 43\n')
+        reject('post-replace', 43, 'System Tray migration failed (exit 43)')
         assert profile('windows') == windows
-        assert user(f'cmp -s {STAGED} {PROFILES}/windows/{APPLETS} || grep -x win7ClassicTrayDefaultsApplied=true {STAGED}') == 'win7ClassicTrayDefaultsApplied=true'
-        assert user(f'grep -x iconSpacing=1 {STAGED}') == 'iconSpacing=1'
-        print('post-replace: real migration modified staged bytes; exact saved Windows input')
+        user(f"grep -x plugin=org.win7classic.tray {STAGED}; "
+             f"{TRAY}.real --undo {STAGED}; cmp {STAGED} {PROFILES}/windows/{APPLETS}")
+        print('post-replace: real migration modified only the tray plugin in staged bytes; exact saved Windows input')
 
         user(f'cp {TRAY}.real {TRAY}; mv {PROFILES}/windows {PROFILES}/w39-saved-windows')
         write(SEED, '#!/bin/bash\nset -e\n"$0.real" "$@" >/dev/null\n'
@@ -147,9 +147,9 @@ def main(out, switch_edges=False):
         assert user(f'grep -x plugin=org.win7classic.taskbar {STAGED}') == 'plugin=org.win7classic.taskbar'
         print('first-seed: real seed replaced staged layout, no Windows profile was created')
     finally:
-        user(f'mv {script}.real {script}; mv {TRAY}.real {TRAY}; mv {SEED}.real {SEED}; '
+        user(
              f'if [[ -d {PROFILES}/w39-saved-windows ]]; then mv {PROFILES}/w39-saved-windows {PROFILES}/windows; fi; '
-             f'rm -f {TRACE} {STAGED}; rm -rf {BIN}')
+             f'rm -f {TRACE} {STAGED}; rm -rf {BIN} {ROOT}')
 
 
 if __name__ == '__main__':

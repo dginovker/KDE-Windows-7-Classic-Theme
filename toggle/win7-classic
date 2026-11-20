@@ -10,6 +10,7 @@ share=$(dirname "$(readlink -f "$0")")
 [[ -d $share/windows ]] || { echo "win7-classic: $share/windows is missing; reinstall" >&2; exit 1; }
 probe=$(dirname "$(dirname "$share")")/bin/win7-classic-probe
 mkdir -p "$state/profiles"
+accelerators=$state/current-tray-accelerators.json
 
 log() { printf '%s %s\n' "$(date -Is)" "$*" | tee -a "$state/switch.log" >&2; }
 die() { log "ERROR: $*"; exit 1; }
@@ -128,6 +129,15 @@ copy_files() {
     done
 }
 
+restore_tray_shortcuts() {
+    [[ ! -f $accelerators ]] || "$share/windows/tray-shortcuts" restore "$accelerators"
+}
+
+clear_tray_shortcuts() {
+    rm -f "$accelerators"
+    if [[ -d $accelerators.ids ]]; then rm -r "$accelerators.ids"; fi
+}
+
 preflight_windows() {
     [[ -f /usr/lib/qt6/plugins/plasma/applets/org.win7classic.tray.so ]] || die "system-wide Classic notification area is missing; run: cd packaging && makepkg -si"
     [[ -f /usr/lib/qt6/plugins/styles/libwin7classicstyle.so ]] || die "system-wide Win7Classic Qt style is missing; run: cd packaging && makepkg -si"
@@ -165,6 +175,13 @@ switch_to() {
         tray_cursor=$(journalctl --user -b -u plasma-plasmashell -n0 --show-cursor --no-pager | sed -n 's/^-- cursor: //p')
         [[ -n $tray_cursor ]] || die "cannot read plasmashell's journal cursor; tray activation cannot be verified"
     fi
+    if [[ $target == windows ]]; then
+        [[ ! -e $accelerators ]] || die "pending tray accelerator receipt; run: win7-classic restore"
+        local saved_accelerators
+        saved_accelerators=$("$share/windows/tray-shortcuts" save "$accelerators") || die "cannot read current tray accelerator registrations"
+        (umask 077; mkdir "$accelerators.ids" && printf '%s\n' "$saved_accelerators" > "$accelerators.new" && mv "$accelerators.new" "$accelerators") ||
+            { clear_tray_shortcuts; die "cannot preserve current tray accelerator registrations"; }
+    fi
     log "switching $from -> $target"
     stop_shell
     rm -rf "$state/profiles/$from.new" && mkdir "$state/profiles/$from.new"
@@ -184,7 +201,11 @@ switch_to() {
     log "saved $from: $(digest "$state/profiles/$from") $(cd "$state/profiles/$from" && sha256sum keys.json 2>/dev/null)"
 
     local problem="" failure_status=1 appearance_dir=$state/profiles/$target out
-    if [[ -d $appearance_dir ]]; then
+    if [[ $from == windows ]] && ! restore_tray_shortcuts; then
+        problem="could not restore current tray accelerators"
+    fi
+    if [[ -n $problem ]]; then :
+    elif [[ -d $appearance_dir ]]; then
         if out=$(copy_files "$appearance_dir" "$config" 2>&1); then :
         else
             failure_status=$?
@@ -243,7 +264,11 @@ switch_to() {
             problem="System Tray migration check failed (exit $failure_status): $tray_layout"
         fi
     fi
-    [[ -n $problem ]] || load_appearance "$target" "$appearance_dir"
+    local tried_target=false
+    if [[ -z $problem ]]; then
+        tried_target=true
+        load_appearance "$target" "$appearance_dir"
+    fi
     if [[ -n $problem ]]; then :
     elif ! start_shell; then
         problem="plasmashell did not start"
@@ -288,6 +313,13 @@ switch_to() {
     if [[ -n $problem ]]; then
         log "rolling back to $from: $problem"
         stop_shell
+        if [[ $target == windows ]]; then
+            if ! $tried_target || restore_tray_shortcuts; then
+                clear_tray_shortcuts
+            else
+                log "ERROR: could not restore tray accelerators; receipt retained: $accelerators"
+            fi
+        fi
         copy_files "$state/profiles/$from" "$config" || die "rollback could not copy the $from layout; run: win7-classic restore"
         load_appearance $from "$state/profiles/$from"
         start_shell || die "rollback could not start plasmashell; run: win7-classic restore"
@@ -295,6 +327,7 @@ switch_to() {
         return "$failure_status"
     fi
     echo "$target" > "$state/mode"
+    [[ $target != current ]] || clear_tray_shortcuts
     log "now in $target mode: $(digest "$config")"
 }
 
@@ -310,10 +343,15 @@ restore() {
     copy_files "$config" "$state/profiles/before-restore"
     save_keys "$state/profiles/before-restore"
     gtk_theme > "$state/profiles/before-restore/gtk-theme"
+    if ! restore_tray_shortcuts; then
+        start_shell || die "could not restart plasmashell after accelerator restore failed"
+        die "could not restore current tray accelerators"
+    fi
     copy_files "$state/profiles/current" "$config"
     load_appearance current "$state/profiles/current"
     echo current > "$state/mode"
     start_shell || die "plasmashell did not start after restore"
+    clear_tray_shortcuts
     log "restored current: $(digest "$config")"
 }
 
@@ -325,6 +363,12 @@ rebuild() {
     log "rebuild: Windows layout discarded; rebuilding from current layout"
     switch_to windows
 }
+
+# Two simultaneous switches must not share an in-progress layout or accelerator receipt.
+if [[ ${1:-} != status ]]; then
+    exec 9>"$state/switch.lock"
+    flock -n 9 || die "another mode switch is in progress"
+fi
 
 case ${1:-} in
     windows|current) switch_to "$1" ;;
