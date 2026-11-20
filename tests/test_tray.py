@@ -139,7 +139,8 @@ def main(out, function_key, remove_tray=False):
         vmctl.pointer(VM, 820, 690)
         wait_for(lambda: snap('overflow-dismissed').crop(crop).tobytes() == image.crop(crop).tobytes(), 'Escape closes overflow')
         click(speaker)
-        wait_for(lambda: any(text == 'Playback' for text, _ in words('volume-controls', crop)), 'stock volume controls open')
+        wait_for(lambda: {'Devices', 'Applications'} <= {text for text, _ in words('volume-controls', crop)},
+                 'stock volume controls open')
         click((820, 690))
         wait_for(lambda: snap('volume-click-away').crop(crop).tobytes() == image.crop(crop).tobytes(), 'volume click-away')
         print(user("systemd-run --user --wait --pipe --collect -q /usr/bin/python - <<'PYQT'\n" + QICON + "PYQT"))
