@@ -775,7 +775,7 @@ protected:
         p.drawPixmap(width() - 23, 7, asset(hovered == SearchPart ? QStringLiteral("search-hot") : QStringLiteral("search-normal")));
     }
 
-    bool pressOpens(int part) const override { return part >= HistoryPart; }
+    bool pressOpens(int part) const override { return part >= HistoryPart && part < parts.size() - 1; }
 
     void enterEvent(QEnterEvent *event) override { trackNavigationTip(event->position().toPoint()); }
     void mouseMoveEvent(QMouseEvent *event) override
@@ -802,7 +802,7 @@ protected:
     }
 
 private:
-    enum { BackPart, ForwardPart, SearchPart, RefreshPart, EditPart, HistoryPart };  // crumb parts follow HistoryPart
+    enum { BackPart, ForwardPart, SearchPart, RefreshPart, HistoryPart };  // crumb parts follow HistoryPart
     struct Crumb {
         QString label;
         QUrl url;
@@ -909,7 +909,6 @@ private:
             {QRect(32, 2, 28, 32), [this] { forward(); }, forwardEnabled},
             {QRect(width() - 23, 7, 21, 21), [this] { search->setFocus(); }},
             {QRect(box.right() - 21, 8, 21, 20), [this] { refresh(); }},
-            {box.adjusted(0, 0, -41, 0), [this] { editAddress(); }},
             {QRect(box.right() - 41, 8, 19, 20), [this, box] { menuOf(history(), QRect(box.left(), box.bottom(), 0, 0)); }, backEnabled || forwardEnabled},
         };
         for (int i = 0; i < crumbs.size(); ++i) {
@@ -927,6 +926,8 @@ private:
                                                subfolderMenu(crumb.url, QPoint(crumb.arrow.left(), 28));
                                            }});
         }
+        // The editable background overlaps the places and breadcrumb controls, which must win hit testing.
+        parts.append({box.adjusted(0, 0, -41, 0), [this] { editAddress(); }});
         update();
     }
 
