@@ -139,14 +139,16 @@ def main(out, function_key, remove_tray=False):
         vmctl.pointer(VM, 820, 690)
         wait_for(lambda: snap('overflow-dismissed').crop(crop).tobytes() == image.crop(crop).tobytes(), 'Escape closes overflow')
         click(speaker)
-        wait_for(lambda: {'Devices', 'Applications'} <= {text for text, _ in words('volume-controls', crop)},
+        vmctl.pointer(VM, 820, 690)
+        wait_for(lambda: {'Applications', 'Line', 'Out', 'In'} <= {text for text, _ in words('volume-controls', crop)},
                  'stock volume controls open')
         click((820, 690))
         wait_for(lambda: snap('volume-click-away').crop(crop).tobytes() == image.crop(crop).tobytes(), 'volume click-away')
         print(user("systemd-run --user --wait --pipe --collect -q /usr/bin/python - <<'PYQT'\n" + QICON + "PYQT"))
         print('Genuine marker, speaker, 24px pitch, single sunken frame; native mute and overflow')
 
-        click(marker, 'right')
+        live_marker = icon_center(snap('after-volume-idle'), reference, (13, 17, 18, 25))
+        click(live_marker, 'right')
         time.sleep(1)
         items = words('items-before')
         _, y = label(items, 'Notifications')
