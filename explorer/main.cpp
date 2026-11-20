@@ -1122,7 +1122,7 @@ public:
         bool child = false;
         bool library = false;
     };
-    std::function<void(const Row &)> go;
+    std::function<void(const QUrl &)> go;
 
     NavigationPane()
     {
@@ -1195,7 +1195,7 @@ private:
             const Row row = rows[i];
             parts.append({QRect(0, 9 + 19 * i, width(), 19), [this, row] {
                               if (row.url.isValid() || row.library)
-                                  go(row);
+                                  go(row.url);
                           },
                           !row.text.isEmpty()});
         }
@@ -1331,12 +1331,7 @@ public:
         column->addWidget(fileMenuBar);
         column->addWidget(bar);
 
-        pane->go = [this](const NavigationPane::Row &row) {
-            if (row.library)
-                openLibraryFolder(row.url);
-            else
-                navigate(row.url);
-        };
+        pane->go = nav->go;
         auto *splitter = new QSplitter;
         splitter->setHandleWidth(3);
         splitter->setStyleSheet(QStringLiteral("QSplitter::handle { background: rgb(212, 208, 200); }"));
@@ -1354,10 +1349,8 @@ public:
                                              .arg(target.toLocalFile()));
                     return;
                 }
-                navigate(target);
-            } else {
-                openLibraryFolder(target);
             }
+            navigate(target);
         });
         splitter->setStretchFactor(1, 1);
         splitter->setSizes({157, 600});
@@ -1531,9 +1524,14 @@ private:
 
     bool inOverview() const { return pages->currentWidget() == overview; }
 
-    void openLibraryFolder(const QUrl &url)
+    bool canNavigateTo(const QUrl &url)
     {
-        const QUrl target = url.adjusted(QUrl::NormalizePathSegments);
+        constexpr auto options = QUrl::NormalizePathSegments | QUrl::StripTrailingSlash;
+        const QUrl target = url.adjusted(options);
+        if (std::ranges::none_of(libraries, [&target](const Library &library) {
+            return target == standardFolder(library.location).adjusted(options);
+        }))
+            return true;
         const QString path = target.toLocalFile();
         // KDirOperator treats an unreadable target as a filename and can open its parent instead.
         if (!QFileInfo(path).isDir() || ::access(QFile::encodeName(path).constData(), R_OK | X_OK) != 0) {
@@ -1542,12 +1540,18 @@ private:
                                 QMessageBox::Ok, this);
             warning.setTextFormat(Qt::PlainText);
             warning.exec();
-            return;
+            return false;
         }
-        navigate(target);
+        return true;
     }
 
     void navigate(const QUrl &url)
+    {
+        if (canNavigateTo(url))
+            openLocation(url);
+    }
+
+    void openLocation(const QUrl &url)
     {
         if (isOverviewUrl(url)) {
             entered(url);
@@ -2006,9 +2010,12 @@ private:
     {
         if (position + by < 0 || position + by >= history.size())
             return;
+        const QUrl target = history[position + by];
+        if (!canNavigateTo(target))
+            return;
         position += by;
         stepping = true;
-        navigate(history[position]);
+        openLocation(target);
         if (std::exchange(stepping, false))
             position -= by;
     }
