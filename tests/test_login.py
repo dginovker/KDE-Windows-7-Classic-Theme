@@ -167,6 +167,7 @@ def main():
         vmctl.pointer(VM, 563, 386, 'left')  # tester's tile; the lab VM also has the older account w
         time.sleep(1)
         capture_closed_prompt(OUT / '0-selected-with-chooser.png')
+        assert_logon_art(OUT / '0-selected-with-chooser.png', REF)
         try:
             assert_single_account_layout(OUT / '0-selected-with-chooser.png', REF)
         except AssertionError as error:
