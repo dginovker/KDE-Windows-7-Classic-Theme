@@ -1593,7 +1593,10 @@ public:
         foldersInNewWindow = config.group("General").readEntry("OpenFoldersInNewWindow", false);
         const auto options = config.group("View");
         thumbnails = options.readEntry("Thumbnails", true);
-        files->setInlinePreviewShown(thumbnails);
+        auto *inlinePreview = files->action(KDirOperator::ShowPreview);
+        // KIO's action must reflect the request, not the generator's deferred startup state.
+        disconnect(inlinePreview, &QAction::toggled, files, nullptr);
+        connect(inlinePreview, &QAction::triggered, this, &Explorer::setThumbnails);
         if (options.hasKey("ShowHidden"))
             files->setShowHiddenFiles(options.readEntry("ShowHidden", false));
         // KDirOperator remembers its preview panel from file dialogs; Explorer starts without one.
@@ -1672,10 +1675,8 @@ public:
         connect(lister, &KDirLister::clear, this, [this, invalidateListing] {
             invalidateListing();
             stopPreviewPreparation();
-            if (viewIndex == Details) {
-                if (auto *generator = files->previewGenerator())
-                    generator->setPreviewShown(false);
-            }
+            if (previewGeneratorUsed)
+                resetPreviewGenerator();
         });
         const auto invalidateCurrent = [this, invalidateListing](const QUrl &url) {
             if (listingRoot(url) == listingRoot(files->url()))
@@ -1707,6 +1708,8 @@ public:
         });
         connect(files, &KDirOperator::viewChanged, this, [this](QAbstractItemView *view) {
             stopPreviewPreparation();
+            previewGeneratorUsed = files->previewGenerator()->isPreviewShown();
+            files->action(KDirOperator::ShowPreview)->setChecked(thumbnails);
             view->setFrameShape(QFrame::NoFrame);
             // With the scroll bar "as needed", QListView always reserves its width, which costs Windows' fifth column.
             // Windows reflows only once the bar appears, so the bar is switched off until there is something to scroll.
@@ -1896,6 +1899,7 @@ private:
     QAction *detailsPaneAction;
     bool foldersInNewWindow;
     bool thumbnails;
+    bool previewGeneratorUsed = false;
     QTimer previewPreparation;
     KFileItemList pendingPreviewItems;
     qsizetype previewCursor = 0;
@@ -1996,9 +2000,51 @@ private:
         }
         foldersInNewWindow = own->isChecked();
         files->setShowHiddenFiles(hidden->isChecked());
-        thumbnails = icons->isChecked();
+        setThumbnails(icons->isChecked());
+    }
+
+    void setThumbnails(bool show)
+    {
+        thumbnails = show;
+        files->action(KDirOperator::ShowPreview)->setChecked(show);
+        if (!show) {
+            stopPreviewPreparation();
+            files->previewGenerator()->setPreviewShown(false);
+        } else if (viewIndex == Details) {
+            files->view()->viewport()->update();
+        } else {
+            enablePreviewGenerator();
+        }
+    }
+
+    void enablePreviewGenerator()
+    {
+        files->previewGenerator()->setPreviewShown(true);
+        previewGeneratorUsed = true;
+    }
+
+    void resetPreviewGenerator()
+    {
+        // KIO keeps queued pixmaps by URL even after disabling/canceling previews. The
+        // generator belongs to the view; recreate it while the listing is empty.
+        auto *old = files->view();
+        const bool focused = old->hasFocus();
+        const bool detailsView = viewIndex == Details;
+        const auto columns = detailsView ? static_cast<QTreeView *>(old)->header()->saveState() : QByteArray();
+        auto *splitter = qobject_cast<QSplitter *>(old->parentWidget());
+        const auto sizes = splitter ? splitter->sizes() : QList<int>();
         files->setInlinePreviewShown(thumbnails && viewIndex != Details);
-        files->previewGenerator()->setPreviewShown(thumbnails && (viewIndex != Details || files->dirLister()->isFinished()));
+        files->setViewMode(files->viewMode());
+        sizeFileView();
+        if (detailsView) {
+            auto *header = static_cast<QTreeView *>(files->view())->header();
+            const QSignalBlocker block(header);
+            header->restoreState(columns);
+        }
+        if (splitter)
+            splitter->setSizes(sizes);
+        if (focused)
+            files->view()->setFocus();
     }
 
     void stopPreviewPreparation()
@@ -2025,7 +2071,7 @@ private:
                 return;
         }
         stopPreviewPreparation();
-        generator->setPreviewShown(true);
+        enablePreviewGenerator();
     }
 
     void commands()
@@ -2234,16 +2280,12 @@ private:
         // Reusing a populated view must retain directory montages: KIO cannot regenerate them at 16px.
         const bool alreadyListed = listedUrl == listingRoot(files->url());
         files->setInlinePreviewShown(thumbnails && (index != Details || alreadyListed));
-        static const int sizes[] = {256, 96, 48, 16, 16, 16, 48, 32};
         const auto mode = index == Details ? KDirOperator::ViewDetailsView
             : index == Small || index == List ? KDirOperator::ViewCompactView : KDirOperator::ViewIconsView;
         files->action(mode)->trigger();
         if (current.isValid())
             files->view()->selectionModel()->setCurrentIndex(current, QItemSelectionModel::NoUpdate);
-        files->setIconSize(sizes[index]);
-        // A new KIO view can start with the preview size despite a matching cached zoom.
-        files->view()->setIconSize(QSize(sizes[index], sizes[index]));
-        iconSize = index <= Medium ? sizes[index] : 0;
+        sizeFileView();
         views->actions()[index]->setChecked(true);
         if (index <= Details)
             backgroundViews->actions()[index]->setChecked(true);
@@ -2251,6 +2293,16 @@ private:
             checked->setChecked(false);
         bar->right[0].icon = viewIcon(index);
         bar->relayout();
+    }
+
+    void sizeFileView()
+    {
+        static constexpr int sizes[] = {256, 96, 48, 16, 16, 16, 48, 32};
+        const int size = sizes[viewIndex];
+        files->setIconSize(size);
+        // A new KIO view can start with the preview size despite a matching cached zoom.
+        files->view()->setIconSize(QSize(size, size));
+        iconSize = viewIndex <= Medium ? size : 0;
         applyGrid();
     }
 
