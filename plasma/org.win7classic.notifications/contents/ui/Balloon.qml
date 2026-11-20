@@ -22,9 +22,9 @@ PlasmaCore.Dialog {
     property bool tail: true
 
     readonly property int tailHeight: tail ? 10 : 0
-    readonly property int timeout: entry.timeout === -1 ? settings.popupTimeout + (entry.urls.length > 0 ? 5000 : 0)
+    readonly property int timeout: !entry ? 0 : entry.timeout === -1 ? settings.popupTimeout + (entry.urls.length > 0 ? 5000 : 0)
         : (entry.type === NM.Notifications.JobType && !settings.permanentJobPopups ? settings.popupTimeout : entry.timeout)
-    readonly property double updatedAt: Number(new Date(entry.updated))
+    readonly property double updatedAt: Number(new Date(entry?.updated))
 
     type: critical ? PlasmaCore.Dialog.CriticalNotification : PlasmaCore.Dialog.Notification
     backgroundHints: PlasmaCore.Dialog.NoBackground
@@ -95,11 +95,11 @@ PlasmaCore.Dialog {
 
         HoverHandler {
             id: hover
-            onHoveredChanged: if (hovered) popup.entry.read = true
+            onHoveredChanged: if (hovered && popup.entry) popup.entry.read = true
         }
         TapHandler {
             acceptedButtons: Qt.MiddleButton
-            enabled: popup.entry.closable
+            enabled: !!popup.entry?.closable
             onTapped: popup.source.close(popup.source.index(popup.row, 0))
         }
     }

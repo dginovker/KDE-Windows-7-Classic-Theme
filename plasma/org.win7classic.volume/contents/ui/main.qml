@@ -28,6 +28,12 @@ PlasmoidItem {
         if (popup.visible) {
             popup.close();
         } else if (trigger.Window.window) {
+            const containment = Plasmoid.containment;
+            const work = containment.availableScreenRect;
+            const y = trigger.mapToGlobal(0, 0).y;
+            // The live cell is inset inside the panel, but the popup must clear the whole panel.
+            popupAnchor.y = Plasmoid.location === PlasmaCore.Types.BottomEdge
+                ? Math.min(0, containment.screenGeometry.y + work.y + work.height - y) : 0;
             popup.visible = true;
             popup.requestActivate();
             level.forceActiveFocus(Qt.PopupFocusReason);
@@ -74,12 +80,13 @@ PlasmoidItem {
                     popup.close();
             }
         }
+        Item { id: popupAnchor; width: parent.width; height: parent.height }
         Kirigami.Icon { id: glyph; anchors.fill: parent; source: root.volumeIcon }
     }
 
     PlasmaCore.Dialog {
         id: popup
-        visualParent: trigger
+        visualParent: popupAnchor
         location: Plasmoid.location
         type: PlasmaCore.Dialog.AppletPopup
         backgroundHints: PlasmaCore.Dialog.NoBackground
