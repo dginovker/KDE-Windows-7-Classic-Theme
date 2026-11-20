@@ -206,7 +206,25 @@ def regressions(out, scale, base, exe):
             elif change == 'inaccessible':
                 guest_root(f'chmod 755 {mount}')
 
-    checks = {'filter reset': filter_reset, 'Computer reselect': reselect_computer}
+    def normalized_root():
+        address('file:///', 'File System')
+        click(computer)
+        wait_for(lambda: captions() == ['Computer'], 'Computer with File System behind it')
+        key('KEY_LEFTALT', 'KEY_D')
+        vmctl.type_text(VM, 'file:///tmp/../\n')
+        image = capture(out, 'normalized-root')
+        assert captions() == ['File System'], f'Normalized root left Computer active: {captions()}'
+        assert 'Storage volumes' not in words(image, heading)
+        key('KEY_LEFTALT', 'KEY_D')
+        key('KEY_LEFTCTRL', 'KEY_C')
+        assert clipboard() == '/', 'the normalized location is not the filesystem root'
+        key('KEY_ESC')
+        key('KEY_LEFTALT', 'KEY_LEFT')
+        wait_for(lambda: captions() == ['Computer'], 'Back from normalized root')
+        key('KEY_LEFTALT', 'KEY_RIGHT')
+        wait_for(lambda: captions() == ['File System'], 'Forward to normalized root')
+
+    checks = {'normalized typed root': normalized_root, 'filter reset': filter_reset, 'Computer reselect': reselect_computer}
     checks.update((f'{change} tile', lambda change=change: stale_tile(change))
                   for change in ('unmounted', 'replaced', 'inaccessible'))
     for name, exercise in checks.items():

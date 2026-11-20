@@ -536,6 +536,8 @@ public:
         layout->setContentsMargins(14, 8, 4, 0);
         layout->setSpacing(4);
         heading->setTextFormat(Qt::PlainText);
+        heading->setWordWrap(true);
+        heading->setAlignment(Qt::AlignTop | Qt::AlignLeft);
         layout->addWidget(heading);
         tiles->setFrameShape(QFrame::NoFrame);
         tiles->setViewMode(QListView::IconMode);
@@ -551,6 +553,15 @@ public:
     void setComputer()
     {
         tiles->clear();
+        // Probe a guaranteed path so unavailable mount IDs aren't mistaken for inaccessible volumes.
+        struct statx root = {};
+        const bool supported = ::statx(AT_FDCWD, "/", AT_NO_AUTOMOUNT, STATX_MNT_ID_UNIQUE, &root) == 0
+            && (root.stx_mask & STATX_MNT_ID_UNIQUE);
+        tiles->setVisible(supported);
+        if (!supported) {
+            heading->setText(tr("Cannot list storage volumes: unique mount IDs are unavailable (requires Linux 6.8 or later)."));
+            return;
+        }
         QSet<QString> seen;
         for (const auto &volume : QStorageInfo::mountedVolumes()) {
             const QString path = volume.rootPath();
@@ -1152,6 +1163,7 @@ public:
         mixed = std::ranges::any_of(items, &KFileItem::isDir) && std::ranges::any_of(items, &KFileItem::isFile);
         icon = count && !mixed ? QIcon::fromTheme(item.iconName()) : folderIcon;
         name = count == 1 ? item.text() : count ? tr("%n items selected", nullptr, count)
+                                               : total < 0 ? QString()
                                                : total == 1 ? tr("1 item") : tr("%n items", nullptr, total);
         type = count == 1 ? (item.isDir() ? tr("File folder") : item.mimeComment()) : QString();
         modified = dateProperty(tr("Date modified: %1"), items, KFileItem::ModificationTime);
@@ -1439,12 +1451,24 @@ private:
 
     void navigate(const QUrl &url)
     {
-        if (url == computerUrl || (inOverview() && url.matches(files->url(), QUrl::StripTrailingSlash))) {
+        if (url == computerUrl) {
             entered(url);
-        } else {
-            QScopedValueRollback opening(openingFolder, true);
-            files->setUrl(url, true);
+            return;
         }
+        if (inOverview()) {
+            // Match KDirOperator's early return, which does not emit urlEntered.
+            auto normalized = url.isValid() ? url.adjusted(QUrl::NormalizePathSegments) : QUrl::fromLocalFile(QDir::homePath());
+            const auto path = normalized.path();
+            if (!path.isEmpty() && !path.endsWith(QLatin1Char('/'))) {
+                normalized.setPath(path + QLatin1Char('/'));
+            }
+            if (normalized.matches(files->url(), QUrl::StripTrailingSlash)) {
+                entered(files->url());
+                return;
+            }
+        }
+        QScopedValueRollback opening(openingFolder, true);
+        files->setUrl(url, true);
     }
 
     void refresh()
@@ -1873,7 +1897,7 @@ private:
     void updateDetails()
     {
         if (inOverview()) {
-            details->setItems({}, false, overview->tiles->count(), folderIcon);
+            details->setItems({}, false, overview->tiles->isHidden() ? -1 : overview->tiles->count(), folderIcon);
             return;
         }
         const KFileItemList items = files->selectedItems();
