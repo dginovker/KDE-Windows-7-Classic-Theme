@@ -23,7 +23,7 @@ PlasmoidItem {
     toolTipSubText: !NM.Server.valid ? qsTr("Plasma notification service unavailable")
         : inhibited ? qsTr("Do not disturb") : qsTr("%n unread notification(s)", "", history.unreadNotificationsCount)
 
-    readonly property Item anchorItem: compactRepresentationItem ?? null
+    readonly property Item anchorItem: trigger
     property Item trayHost
     readonly property Item balloonAnchor: trayHost?.cellForPlugin(Plasmoid.pluginName) ?? trayHost?.hiddenIconsAnchor ?? null
     readonly property bool frontendReady: NM.Server.valid && !!trayHost && stock.status === Loader.Ready
@@ -43,6 +43,7 @@ PlasmoidItem {
         } else if (anchorItem?.Window.window && stock.item) {
             stock.item.hideInhibitionSummary();
             historyPopup.visible = true;
+            historyPopup.requestActivate();
         }
     }
 
@@ -73,8 +74,9 @@ PlasmoidItem {
         });
         Plasmoid.setInternalAction("configure", configureAction);
     }
-    preferredRepresentation: compactRepresentation
-    compactRepresentation: MouseArea {
+    MouseArea {
+        id: trigger
+        anchors.fill: parent
         acceptedButtons: Qt.LeftButton | Qt.MiddleButton
         onClicked: mouse => {
             if (mouse.button === Qt.MiddleButton)

@@ -11,17 +11,17 @@ Stock.FullRepresentation {
     readonly property bool inhibited: Stock.Globals.inhibited
 
     anchors.fill: parent
-    readonly property bool hasAnchor: !!appletInterface?.compactRepresentationItem
-    onHasAnchorChanged: {
-        if (hasAnchor)
-            Stock.Globals.adopt(appletInterface);
-        else
-            Stock.Globals.forget(appletInterface);
+    // KDE's stock clear-history shortcut and coordinator refer to the active view's anchor.
+    QtObject {
+        id: coordinatorView
+        readonly property Item compactRepresentationItem: history.appletInterface.anchorItem
+        function clearNotificationHistoryAndShowOsd() { history.appletInterface.clearNotificationHistoryAndShowOsd(); }
     }
 
     Component.onCompleted: {
         // Use KDE's unmodified history, DND, and shortcuts, but only one toast renderer.
         Stock.Globals.popupInstantiator.active = false;
+        Stock.Globals.plasmoidItem = coordinatorView;
     }
-    Component.onDestruction: Stock.Globals.forget(history.appletInterface)
+    Component.onDestruction: Stock.Globals.plasmoidItem = null
 }
