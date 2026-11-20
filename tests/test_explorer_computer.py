@@ -56,6 +56,12 @@ def start_computer(out, scale, exe):
     return title, capture(out, 'start-computer')
 
 
+def activate_tile(pt):
+    click(pt(210, 143))
+    if captions() == ['Computer']:  # single-click mode has already navigated or opened the error dialog
+        key('KEY_ENTER')
+
+
 def identity(out, label, exe):
     folder = out / label
     folder.mkdir(exist_ok=True)
@@ -93,9 +99,7 @@ def run(out, scale, base, exe):
     # The only remaining tile's meter has both the Classic ink and its white unfilled section.
     meter = single.crop(pt(233, 141) + pt(406, 150))
     assert (255, 255, 255) in meter.get_flattened_data() and (10, 36, 106) in meter.get_flattened_data(), label
-    click(pt(210, 143))
-    if 'Computer' in captions():  # keep activation independent of KDE's single-click preference
-        key('KEY_ENTER')
+    activate_tile(pt)
     wait_for(lambda: captions() == ['Mount'], 'genuine mounted folder opened')
     assert 'Proof.txt' in words(capture(out, 'mounted-folder'), pt(297, 193) + pt(399, 215))
     key('KEY_LEFTALT', 'KEY_LEFT')
@@ -127,6 +131,102 @@ def run(out, scale, base, exe):
     wait_for(lambda: not captions(), 'pane Explorer closed')
 
 
+def regressions(out, scale, base, exe):
+    pt = area(scale)
+    heading = pt(176, 94) + pt(400, 120)
+    rows = pt(171, 96) + pt(470, 260)
+    tiles = pt(180, 118) + pt(421, 175)
+    computer = pt(68, 310)
+    failures = []
+
+    def folder_text(name):
+        return words(capture(out, name), rows)
+
+    def search(text):
+        click(pt(665, 42))
+        vmctl.type_text(VM, text)
+
+    def filter_reset():
+        before = folder_text('filter-before')
+        assert 'Alpha.txt' in before and 'Zulu.txt' in before, before
+        search('Alpha')
+        filtered = folder_text('filter-active')
+        assert 'Alpha.txt' in filtered and 'Zulu.txt' not in filtered, filtered
+        click(computer)
+        wait_for(lambda: captions() == ['Computer'], 'Computer without a new search')
+        key('KEY_LEFTALT', 'KEY_LEFT')
+        wait_for(lambda: captions() == ['Ordinary'], 'Back to the populated ordinary folder')
+        after = folder_text('filter-back')
+        assert 'Alpha.txt' in after and 'Zulu.txt' in after, f'Folder filter survived Back: {after!r}'
+
+    def reselect_computer():
+        click(computer)
+        wait_for(lambda: captions() == ['Computer'], 'Computer selected from pane')
+        click(computer)
+        assert captions() == ['Computer']
+        key('KEY_LEFTALT', 'KEY_LEFT')
+        capture(out, 'reselect-back')
+        assert captions() == ['Ordinary'], f'One Back did not reach Ordinary: {captions()}'
+        key('KEY_LEFTALT', 'KEY_RIGHT')
+        assert 'Storage volumes' in words(capture(out, 'reselect-forward'), heading)
+
+    def stale_tile(change):
+        click(computer)
+        wait_for(lambda: captions() == ['Computer'], 'Computer before mount change')
+        search('W7VOLUME')
+        assert 'W7VOLUME' in words(capture(out, f'{change}-before'), tiles)
+        mount = f'{base}/Mount'
+        if change == 'inaccessible':
+            guest_root(f'chmod 000 {mount}')
+        else:
+            guest_root(f'umount {mount}; test -f {mount}/Underlying.txt')
+            if change == 'replaced':
+                # Remount the very same volume: label, mountpoint and contents alone cannot prove identity.
+                guest_root(f'mount -o loop {base}/volume.img {mount}')
+        try:
+            activate_tile(pt)  # No refresh yet: activate the stale item, not the new mount list.
+            result = capture(out, f'{change}-activated')
+            titles = captions()
+            assert sorted(titles) == ['Computer', 'Volume unavailable'], f'Stale {change} tile: {titles}'
+            assert 'no longer accessible' in words(result, pt(130, 130) + pt(630, 325)).replace('\n', ' ')
+            key('KEY_ESC')
+            wait_for(lambda: captions() == ['Computer'], 'closed warning without leaving Computer')
+            key('KEY_F5')
+            refreshed = capture(out, f'{change}-refreshed')
+            if change == 'replaced':
+                assert 'W7VOLUME' in words(refreshed, tiles)
+                activate_tile(pt)
+                wait_for(lambda: captions() == ['Mount'], 'fresh tile opens the replacement after F5')
+                assert 'Proof.txt' in words(capture(out, 'replaced-opened'), pt(297, 193) + pt(399, 215))
+            else:
+                assert set(refreshed.crop(tiles).get_flattened_data()) == {(255, 255, 255)}, change
+        finally:
+            if change == 'unmounted':
+                guest_root(f'mount -o loop {base}/volume.img {mount}')
+            elif change == 'inaccessible':
+                guest_root(f'chmod 755 {mount}')
+
+    checks = {'filter reset': filter_reset, 'Computer reselect': reselect_computer}
+    checks.update((f'{change} tile', lambda change=change: stale_tile(change))
+                  for change in ('unmounted', 'replaced', 'inaccessible'))
+    for name, exercise in checks.items():
+        user(f'systemd-run --user --collect -q {exe} {base}/Ordinary')
+        wait_for(lambda: captions() == ['Ordinary'], 'populated ordinary folder')
+        arrange(scale, 'Ordinary')
+        try:
+            exercise()
+            print(f'PASS {name}', flush=True)
+        except AssertionError as error:
+            failures.append(f'{name}: {error}')
+            print(f'FAIL {failures[-1]}', flush=True)
+        finally:
+            if 'Volume unavailable' in captions():
+                key('KEY_ESC')
+            key('KEY_LEFTCTRL', 'KEY_W')
+            wait_for(lambda: not captions(), 'regression Explorer closed')
+    assert not failures, failures
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('out', type=Path)
@@ -142,13 +242,15 @@ def main():
     toggle('current', packaged=args.packaged)
     before = user('xdg-mime query default inode/directory')
     base = user('mktemp -d /tmp/w7-volumes.XXXXXX')
-    user(f'mkdir {base}/Mount {base}/Ordinary; kscreen-doctor output.{output}.scale.{args.scale}')
+    user(f'mkdir {base}/Mount {base}/Ordinary; touch {base}/Ordinary/{{Alpha,Zulu}}.txt {base}/Mount/Underlying.txt; '
+         f'kscreen-doctor output.{output}.scale.{args.scale}')
     try:
         guest_root(f'chmod 755 {base}; truncate -s 48M {base}/volume.img; '
                    f'mkfs.ext4 -q -F -L W7VOLUME {base}/volume.img && mount -o loop {base}/volume.img {base}/Mount && '
                    f'touch {base}/Mount/Proof.txt && chmod a+r {base}/Mount/Proof.txt')
         toggle('windows', packaged=args.packaged)
         run(args.out, args.scale, base, exe)
+        regressions(args.out, args.scale, base, exe)
         toggle('current', packaged=args.packaged)
         assert user('xdg-mime query default inode/directory') == before
         open_folder(f'file://{base}/Ordinary')
