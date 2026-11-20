@@ -98,9 +98,11 @@ def run(out, scale, base, exe, unavailable):
         key('KEY_ESC')
         expect(still_at, f'{route}-warning-dismissed')
 
-    def show_places():
+    def show_places(name):
+        # The inline address editor covers the arrow until focus moves away.
+        click(pt(78, 178))  # blank row above Libraries
         click(pt(103, 42))
-        menu = capture(out, 'address-places')
+        menu = capture(out, name)
         # Crop the first five text rows, not the popup frame or the folder behind it.
         options = words(menu, pt(121, 55) + pt(194, 138)).splitlines()
         assert options[:5] == ['Desktop', 'Downloads', 'Recent Places', 'Libraries', 'Documents'], options
@@ -133,7 +135,7 @@ def run(out, scale, base, exe, unavailable):
             if unavailable == 'forward':
                 click(pt(47, 43))
             else:
-                show_places()
+                show_places('address-places-missing')
             check_warning(unavailable, 'Libraries')
             landing('unchanged-landing')
             live_address('win7-explorer:/libraries')
@@ -152,7 +154,7 @@ def run(out, scale, base, exe, unavailable):
         expect('tester', 'back-still-targets-home')
         live_address('/home/tester')
         if unavailable == 'places':
-            show_places()
+            show_places('address-places-restored')
             expect(FOLDERS[0], 'places-opens-restored-documents')
             live_address(docs)
         print(f'PASS: missing Documents via {unavailable} reported without changing view or history', flush=True)
