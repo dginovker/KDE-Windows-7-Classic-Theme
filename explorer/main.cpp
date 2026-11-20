@@ -46,6 +46,7 @@
 #include <QDialogButtonBox>
 #include <QDir>
 #include <QDragEnterEvent>
+#include <QElapsedTimer>
 #include <QEnterEvent>
 #include <QFile>
 #include <QFileInfo>
@@ -1624,7 +1625,13 @@ public:
                 entered(url);
         });
         connect(files, &KDirOperator::fileSelected, this, &Explorer::open);
-        connect(files, &KDirOperator::finishedLoading, this, &Explorer::updateDetails);
+        previewPreparation.setInterval(1);
+        connect(&previewPreparation, &QTimer::timeout, this, &Explorer::prepareDetailsPreviews);
+        connect(files, &KDirOperator::finishedLoading, this, [this] {
+            updateDetails();
+            if (viewIndex == Details && thumbnails && files->view())
+                files->view()->viewport()->update();
+        });
         connect(files, &KDirOperator::finishedLoading, this, &Explorer::hideFocus);
         // finishedLoading also means canceled or failed, and a reload clears the proxy before any items arrive.
         auto *lister = files->dirLister();
@@ -1632,7 +1639,14 @@ public:
             listedUrl.clear();
             empty->hide();
         };
-        connect(lister, &KDirLister::clear, this, invalidateListing);
+        connect(lister, &KDirLister::clear, this, [this, invalidateListing] {
+            invalidateListing();
+            stopPreviewPreparation();
+            if (viewIndex == Details) {
+                if (auto *generator = files->previewGenerator())
+                    generator->setPreviewShown(false);
+            }
+        });
         const auto invalidateCurrent = [this, invalidateListing](const QUrl &url) {
             if (listingRoot(url) == listingRoot(files->url()))
                 invalidateListing();
@@ -1662,6 +1676,7 @@ public:
             }
         });
         connect(files, &KDirOperator::viewChanged, this, [this](QAbstractItemView *view) {
+            stopPreviewPreparation();
             view->setFrameShape(QFrame::NoFrame);
             // With the scroll bar "as needed", QListView always reserves its width, which costs Windows' fifth column.
             // Windows reflows only once the bar appears, so the bar is switched off until there is something to scroll.
@@ -1695,7 +1710,19 @@ public:
             connect(view->model(), &QAbstractItemModel::rowsInserted, this, &Explorer::updateDetails, connection);
             connect(view->model(), &QAbstractItemModel::rowsRemoved, this, &Explorer::updateDetails, connection);
             connect(view->model(), &QAbstractItemModel::modelReset, this, &Explorer::updateDetails, connection);
-            connect(view->model(), &QAbstractItemModel::dataChanged, this, &Explorer::updateDetails, connection);
+            connect(view->model(), &QAbstractItemModel::dataChanged, view,
+                    [this, view](const QModelIndex &first, const QModelIndex &last, const QList<int> &roles) {
+                // Thumbnail and cut-icon updates don't change any Details pane fields or commands.
+                if (!roles.isEmpty() && std::ranges::all_of(roles, [](int role) {
+                        return role == Qt::DecorationRole || role == KDirModel::HandleSequencesRole;
+                    }))
+                    return;
+                const auto *selection = view->selectionModel();
+                if (selection->hasSelection() && std::ranges::any_of(selection->selection(), [&](const auto &range) {
+                        return range.intersects(QItemSelectionRange(first, last));
+                    }))
+                    QTimer::singleShot(0, this, &Explorer::updateDetails);
+            });
             QTimer::singleShot(0, this, &Explorer::updateDetails);
         });
         connect(QApplication::clipboard(), &QClipboard::dataChanged, this, &Explorer::updateActions);
@@ -1764,6 +1791,14 @@ protected:
         if ((watched == view || watched == view->viewport())
             && (event->type() == QEvent::Move || event->type() == QEvent::Resize))
             QTimer::singleShot(0, this, &Explorer::layoutEmptyMessage);
+        const auto *generator = files->previewGenerator();
+        if (watched == view->viewport() && event->type() == QEvent::Paint && viewIndex == Details && thumbnails
+            && generator && files->dirLister()->isFinished() && !generator->isPreviewShown() && !previewPreparation.isActive()) {
+            // KIO's preview setup synchronously resolves every MIME type. Its listing can paint first;
+            // pre-resolve the remaining types in small GUI-thread slices (KFileItem copies share the cache).
+            pendingPreviewItems = files->dirLister()->items();
+            previewPreparation.start();
+        }
         if (watched != view)
             return false;
         if (event->type() == QEvent::Resize)
@@ -1831,6 +1866,9 @@ private:
     QAction *detailsPaneAction;
     bool foldersInNewWindow;
     bool thumbnails;
+    QTimer previewPreparation;
+    KFileItemList pendingPreviewItems;
+    qsizetype previewCursor = 0;
     int viewIndex = -1;
     int iconSize = 96;
     bool keyboardUsed = false;
@@ -1929,8 +1967,35 @@ private:
         foldersInNewWindow = own->isChecked();
         files->setShowHiddenFiles(hidden->isChecked());
         thumbnails = icons->isChecked();
-        files->setInlinePreviewShown(thumbnails);
-        files->previewGenerator()->setPreviewShown(thumbnails);
+        files->setInlinePreviewShown(thumbnails && viewIndex != Details);
+        files->previewGenerator()->setPreviewShown(thumbnails && (viewIndex != Details || files->dirLister()->isFinished()));
+    }
+
+    void stopPreviewPreparation()
+    {
+        previewPreparation.stop();
+        pendingPreviewItems.clear();
+        previewCursor = 0;
+    }
+
+    void prepareDetailsPreviews()
+    {
+        auto *generator = files->previewGenerator();
+        if (!thumbnails || inOverview() || !files->dirLister()->isFinished() || generator->isPreviewShown()) {
+            stopPreviewPreparation();
+            return;
+        }
+        QElapsedTimer budget;
+        budget.start();
+        while (previewCursor < pendingPreviewItems.size()) {
+            const auto &item = std::as_const(pendingPreviewItems)[previewCursor++];
+            if (!item.isMimeTypeKnown())
+                item.determineMimeType();
+            if (budget.elapsed() >= 3)
+                return;
+        }
+        stopPreviewPreparation();
+        generator->setPreviewShown(true);
     }
 
     void commands()
@@ -2136,6 +2201,9 @@ private:
         const QPersistentModelIndex current(files->view() ? files->view()->currentIndex() : QModelIndex());
         viewIndex = index;
         files->presentation = index;
+        // Reusing a populated view must retain directory montages: KIO cannot regenerate them at 16px.
+        const bool alreadyListed = listedUrl == listingRoot(files->url());
+        files->setInlinePreviewShown(thumbnails && (index != Details || alreadyListed));
         static const int sizes[] = {256, 96, 48, 16, 16, 16, 48, 32};
         const auto mode = index == Details ? KDirOperator::ViewDetailsView
             : index == Small || index == List ? KDirOperator::ViewCompactView : KDirOperator::ViewIconsView;
