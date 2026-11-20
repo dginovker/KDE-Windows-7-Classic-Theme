@@ -13,6 +13,8 @@
 #include <KFileItemDelegate>
 #include <KFileItemListProperties>
 #include <KFilePreviewGenerator>
+#include <KIconEffect>
+#include <KIconUtils>
 #include <KIO/ApplicationLauncherJob>
 #include <KIO/UDSEntry>
 #include <KIO/FileUndoManager>
@@ -41,9 +43,11 @@
 #include <QEnterEvent>
 #include <QFile>
 #include <QFileInfo>
+#include <QFileSystemWatcher>
 #include <QFontMetricsF>
 #include <QGroupBox>
 #include <QHeaderView>
+#include <QIdentityProxyModel>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListView>
@@ -209,7 +213,24 @@ private:
 class DetailsNameDelegate : public KFileItemDelegate
 {
 public:
-    using KFileItemDelegate::KFileItemDelegate;
+    explicit DetailsNameDelegate(QTreeView *tree, KDirLister *lister)
+        : KFileItemDelegate(tree), plainFolders(lister)
+    {
+        plainFolders.setSourceModel(tree->model());
+        connect(&modeWatcher, &QFileSystemWatcher::fileChanged, this, [this, tree] { updateMode(tree); });
+        connect(&modeWatcher, &QFileSystemWatcher::directoryChanged, this, [this, tree] { updateMode(tree); });
+        updateMode(tree);
+        auto *clipboard = QApplication::clipboard();
+        const auto updateCut = [this, tree, clipboard] {
+            const auto *data = clipboard->mimeData();
+            const auto urls = data && KIO::isClipboardDataCut(data) ? KUrlMimeData::urlsFromMimeData(data) : QList<QUrl>{};
+            plainFolders.cut = QSet<QUrl>(urls.cbegin(), urls.cend());
+            if (windowsMode)
+                tree->viewport()->update();
+        };
+        connect(clipboard, &QClipboard::dataChanged, this, updateCut);
+        updateCut();
+    }
 
     QSize sizeHint(const QStyleOptionViewItem &option, const QModelIndex &index) const override
     {
@@ -221,8 +242,85 @@ public:
     {
         auto cell = option;
         cell.rect = QStyle::visualRect(option.direction, option.rect, option.rect.adjusted(14, 0, 0, 0));
-        KFileItemDelegate::paint(painter, cell, index);
+        if (windowsMode && index.data(KDirModel::FileItemRole).value<KFileItem>().isDir()) {
+            plainFolders.iconSize = cell.decorationSize;
+            plainFolders.dpr = painter->device()->devicePixelRatioF();
+            KFileItemDelegate::paint(painter, cell, plainFolders.mapFromSource(index));
+        } else {
+            KFileItemDelegate::paint(painter, cell, index);
+        }
     }
+
+private:
+    // KDirModel puts previews and plain icons in the same role. Only change the paint-time read:
+    // clearing the live role would lose Large Icons montages which KIO can't regenerate at 16px.
+    class PlainFolderDecoration : public QIdentityProxyModel
+    {
+    public:
+        explicit PlainFolderDecoration(KDirLister *lister) : lister(lister) {}
+        QSet<QUrl> cut;
+        QSize iconSize;
+        qreal dpr = 1;
+
+        QVariant data(const QModelIndex &index, int role) const override
+        {
+            if (role != Qt::DecorationRole)
+                return QIdentityProxyModel::data(index, role);
+            const auto item = index.data(KDirModel::FileItemRole).value<KFileItem>();
+            const auto name = item.iconName();
+            // Match KDirModel's non-preview branch, including its unknown icon and slow-listing rule.
+            QIcon icon = QDir::isAbsolutePath(name) ? QIcon(name) : QIcon();
+            if (icon.isNull() || (!(name.endsWith(u".svg") || name.endsWith(u".svgz")) && icon.availableSizes().isEmpty()))
+                icon = QIcon::fromTheme(name, QIcon::fromTheme(QStringLiteral("unknown")));
+
+            if (root.url() != lister->url())
+                root = KFileItem(lister->url());
+            bool slow = root.isSlow();
+            for (auto parent = index.parent(); !slow && parent.isValid(); parent = parent.parent())
+                slow = parent.data(KDirModel::FileItemRole).value<KFileItem>().isSlow();
+            if (!slow)
+                icon = KIconUtils::addOverlays(icon, item.overlays());
+            if (cut.contains(item.url())) {
+                auto pixmap = icon.pixmap(iconSize, dpr);
+                KIconEffect::toDisabled(pixmap);
+                icon = QIcon(pixmap);
+            }
+            return icon;
+        }
+
+    private:
+        const KDirLister *lister;
+        mutable KFileItem root;
+    };
+
+    void updateMode(QTreeView *tree)
+    {
+        const auto state = QStandardPaths::writableLocation(QStandardPaths::GenericStateLocation)
+            + QStringLiteral("/win7-classic/mode");
+        // A fresh install has no mode file yet; watch its nearest existing parent until it appears.
+        auto watch = state;
+        while (!QFileInfo::exists(watch))
+            watch = QFileInfo(watch).absolutePath();
+        const auto old = modeWatcher.files() + modeWatcher.directories();
+        if (!old.contains(watch)) {
+            if (!modeWatcher.addPath(watch))
+                qWarning() << "Explorer cannot watch active mode at" << watch;
+            if (!old.isEmpty())
+                modeWatcher.removePaths(old);
+        }
+        QFile mode(state);
+        const bool windows = mode.open(QIODevice::ReadOnly) && mode.readLine().trimmed() == "windows";
+        if (!mode.isOpen() && QFileInfo::exists(state))
+            qWarning() << "Explorer cannot read active mode:" << mode.errorString();
+        if (windowsMode != windows) {
+            windowsMode = windows;
+            tree->viewport()->update();
+        }
+    }
+
+    QFileSystemWatcher modeWatcher;
+    mutable PlainFolderDecoration plainFolders;
+    bool windowsMode = false;
 };
 
 static QString absoluteDate(const QDateTime &date, const QLocale &locale)
@@ -1404,8 +1502,6 @@ public:
             }
         });
         connect(files, &KDirOperator::viewChanged, this, [this](QAbstractItemView *view) {
-            viewPreviewPlugins = files->previewGenerator()->enabledPlugins();
-            applyInlinePreviews();
             view->setFrameShape(QFrame::NoFrame);
             // With the scroll bar "as needed", QListView always reserves its width, which costs Windows' fifth column.
             // Windows reflows only once the bar appears, so the bar is switched off until there is something to scroll.
@@ -1497,13 +1593,6 @@ public:
     }
 
 protected:
-    void changeEvent(QEvent *event) override
-    {
-        QMainWindow::changeEvent(event);
-        if (event->type() == QEvent::StyleChange && viewIndex == Details)
-            applyInlinePreviews();
-    }
-
     // KDirOperator's icon view sizes its grid from the font after every resize; Explorer's grid is reapplied after it.
     bool eventFilter(QObject *watched, QEvent *event) override
     {
@@ -1606,7 +1695,6 @@ private:
     QAction *detailsPaneAction;
     bool foldersInNewWindow;
     bool thumbnails;
-    QStringList viewPreviewPlugins;
     int viewIndex = -1;
     int iconSize = 96;
     bool keyboardUsed = false;
@@ -1706,21 +1794,7 @@ private:
         files->setShowHiddenFiles(hidden->isChecked());
         thumbnails = icons->isChecked();
         files->setInlinePreviewShown(thumbnails);
-        applyInlinePreviews();
-    }
-
-    void applyInlinePreviews()
-    {
-        auto *generator = files->previewGenerator();
-        auto plugins = viewPreviewPlugins;
-        if (viewIndex == Details && style()->name().compare(QStringLiteral("Win7Classic"), Qt::CaseInsensitive) == 0)
-            plugins.removeAll(QStringLiteral("directorythumbnail"));
-        if (plugins != generator->enabledPlugins()) {
-            // KIO shares the directory model across views; changing plugins alone leaves existing previews in it.
-            generator->setPreviewShown(false);
-            generator->setEnabledPlugins(plugins);
-        }
-        generator->setPreviewShown(thumbnails);
+        files->previewGenerator()->setPreviewShown(thumbnails);
     }
 
     void commands()
@@ -1962,10 +2036,10 @@ private:
         }
     }
 
-    static void explorerColumns(QTreeView *tree)
+    void explorerColumns(QTreeView *tree)
     {
         tree->setAlternatingRowColors(false);
-        tree->setItemDelegateForColumn(KDirModel::Name, new DetailsNameDelegate(tree));
+        tree->setItemDelegateForColumn(KDirModel::Name, new DetailsNameDelegate(tree, files->dirLister()));
         auto *metadata = new DetailsMetadataDelegate(tree);
         for (int column : {KDirModel::ModifiedTime, KDirModel::Type, KDirModel::Size})
             tree->setItemDelegateForColumn(column, metadata);
