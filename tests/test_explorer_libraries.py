@@ -101,7 +101,8 @@ def run(out, scale, base, exe, unavailable):
     def show_places():
         click(pt(103, 42))
         menu = capture(out, 'address-places')
-        options = words(menu, pt(99, 54) + pt(205, 231)).splitlines()
+        # Crop the first five text rows, not the popup frame or the folder behind it.
+        options = words(menu, pt(121, 55) + pt(194, 138)).splitlines()
         assert options[:5] == ['Desktop', 'Downloads', 'Recent Places', 'Libraries', 'Documents'], options
         for _ in range(5):
             key('KEY_DOWN')
