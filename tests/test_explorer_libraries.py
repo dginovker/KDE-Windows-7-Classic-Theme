@@ -3,7 +3,7 @@
 import argparse
 from pathlib import Path
 
-from lab import VM, clipboard, executable, explorer_identity, install, toggle, user, wait_for
+from lab import clipboard, executable, explorer_identity, install, toggle, user, wait_for
 from test_explorer import captions, click, double_click, key
 from test_explorer_command_menus import words
 from test_explorer_computer import address, area, arrange, capture
@@ -79,26 +79,96 @@ def run(out, scale, base, exe, unavailable):
     expect('Libraries', 'pane-opens-landing-not-home')
     landing('libraries')
     live_address('win7-explorer:/libraries')
+    docs = f'{base}/{FOLDERS[0]}'
+
+    def remove_docs():
+        user(f'mv {docs} {docs}.held && test ! -e {docs} && test -r {base}')
+
+    def restore_docs():
+        user(f'mv {docs}.held {docs}')
+        assert tree() == before, 'failed navigation changed files or XDG definitions'
+
+    def check_warning(route, still_at):
+        warning = capture(out, f'missing-{route}')
+        titles = captions()
+        print(f'missing {route}: windows={titles}; removed {docs}', flush=True)
+        assert sorted(titles) == sorted(['Folder unavailable', still_at]), titles
+        message = words(warning, pt(158, 155) + pt(626, 248)).replace('\n', ' ')
+        assert all(word in message for word in ('Cannot open', FOLDERS[0])), message
+        key('KEY_ESC')
+        expect(still_at, f'{route}-warning-dismissed')
+
+    def show_places():
+        click(pt(103, 42))
+        menu = capture(out, 'address-places')
+        options = words(menu, pt(99, 54) + pt(205, 231)).splitlines()
+        assert options[:5] == ['Desktop', 'Downloads', 'Recent Places', 'Libraries', 'Documents'], options
+        for _ in range(5):
+            key('KEY_DOWN')
+        key('KEY_ENTER')
+
+    if unavailable in ('back', 'forward', 'places'):
+        # Home → Libraries → configured Documents → Music. Remove Documents only after leaving it.
+        double_click(pt(211, 167))
+        expect(FOLDERS[0], 'visited-documents')
+        live_address(docs)
+        click(pt(78, 235))
+        expect(FOLDERS[1], 'left-documents-for-music')
+        if unavailable != 'back':
+            key('KEY_LEFTALT', 'KEY_LEFT')
+            expect(FOLDERS[0], 'back-to-existing-documents')
+            key('KEY_LEFTALT', 'KEY_LEFT')
+            expect('Libraries', 'back-to-libraries-before-removal')
+        remove_docs()
+        if unavailable == 'back':
+            click(pt(18, 43))
+            check_warning(unavailable, FOLDERS[1])
+            live_address(f'{base}/{FOLDERS[1]}')
+            restore_docs()
+            click(pt(18, 43))
+            expect(FOLDERS[0], 'back-still-targets-documents')
+            live_address(docs)
+        else:
+            if unavailable == 'forward':
+                click(pt(47, 43))
+            else:
+                show_places()
+            check_warning(unavailable, 'Libraries')
+            landing('unchanged-landing')
+            live_address('win7-explorer:/libraries')
+            restore_docs()
+            click(pt(47, 43))
+            expect(FOLDERS[0], 'forward-still-targets-documents')
+            live_address(docs)
+        click(pt(47, 43))
+        expect(FOLDERS[1], 'forward-still-targets-music')
+        live_address(f'{base}/{FOLDERS[1]}')
+        key('KEY_LEFTALT', 'KEY_LEFT')
+        expect(FOLDERS[0], 'back-from-music-still-targets-documents')
+        key('KEY_LEFTALT', 'KEY_LEFT')
+        expect('Libraries', 'back-still-targets-libraries')
+        key('KEY_LEFTALT', 'KEY_LEFT')
+        expect('tester', 'back-still-targets-home')
+        live_address('/home/tester')
+        if unavailable == 'places':
+            show_places()
+            expect(FOLDERS[0], 'places-opens-restored-documents')
+            live_address(docs)
+        print(f'PASS: missing Documents via {unavailable} reported without changing view or history', flush=True)
+        return
+
     if unavailable:
         # Leave a real forward entry, then remove Documents without refreshing Libraries.
         double_click(pt(465, 167))
         expect('Lab-Music', 'music-before-removal')
         key('KEY_LEFTALT', 'KEY_LEFT')
         expect('Libraries', 'landing-before-removal')
-        docs = f'{base}/Custom-Docs'
-        user(f'mv {docs} {docs}.held && test ! -e {docs} && test -r {base}')
+        remove_docs()
         if unavailable == 'tile':
             double_click(pt(211, 167))
         else:
             click(pt(78, 216))
-        warning = capture(out, f'missing-{unavailable}')
-        titles = captions()
-        print(f'missing {unavailable}: windows={titles}; removed {docs}', flush=True)
-        assert sorted(titles) == ['Folder unavailable', 'Libraries'], titles
-        message = words(warning, pt(158, 155) + pt(626, 248)).replace('\n', ' ')
-        assert all(word in message for word in ('Cannot open', 'Custom-Docs')), message
-        key('KEY_ESC')
-        expect('Libraries', 'warning-dismissed-on-landing')
+        check_warning(unavailable, 'Libraries')
         landing('unchanged-landing')
         live_address('win7-explorer:/libraries')
         key('KEY_LEFTALT', 'KEY_RIGHT')
@@ -119,8 +189,7 @@ def run(out, scale, base, exe, unavailable):
             live_address('/home/tester')
             key('KEY_LEFTALT', 'KEY_RIGHT')
             expect('Libraries', 'forward-history-from-home-unchanged')
-        user(f'mv {docs}.held {docs}')
-        assert tree() == before, 'failed navigation changed files or XDG definitions'
+        restore_docs()
         print(f'PASS: missing {unavailable} reported without changing view or history', flush=True)
         return
     for i, title in enumerate(FOLDERS):
@@ -170,7 +239,6 @@ def run(out, scale, base, exe, unavailable):
     (out / 'before-browsing.txt').write_text(before + '\n')
     (out / 'after-browsing.txt').write_text(tree() + '\n')
 
-    docs = f'{base}/{FOLDERS[0]}'
     for folder, source, selected in ((sources, f'{sources}/IncludeMe', True),
                                      (f'{base}/IncludeCurrent', f'{base}/IncludeCurrent', False)):
         name = Path(source).name
@@ -207,7 +275,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('out', type=Path)
     parser.add_argument('--scale', type=float, choices=(1, 1.5), default=1)
-    parser.add_argument('--unavailable', choices=('tile', 'child'), help='exercise the missing Documents target')
+    parser.add_argument('--unavailable', choices=('tile', 'child', 'back', 'forward', 'places'), help='exercise the missing Documents target')
     installed = parser.add_mutually_exclusive_group()
     installed.add_argument('--installed', action='store_true')
     installed.add_argument('--packaged', action='store_true')
