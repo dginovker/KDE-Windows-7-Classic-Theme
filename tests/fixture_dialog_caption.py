@@ -13,7 +13,9 @@ owner.show()
 
 kind = sys.argv[1]
 if kind == 'message':
-    QMessageBox.information(owner, 'Modal caption probe', 'Caption probe', QMessageBox.Ok | QMessageBox.Cancel)
+    # Keep title glyphs outside the caption-button measurement even with wider host font metrics.
+    QMessageBox.information(owner, 'Modal caption probe', 'This message box exercises Classic modal caption buttons.',
+                            QMessageBox.Ok | QMessageBox.Cancel)
 else:
     flags = Qt.WindowType
     dialog = QDialog(owner, flags.Dialog | flags.WindowCloseButtonHint
