@@ -77,6 +77,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 namespace classic {
 const auto &face=Classic::Face, &shadow=Classic::Shadow3D, &darkShadow=Classic::DarkShadow3D,
@@ -464,11 +467,24 @@ protected:
 
 static const QUrl computerUrl(QStringLiteral("win7-explorer:/computer"));
 
+static quint64 browseableMountId(const QString &path)
+{
+    const auto name = QFile::encodeName(path);
+    struct statx info = {};
+    // Device numbers and paths can both be reused after an unmount.
+    constexpr unsigned mask = STATX_TYPE | STATX_MNT_ID_UNIQUE;
+    if (::statx(AT_FDCWD, name.constData(), AT_NO_AUTOMOUNT, mask, &info) != 0
+        || (info.stx_mask & mask) != mask || !(info.stx_attributes & STATX_ATTR_MOUNT_ROOT)
+        || !S_ISDIR(info.stx_mode) || ::access(name.constData(), R_OK | X_OK) != 0)
+        return 0;
+    return info.stx_mnt_id;
+}
+
 class OverviewTiles : public QStyledItemDelegate
 {
 public:
     using QStyledItemDelegate::QStyledItemDelegate;
-    enum Role { Target = Qt::UserRole, CapacityText, UsedPercent };
+    enum Role { Target = Qt::UserRole, MountId, CapacityText, UsedPercent };
 
     void paint(QPainter *p, const QStyleOptionViewItem &option, const QModelIndex &item) const override
     {
@@ -538,13 +554,17 @@ public:
         QSet<QString> seen;
         for (const auto &volume : QStorageInfo::mountedVolumes()) {
             const QString path = volume.rootPath();
-            if (!volume.isValid() || path.isEmpty() || !QFileInfo(path).isDir() || seen.contains(path))
+            if (!volume.isValid() || path.isEmpty() || seen.contains(path))
+                continue;
+            const auto mountId = browseableMountId(path);
+            if (!mountId)
                 continue;
             seen.insert(path);
             const auto name = volume.name();
             const QString label = name.isEmpty() || name == path ? path : tr("%1 (%2)").arg(name, path);
             auto *item = add(label, assetIcon(path == QLatin1String("/") ? QStringLiteral("drive-system") : QStringLiteral("drive")),
                              QUrl::fromLocalFile(path));
+            item->setData(OverviewTiles::MountId, mountId);
             const qint64 free = volume.bytesAvailable(), total = volume.bytesTotal();
             if (volume.isReady() && total > 0 && free >= 0 && free <= total) {
                 item->setData(OverviewTiles::CapacityText,
@@ -1249,7 +1269,15 @@ public:
         pages->addWidget(overview);
         splitter->addWidget(pages);
         connect(overview->tiles, &QListWidget::itemActivated, this, [this](QListWidgetItem *item) {
-            navigate(item->data(OverviewTiles::Target).toUrl());
+            const auto target = item->data(OverviewTiles::Target).toUrl();
+            const auto mountId = browseableMountId(target.toLocalFile());
+            if (!mountId || mountId != item->data(OverviewTiles::MountId).toULongLong()) {
+                QMessageBox::warning(this, tr("Volume unavailable"),
+                                     tr("Cannot open %1. The volume was unmounted, replaced or is no longer accessible. Refresh Computer and try again.")
+                                         .arg(target.toLocalFile()));
+                return;
+            }
+            navigate(target);
         });
         splitter->setStretchFactor(1, 1);
         splitter->setSizes({157, 600});
@@ -1785,6 +1813,8 @@ private:
             overview->tiles->setFocus();
         } else {
             restoreFolderView();
+            // Computer may already have cleared the edit without touching the hidden folder model.
+            proxy()->setFilterFixedString({});
         }
         const QString name = locationName(url);
         setWindowTitle(name);
@@ -1796,7 +1826,7 @@ private:
             pixels.addPixmap(icon.pixmap(size));
         setWindowIcon(pixels);
         folderIcon = icon;
-        if (!std::exchange(stepping, false)) {
+        if (!std::exchange(stepping, false) && (position < 0 || !url.matches(history[position], QUrl::StripTrailingSlash))) {
             history.resize(position + 1);
             history.append(url);
             position = history.size() - 1;
