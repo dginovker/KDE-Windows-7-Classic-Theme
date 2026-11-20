@@ -40,9 +40,14 @@ PlasmoidItem {
     readonly property bool inhibited: stock.item?.inhibited ?? false
 
     function toggleHistory() {
-        if (historyPopup.visible) {
+        if (historyPopup.visible)
             historyPopup.close();
-        } else if (anchorItem?.Window.window && stock.item) {
+        else
+            showHistory();
+    }
+
+    function showHistory() {
+        if (!historyPopup.visible && anchorItem?.Window.window && stock.item) {
             stock.item.hideInhibitionSummary();
             historyPopup.visible = true;
             historyPopup.requestActivate();
@@ -107,7 +112,6 @@ PlasmoidItem {
         urgencies: (!root.inhibited || policy.criticalPopupsInDoNotDisturbMode ? NM.Notifications.CriticalUrgency : 0)
             | (!root.inhibited ? NM.Notifications.NormalUrgency : 0)
             | (!root.inhibited && policy.lowPriorityPopups ? NM.Notifications.LowUrgency : 0)
-        onShowNotificationsRequested: if (!historyPopup.visible) root.toggleHistory()
     }
 
     NM.Notifications {

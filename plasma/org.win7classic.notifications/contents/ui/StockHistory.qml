@@ -18,6 +18,12 @@ Stock.FullRepresentation {
         function clearNotificationHistoryAndShowOsd() { history.appletInterface.clearNotificationHistoryAndShowOsd(); }
     }
 
+    // The inhibition summary is sent by the stock model, although Classic renders it.
+    Connections {
+        target: Stock.Globals.popupNotificationsModel
+        function onShowNotificationsRequested() { history.appletInterface.showHistory(); }
+    }
+
     Component.onCompleted: {
         // Use KDE's unmodified history, DND, and shortcuts, but only one toast renderer.
         Stock.Globals.popupInstantiator.active = false;
