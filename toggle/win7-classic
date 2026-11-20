@@ -335,12 +335,25 @@ switch_to() {
             problem="KWin rejected the Classic decoration (see switch.log and journalctl --user -u plasma-kwin_wayland)"
         fi
     fi
+    local retired="" windows_profile=$state/profiles/windows
+    if [[ -z $problem && $rebuild == true && ( -e $windows_profile || -L $windows_profile ) ]]; then
+        # Keep the old profile intact until the new baseline commits.
+        if retired=$(mktemp -d "$state/profiles/.rebuild.XXXXXX") &&
+                mv --no-copy -T "$windows_profile" "$retired/windows"; then :
+        else problem="could not retire the old Windows profile"; fi
+    fi
     if [[ -z $problem ]] && ! mv -fT "${shared_applets%.json}.new" "$shared_applets"; then
         problem="could not commit shared applet settings baseline"
     fi
     if [[ -n $problem ]]; then
         rm -f "${shared_applets%.json}.new" || true
         log "rolling back to $from: $problem"
+        if [[ -n $retired ]]; then
+            if [[ -e $retired/windows || -L $retired/windows ]]; then
+                mv --no-copy -T "$retired/windows" "$windows_profile" || log "ERROR: old Windows profile retained at $retired/windows"
+            fi
+            [[ -e $retired/windows || -L $retired/windows ]] || rmdir "$retired" || log "WARNING: could not remove $retired"
+        fi
         stop_shell
         if [[ $target == windows ]]; then
             if ! $tried_target || restore_tray_shortcuts; then
@@ -355,11 +368,11 @@ switch_to() {
         log "ERROR: switch to $target failed ($problem); still in $from mode"
         return "$failure_status"
     fi
-    if $rebuild; then rm -rf "$state/profiles/windows"; fi
     echo "$target" > "$state/mode"
     [[ $target != current ]] || clear_tray_shortcuts
     [[ -z $carried ]] || log "$carried"
     log "now in $target mode: $(digest "$config")"
+    [[ -z $retired ]] || rm -rf "$retired" || log "WARNING: could not remove retired Windows profile at $retired"
 }
 
 restore() {
@@ -380,11 +393,11 @@ restore() {
     fi
     copy_files "$state/profiles/current" "$config"
     load_appearance current "$state/profiles/current"
-    rm -f "$shared_applets"
     echo current > "$state/mode"
     start_shell || die "plasmashell did not start after restore"
     clear_tray_shortcuts
     log "restored current: $(digest "$config")"
+    rm -f "$shared_applets" || die "Current is running; could not clear the shared applet baseline at $shared_applets"
 }
 
 # Throw away the saved Windows layout and build a fresh one from the current layout.

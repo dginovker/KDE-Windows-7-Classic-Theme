@@ -120,7 +120,12 @@ def applet_content(path):
     groups = parse(path, ambiguous)
     applets = {}
     for group, keys in groups.items():
-        if re.fullmatch(APPLET, group) and keys.get('plugin'):
+        bare_group = re.sub(r'\[\$[^\]]*\]', '', group)
+        if not re.fullmatch(APPLET, bare_group):
+            continue
+        if any(k.startswith('plugin[') for k in keys) or (bare_group != group and 'plugin' in keys):
+            raise ValueError(f'{path}: {group}: unsupported qualified applet plugin identity')
+        if keys.get('plugin'):
             identity = (group.rsplit('[', 1)[1][:-1], keys['plugin'])
             if identity in applets:
                 raise ValueError(f'{path}: ambiguous applet {identity}')
