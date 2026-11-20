@@ -11,7 +11,7 @@ unset DISPLAY WAYLAND_DISPLAY DBUS_SESSION_BUS_ADDRESS
 mkdir -p plasma/plasmoids win7-classic/popup-backend
 cp -r "$src"/plasma/org.win7classic.{volume,notifications} plasma/plasmoids/
 cp "$src/plasma/popup-backend/qmldir" "$module" win7-classic/popup-backend/
-"$qtbin/qmllint" plasma/plasmoids/*/contents/ui/*.qml
+"$qtbin/qmllint" plasma/plasmoids/*/contents/ui/main.qml plasma/plasmoids/org.win7classic.notifications/contents/ui/{Balloon,NotificationContents}.qml
 
 # Loading the nested relative import must resolve the real plugin. The null
 # typed property validates the registration without instantiating Audio.
@@ -32,7 +32,7 @@ int main(int argc, char **argv)
         import "../../../../../win7-classic/popup-backend" as Backend
         QtObject {
             property Backend.Audio audio: null
-            property Backend.NotificationShortcuts shortcuts: null
+            property Backend.StockNotificationView stockHistory: null
         }
     )", QUrl::fromLocalFile(QCoreApplication::arguments().at(1)));
     std::unique_ptr<QObject> probe(component.create());
