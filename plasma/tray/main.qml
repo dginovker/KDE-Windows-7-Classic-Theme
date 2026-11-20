@@ -71,6 +71,7 @@ ContainmentItem {
         target: tray.configured
         function onShowAllItemsChanged() { tray.queueEntries(); }
         function onShownItemsChanged() { tray.queueEntries(); }
+        function onExtraItemsChanged() { tray.queueEntries(); }
         function onHiddenItemsChanged() { tray.queueEntries(); }
         function onDisabledStatusNotifiersChanged() { tray.queueEntries(); }
     }

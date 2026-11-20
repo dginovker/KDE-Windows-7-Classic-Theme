@@ -146,11 +146,23 @@ def main(out, function_key, remove_tray=False):
                 if (w, h) == (70, 291) and abs(x + w / 2 - speaker[0]) <= 2:
                     popup = snap('volume-controls')
                     box = tuple(map(round, (x+2, y+h-37, x+w-2, y+h-2)))
-                    return popup.getpixel((round(x+5), round(y+16))) == (255, 255, 255) and any(
-                        word == 'Mixer' for word, _ in ocr(popup, box))
+                    if popup.getpixel((round(x+5), round(y+16))) == (255, 255, 255) and any(
+                            word == 'Mixer' for word, _ in ocr(popup, box)):
+                        return round(x), round(y)
             return False
 
         wait_for(classic_volume_open, 'compact white vertical-slider volume popup opens over its genuine icon')
+        x, y = classic_volume_open()
+        for offset, lo, hi in ((90, .70, .90), (158, .15, .30)):
+            click((x + 31, y + offset))
+            def sink_in_range():
+                volume = user(f'wpctl get-volume {SINK}')
+                return volume if lo <= float(volume.split()[1]) <= hi and '[MUTED]' not in volume else False
+
+            wait_for(sink_in_range, 'slider changes real default sink')
+            print(f'Vertical slider at y+{offset}:', sink_in_range())
+            snap(f'volume-slider-{offset}')
+        user(f'wpctl set-volume {SINK} .40')
         click((820, 690))
         wait_for(lambda: snap('volume-click-away').crop(crop).tobytes() == image.crop(crop).tobytes(), 'volume click-away')
         print(user("systemd-run --user --wait --pipe --collect -q /usr/bin/python - <<'PYQT'\n" + QICON + "PYQT"))
@@ -182,9 +194,13 @@ def main(out, function_key, remove_tray=False):
             script = ('for (const p of panels()) for (const w of p.widgets()) '
                       'if (w.type === "org.win7classic.tray") w.remove()')
             user(f"qdbus6 org.kde.plasmashell /PlasmaShell evaluateScript '{script}'")
-            wait_for(lambda: 'plugin=org.win7classic.tray\n' not in user(f'cat {APPLET_CONFIG}') + '\n'
-                     and 'plugin=org.win7classic.notifications\n' not in user(f'cat {APPLET_CONFIG}') + '\n',
-                     'Plasma finalized tray and child removal')
+            def tray_and_popups_removed():
+                layout = set(user(f'cat {APPLET_CONFIG}').splitlines())
+                return not layout.intersection({'plugin=org.win7classic.tray',
+                                                'plugin=org.win7classic.notifications', 'plugin=org.kde.plasma.notifications',
+                                                'plugin=org.win7classic.volume', 'plugin=org.kde.plasma.volume'})
+
+            wait_for(tray_and_popups_removed, 'Plasma finalized tray and child removal')
             assert user(f'{call} shortcutKeys {binding}') == keys_before_remove, 'dormant registration was not reproduced'
             snap('tray-removed')
             print(f'Plasma finalized tray removal; KGlobalAccel still holds dormant widget {nid}: {keys_before_remove}')

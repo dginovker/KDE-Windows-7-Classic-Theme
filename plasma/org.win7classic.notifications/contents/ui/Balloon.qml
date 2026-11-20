@@ -105,7 +105,8 @@ PlasmaCore.Dialog {
     property Timer expiryTimer: Timer {
         id: expiry
         interval: Math.max(1, popup.timeout)
-        running: popup.visible && popup.timeout > 0 && !hover.hovered && !(contents.replying && (contents.editing || contents.pendingReply))
+        // The server timer is stopped even for delegates that cannot fit in the stack.
+        running: popup.timeout > 0 && (!popup.visible || (!hover.hovered && !(contents.replying && (contents.editing || contents.pendingReply))))
         onTriggered: popup.expire()
     }
 }

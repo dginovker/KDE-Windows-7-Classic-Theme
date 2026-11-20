@@ -18,7 +18,9 @@ PlasmoidItem {
     Plasmoid.onActivated: root.toggleHistory()
     Plasmoid.icon: !NM.Server.valid || inhibited ? "notifications-disabled-symbolic"
         : history.unreadNotificationsCount > 0 ? "notification-active-symbolic" : "notification-inactive-symbolic"
-    Plasmoid.status: PlasmaCore.Types.ActiveStatus
+    Plasmoid.status: history.activeJobsCount > 0 || history.unreadNotificationsCount > 0
+        || history.dismissedResidentNotificationsCount > 0 || inhibited
+        ? PlasmaCore.Types.ActiveStatus : PlasmaCore.Types.PassiveStatus
     toolTipMainText: qsTr("Notifications")
     toolTipSubText: !NM.Server.valid ? qsTr("Plasma notification service unavailable")
         : inhibited ? qsTr("Do not disturb") : qsTr("%n unread notification(s)", "", history.unreadNotificationsCount)
@@ -181,9 +183,16 @@ PlasmoidItem {
         const above = anchored ? anchor.y >= area.y + area.height / 2 : pos >= NM.Settings.BottomLeft;
         const towardsLeft = pos === NM.Settings.TopLeft || pos === NM.Settings.BottomLeft;
         const centered = pos === NM.Settings.TopCenter || pos === NM.Settings.BottomCenter;
-        let edge = above ? area.y + area.height : area.y;
-        if (!anchored)
-            edge += above ? -2 * Kirigami.Units.gridUnit : 2 * Kirigami.Units.gridUnit;
+        const top = area.y;
+        const bottom = area.y + area.height;
+        let edge;
+        if (anchored) {
+            // A mapped overflow or side-panel cell can be well inside the work area's Y range.
+            const near = anchor.y + (above ? -1 : 1) * balloonAnchor.height / 2;
+            edge = Math.max(top, Math.min(near, bottom));
+        } else {
+            edge = above ? bottom - 2 * Kirigami.Units.gridUnit : top + 2 * Kirigami.Units.gridUnit;
+        }
         for (let i = 0; i < balloons.count; ++i) {
             const p = balloons.objectAt(i) as Balloon;
             if (!p)
@@ -195,9 +204,10 @@ PlasmoidItem {
                 : towardsLeft ? area.x + 2 * Kirigami.Units.gridUnit : area.x + area.width - w - 2 * Kirigami.Units.gridUnit;
             p.x = Math.round(Math.max(area.x, Math.min(preferredX, area.x + area.width - w)));
             p.tailOffset = Math.round(Math.max(15, Math.min(w - 15, anchor.x - p.x)));
-            p.y = Math.round(above ? edge - p.height : edge);
-            p.visible = i === 0 || (above ? p.y > area.y + area.height * 0.2 : p.y + p.height < area.y + area.height * 0.8);
-            edge += above ? -p.height - 4 : p.height + 4;
+            const y = above ? edge - p.height : edge;
+            p.y = Math.round(i === 0 ? Math.max(top, Math.min(y, bottom - p.height)) : y);
+            p.visible = i === 0 || (above ? p.y > top + area.height * 0.2 : p.y + p.height < bottom - area.height * 0.2);
+            edge = above ? p.y - 4 : p.y + p.height + 4;
         }
     }
 
