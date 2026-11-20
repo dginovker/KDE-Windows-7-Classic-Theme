@@ -2,7 +2,7 @@
 # Tested with Plasma/KWin 6.8.2 and Qt 6.12; the QML relies on Plasma 6.8 APIs.
 pkgname=win7-classic
 pkgver=0.4
-pkgrel=19
+pkgrel=26
 pkgdesc='Windows 7 Classic look for KDE Plasma, switchable live with win7-classic'
 arch=(x86_64)
 url='https://github.com/dginovker/KDE-Windows-7-Classic-Theme'
