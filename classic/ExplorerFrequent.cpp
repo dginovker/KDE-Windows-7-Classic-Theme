@@ -174,13 +174,12 @@ void ExplorerFrequent::record(const QUrl &folder, ExplorerPrivacy &permit)
     for (const auto &visit : *visits)
         json.append(QJsonArray{visit.path, visit.count});
     const QByteArray data = QJsonDocument(json).toJson(QJsonDocument::Compact);
-    // Give the staging file an exclusive name in the locked directory; renameat never resolves the destination entry.
-    const QByteArray temp = ".frequent-" + QUuid::createUuid().toByteArray(QUuid::Id128);
     if (data.size() > maxBytes) {
         qWarning("win7-explorer: Frequent history exceeds its size limit");
         return;
     }
-    const Fd fd{openat(dir.value, temp.constData(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600)};
+    // A denied visit must not have a directory entry, even if Explorer is killed while staging it.
+    const Fd fd{openat(dir.value, ".", O_TMPFILE | O_WRONLY | O_CLOEXEC, 0600)};
     if (fd.value < 0) {
         qErrnoWarning("win7-explorer: cannot create Frequent history staging file");
         return;
@@ -189,11 +188,20 @@ void ExplorerFrequent::record(const QUrl &folder, ExplorerPrivacy &permit)
     if (fchmod(fd.value, 0600) != 0 || !file.open(fd.value, QIODevice::WriteOnly)
         || file.write(data) != data.size() || !file.flush() || fsync(fd.value) != 0) {
         qWarning("win7-explorer: cannot write Frequent history staging file");
-    } else if (permit.allowsVisit(path) && permit.check() == Policy::Allowed) {
-        if (renameat(dir.value, temp.constData(), dir.value, fileName) == 0)
-            return;
-        qErrnoWarning("win7-explorer: cannot commit Frequent history");
+        return;
     }
+    const QByteArray temp = ".frequent-" + QUuid::createUuid().toByteArray(QUuid::Id128);
+    // Following our own fd through procfs lets an unprivileged writer link the anonymous inode.
+    const QByteArray source = "/proc/self/fd/" + QByteArray::number(fd.value);
+    if (!permit.allowsVisit(path) || permit.check() != Policy::Allowed)
+        return;
+    if (linkat(AT_FDCWD, source.constData(), dir.value, temp.constData(), AT_SYMLINK_FOLLOW) != 0) {
+        qErrnoWarning("win7-explorer: cannot link approved Frequent history");
+        return;
+    }
+    if (renameat(dir.value, temp.constData(), dir.value, fileName) == 0)
+        return;
+    qErrnoWarning("win7-explorer: cannot commit Frequent history");
     if (unlinkat(dir.value, temp.constData(), 0) != 0)
         qErrnoWarning("win7-explorer: cannot remove Frequent history staging file");
 }

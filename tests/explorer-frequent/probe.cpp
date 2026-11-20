@@ -36,7 +36,7 @@ extern "C" bool __wrap__ZN9QSaveFile4openE6QFlagsIN13QIODeviceBase12OpenModeFlag
 extern "C" int __real_##name(int dir, const char *path, int flags, ...); \
 extern "C" int __wrap_##name(int dir, const char *path, int flags, ...) \
 { \
-    if (!(flags & O_CREAT)) \
+    if (!(flags & O_CREAT) && (flags & O_TMPFILE) != O_TMPFILE) \
         return __real_##name(dir, path, flags); \
     beforeSave(); \
     return __real_##name(dir, path, flags, 0600); \

@@ -831,15 +831,25 @@ public:
 
     void setState(const QUrl &url, const QUrl &backUrl, const QUrl &forwardUrl, const QIcon &icon)
     {
-        clearNavigationTip();
         location = url;
         addressIcon = icon;
+        setHistory(backUrl, forwardUrl);
+        address->hide();
+        layoutParts();
+    }
+
+    void setHistory(const QUrl &backUrl, const QUrl &forwardUrl)
+    {
+        clearNavigationTip();
         backDestination = backUrl;
         forwardDestination = forwardUrl;
         backEnabled = !backUrl.isEmpty();
         forwardEnabled = !forwardUrl.isEmpty();
-        address->hide();
-        layoutParts();
+        if (!parts.isEmpty()) {
+            parts[BackPart].enabled = backEnabled;
+            parts[ForwardPart].enabled = forwardEnabled;
+        }
+        update();
     }
 
     void editAddress()
@@ -1825,7 +1835,7 @@ private:
     int iconSize = 96;
     bool keyboardUsed = false;
     QList<QUrl> history;
-    qsizetype position = -1;
+    qsizetype position = -1, pendingPosition = -1;
     bool stepping = false;
     KFileItemActions openWith;
     QAction *print = action(tr("&Print"), {}, {}, [this] { printText(files->selectedItems()); });
@@ -2186,40 +2196,52 @@ private:
 
     void navigate(const QUrl &url, bool clearForward = true, qsizetype target = -1)
     {
-        if (!canNavigateTo(url))
-            return;
         const auto request = ++navigation;
-        const auto normalized = url.isValid() ? url : QUrl::fromLocalFile(QDir::homePath());
-        const auto folder = listingRoot(normalized);
-        const auto move = [this, target](auto &&open) {
+        pendingPosition = target;
+        const auto folder = listingRoot(url.isValid() ? url : QUrl::fromLocalFile(QDir::homePath()));
+        const auto open = [this, request, url, folder, target, clearForward](PreparedVisit visit) {
+            if (request != navigation)
+                return;
+            pendingPosition = -1;
+            nav->setHistory(history.value(position - 1), history.value(position + 1));
+            if (!canNavigateTo(url) || request != navigation)
+                return;
             const auto previous = position;
             stepping = target >= 0;
             if (stepping)
                 position = target;
-            open();
+            if (isOverviewUrl(url)) {
+                pendingVisit.reset();
+                entered(url);
+            } else if (folder == listingRoot(files->url())) {
+                // KIO will not emit urlEntered for the already listed folder.
+                if (inOverview() || position != previous)
+                    entered(files->url());
+            } else {
+                pendingVisit = std::move(visit);
+                QScopedValueRollback opening(openingFolder, true);
+                files->KDirOperator::setUrl(url, clearForward);
+            }
             if (std::exchange(stepping, false))
                 position = previous;
         };
-        if (isOverviewUrl(url)) {
-            pendingVisit.reset();
-            move([&] { entered(url); });
-        } else if (folder == listingRoot(files->url())) {
-            // The hidden folder is already listed; KIO will not emit urlEntered again.
-            if (inOverview())
-                move([&] { entered(files->url()); });
+        if (isOverviewUrl(url) || folder == listingRoot(files->url())) {
+            open({});
         } else {
-            prepareVisit(this, folder, [this, request, url, clearForward, move](PreparedVisit visit) {
-                if (request != navigation)
-                    return;
-                pendingVisit = std::move(visit);
-                QScopedValueRollback opening(openingFolder, true);
-                move([&] { files->KDirOperator::setUrl(url, clearForward); });
-            });
+            // Repeated input advances this cursor before KIO has committed the first step.
+            const auto cursor = target >= 0 ? target : position;
+            nav->setHistory(history.value(cursor - 1), history.value(cursor + 1));
+            prepareVisit(this, folder, open);
         }
     }
 
     void entered(const QUrl &url)
     {
+        if (pendingPosition >= 0) {
+            // A watched-folder rename can change the committed history during preflight.
+            ++navigation;
+            pendingPosition = -1;
+        }
         if (pendingVisit && pendingVisit->url != listingRoot(url))
             pendingVisit.reset();
         const bool special = isOverviewUrl(url);
@@ -2268,9 +2290,9 @@ private:
 
     void step(int by)
     {
-        if (position + by < 0 || position + by >= history.size())
-            return;
-        navigate(history[position + by], true, position + by);
+        const auto next = (pendingPosition >= 0 ? pendingPosition : position) + by;
+        if (next >= 0 && next < history.size())
+            navigate(history[next], true, next);
     }
 
     // Windows draws no focus rectangle until the keyboard is used, but loading and focusing the view make the first
