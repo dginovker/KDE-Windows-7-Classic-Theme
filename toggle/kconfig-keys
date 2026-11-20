@@ -18,19 +18,30 @@ Values are copied as raw text, so KConfig escaping round-trips unchanged.
 import json
 import os
 from pathlib import Path
+import re
 import sys
 import tempfile
 
 
-def parse(path):
+def parse(path, ambiguous=None):
     """{group: {key: value}} for a KConfig file; group is the header text, e.g. "[Colors:View]"."""
     groups, group = {}, None
-    for line in path.read_text().splitlines():
-        if line.startswith('['):
+    with path.open() as stream:
+        lines = stream.readlines()
+    for line in lines:
+        line = line.removesuffix('\n')
+        if line.lstrip().startswith('['):
             group = line.strip()
+            if ambiguous is not None and group in groups:
+                ambiguous.add(group)
             groups.setdefault(group, {})
-        elif '=' in line and group and not line.startswith('#'):
-            key, value = line.split('=', 1)
+        elif group and not line.lstrip().startswith('#'):
+            key, sep, value = line.partition('=')
+            if not sep and not (ambiguous is not None and '[$' in key):
+                continue
+            key = key.strip()
+            if ambiguous is not None and key in groups[group]:
+                ambiguous.add(group)
             groups[group][key] = value
     return groups
 
@@ -49,41 +60,137 @@ def save(patchdir, configdir, out, applied=None):
     Path(out).write_text(json.dumps(snapshot, indent=1, sort_keys=True) + '\n')
 
 
-def set_keys(path, groups):
-    lines = path.read_text().splitlines() if path.exists() else []
+def set_keys(path, groups, *, prune=True):
+    if path.exists():
+        with path.open(newline='') as stream:
+            lines = stream.readlines()
+    else:
+        lines = []
+    newline = next((m[0] for line in lines if (m := re.search(r'[\r\n]+$', line))), '\n')
+
+    def insert(at, *new):
+        if at and not lines[at - 1].endswith(('\n', '\r')):
+            lines[at - 1] += newline
+        lines[at:at] = [line + newline for line in new]
+
     for group, keys in groups.items():
         for key, value in keys.items():
             start = next((i for i, l in enumerate(lines) if l.strip() == group), None)
             if start is None:
                 if value is not None:
-                    lines += ([''] if lines and lines[-1] else []) + [group, f'{key}={value}']
+                    insert(len(lines), *([''] if lines and lines[-1].strip() else []), group, f'{key}={value}')
                 continue
-            end = next((i for i in range(start + 1, len(lines)) if lines[i].startswith('[')), len(lines))
-            at = next((i for i in range(start + 1, end) if lines[i].split('=', 1)[0] == key and '=' in lines[i]), None)
+            end = next((i for i in range(start + 1, len(lines)) if lines[i].lstrip().startswith('[')), len(lines))
+            at = next((i for i in range(start + 1, end) if '=' in lines[i]
+                       and not lines[i].lstrip().startswith('#') and lines[i].split('=', 1)[0].strip() == key), None)
             if value is None:
                 if at is not None:
                     del lines[at]
                     end -= 1
                     # Drop a group this mode created, so restoring leaves no empty header behind.
-                    if not any('=' in l for l in lines[start + 1:end]):
+                    if prune and not any('=' in l for l in lines[start + 1:end]):
                         del lines[start:end]
-                        if start > 0 and start <= len(lines) and not lines[start - 1] and (start == len(lines) or not lines[start]):
+                        if start > 0 and start <= len(lines) and not lines[start - 1].strip() and (start == len(lines) or not lines[start].strip()):
                             del lines[start - 1]
             elif at is not None:
-                lines[at] = f'{key}={value}'
+                lines[at] = lines[at].split('=', 1)[0] + '=' + value + lines[at][len(lines[at].rstrip('\r\n')):]
             else:
-                last = max((i for i in range(start, end) if lines[i]), default=start)
-                lines.insert(last + 1, f'{key}={value}')
-    if not any(lines):
+                last = max((i for i in range(start, end) if lines[i].strip()), default=start)
+                insert(last + 1, f'{key}={value}')
+    if not any(line.rstrip('\r\n') for line in lines):
         # Only this mode's keys were in it (e.g. a mimeapps.list Windows mode created), so restore its absence.
         path.unlink(missing_ok=True)
         return
     fd, tmp = tempfile.mkstemp(dir=path.parent)
-    with os.fdopen(fd, 'w') as stream:
-        stream.write('\n'.join(lines) + '\n')
+    with os.fdopen(fd, 'w', newline='') as stream:
+        stream.writelines(lines)
     if path.exists():
         os.chmod(tmp, path.stat().st_mode & 0o7777)
     os.replace(tmp, path)
+
+
+# Plasma keeps tray children under another [Applets] pair. IDs stay global even when an applet moves.
+APPLET = r'\[Containments\]\[\d+\](?:\[Applets\]\[\d+\])+'
+MODE_KEYS = {'popupWidth', 'popupHeight', 'DialogWidth', 'DialogHeight', 'ConfigDialogWidth', 'ConfigDialogHeight'}
+CLASSIC_KEYS = {('org.win7classic.taskbar', '[Configuration][General]', 'launchers')}
+
+
+def applet_content(path):
+    ambiguous = set()
+    groups = parse(path, ambiguous)
+    applets = {}
+    for group, keys in groups.items():
+        if re.fullmatch(APPLET, group) and keys.get('plugin'):
+            identity = (group.rsplit('[', 1)[1][:-1], keys['plugin'])
+            if identity in applets:
+                raise ValueError(f'{path}: ambiguous applet {identity}')
+            applets[identity] = (group, {})
+    roots = {root: (plugin, content) for (_, plugin), (root, content) in applets.items()}
+    for group, keys in groups.items():
+        root, config, tail = group.partition('[Configuration]')
+        if config and root in roots:
+            plugin, content = roots[root]
+            for key, value in keys.items():
+                name = key.partition('[')[0].rstrip()
+                if (name in MODE_KEYS or ('[ConfigDialog]' in tail and name.lower() in {'width', 'height'})
+                        or (plugin, config + tail, name) in CLASSIC_KEYS):
+                    continue
+                content[config + tail + '\t' + key] = value
+    policy = {re.sub(r'\[\$[^\]]*\]', '', group) for group in groups if '[$' in group}
+    return applets, ambiguous, policy
+
+
+def carry_applets(source, target, baseline, outgoing, incoming, compare):
+    # The inactive profile can be edited independently. Remember both states from the last
+    # successful switch, not just the outgoing profile we have already saved over.
+    before, source_ambiguous, source_policy = applet_content(Path(source))
+    after, target_ambiguous, target_policy = applet_content(Path(target))
+    baseline = Path(baseline)
+    previous = json.loads(baseline.read_text()) if compare == 'yes' and baseline.exists() else {}
+    next_state = {outgoing: {}, incoming: {}}
+    patches = {}
+    display = lambda keys: json.dumps([key.replace('\t', '/', 1) for key in keys])
+    for applet, plugin in sorted(before.keys() & after.keys()):
+        left_root, left = before[applet, plugin]
+        root, right = after[applet, plugin]
+        identity = f'{applet} {plugin}'
+        for path, prefix, ambiguous in ((source, left_root, source_ambiguous), (target, root, target_ambiguous)):
+            for group in sorted(ambiguous):
+                if group == prefix or group.startswith(prefix + '[Configuration]'):
+                    raise ValueError(f'{path}: shared applet {identity}: duplicate key or group in {group}')
+        # A KConfig option or locale suffix is not a separate unqualified setting.
+        qualified = {group + '\t' + name.partition('[')[0].rstrip()
+                     for key in left.keys() | right.keys() for group, name in [key.split('\t', 1)] if '[' in name}
+        old_left, old_right = (previous.get(m, {}).get(identity) for m in (outgoing, incoming))
+        left_edits, right_edits, conflicts = [], [], []
+        merged = right.copy()
+        for key in sorted(left.keys() | right.keys() | (old_left or {}).keys() | (old_right or {}).keys()):
+            a, b = left.get(key), right.get(key)
+            a_edit = old_left is not None and a != old_left.get(key)
+            b_edit = old_right is not None and b != old_right.get(key)
+            if a_edit: left_edits.append(key)
+            if b_edit: right_edits.append(key)
+            if compare != 'yes' or a == b or (b_edit and not a_edit):
+                continue
+            if b_edit or old_left is None:
+                conflicts.append(key)
+            group, name = key.split('\t', 1)
+            if (group + '\t' + name.partition('[')[0].rstrip() in qualified
+                    or any((left_root + group + '[').startswith(g + '[') for g in source_policy)
+                    or any((root + group + '[').startswith(g + '[') for g in target_policy)):
+                raise ValueError(f'shared applet {identity}: cannot update qualified KConfig setting {group}/{name}')
+            patches.setdefault(root + group, {})[name] = a
+            if a is None: merged.pop(key)
+            else: merged[key] = a
+        next_state[outgoing][identity] = left
+        next_state[incoming][identity] = merged
+        if conflicts or (left_edits and right_edits):
+            print(f'shared applet {identity}: {outgoing} edits {display(left_edits)}; '
+                  f'{incoming} edits {display(right_edits)}; {outgoing} won differences '
+                  f'({"conflict" if old_left is not None else "no previous baseline"}): {display(conflicts)}')
+    if patches:
+        set_keys(Path(target), patches, prune=False)
+    baseline.with_suffix('.new').write_text(json.dumps(next_state))
 
 
 def load(source, configdir, patchdir=None, requireddir=None):
@@ -124,4 +231,4 @@ def migrate_decoration(configdir, state):
 
 if __name__ == '__main__':
     command, *args = sys.argv[1:]
-    {'save': save, 'load': load, 'migrate-decoration': migrate_decoration}[command](*args)
+    {'save': save, 'load': load, 'migrate-decoration': migrate_decoration, 'carry-applets': carry_applets}[command](*args)

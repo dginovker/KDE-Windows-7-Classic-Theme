@@ -11,6 +11,7 @@ share=$(dirname "$(readlink -f "$0")")
 probe=$(dirname "$(dirname "$share")")/bin/win7-classic-probe
 mkdir -p "$state/profiles"
 accelerators=$state/current-tray-accelerators.json
+shared_applets=$state/shared-applets.json
 
 log() { printf '%s %s\n' "$(date -Is)" "$*" | tee -a "$state/switch.log" >&2; }
 die() { log "ERROR: $*"; exit 1; }
@@ -159,7 +160,7 @@ migrate_legacy_decoration() {
 }
 
 switch_to() {
-    local target=$1 from
+    local target=$1 rebuild=${2:-false} from
     from=$(mode)
     warn_legacy_other_root
     [[ $target != windows ]] || preflight_windows
@@ -205,7 +206,7 @@ switch_to() {
         problem="could not restore current tray accelerators"
     fi
     if [[ -n $problem ]]; then :
-    elif [[ -d $appearance_dir ]]; then
+    elif ! $rebuild && [[ -d $appearance_dir ]]; then
         if out=$(copy_files "$appearance_dir" "$config" 2>&1); then :
         else
             failure_status=$?
@@ -267,7 +268,16 @@ switch_to() {
     if [[ -z $problem && $target == windows ]] && ! out=$("$share/windows/check-popup-host" "$layout_path" 2>&1); then
         problem="$out"
     fi
-    local tried_target=false
+    local tried_target=false carried="" layout=${FILES[0]} compare=no
+    if [[ -z $problem ]]; then
+        [[ $appearance_dir != "$state/profiles/$target" ]] || compare=yes
+        if carried=$("$share/kconfig-keys" carry-applets "$state/profiles/$from/$layout" "$config/$layout" \
+                "$shared_applets" "$from" "$target" "$compare" 2>&1); then :
+        else
+            failure_status=$?
+            problem="carrying shared applet settings failed (exit $failure_status): $carried"
+        fi
+    fi
     if [[ -z $problem ]]; then
         tried_target=true
         load_appearance "$target" "$appearance_dir"
@@ -325,7 +335,11 @@ switch_to() {
             problem="KWin rejected the Classic decoration (see switch.log and journalctl --user -u plasma-kwin_wayland)"
         fi
     fi
+    if [[ -z $problem ]] && ! mv -fT "${shared_applets%.json}.new" "$shared_applets"; then
+        problem="could not commit shared applet settings baseline"
+    fi
     if [[ -n $problem ]]; then
+        rm -f "${shared_applets%.json}.new" || true
         log "rolling back to $from: $problem"
         stop_shell
         if [[ $target == windows ]]; then
@@ -341,8 +355,10 @@ switch_to() {
         log "ERROR: switch to $target failed ($problem); still in $from mode"
         return "$failure_status"
     fi
+    if $rebuild; then rm -rf "$state/profiles/windows"; fi
     echo "$target" > "$state/mode"
     [[ $target != current ]] || clear_tray_shortcuts
+    [[ -z $carried ]] || log "$carried"
     log "now in $target mode: $(digest "$config")"
 }
 
@@ -364,6 +380,7 @@ restore() {
     fi
     copy_files "$state/profiles/current" "$config"
     load_appearance current "$state/profiles/current"
+    rm -f "$shared_applets"
     echo current > "$state/mode"
     start_shell || die "plasmashell did not start after restore"
     clear_tray_shortcuts
@@ -374,9 +391,8 @@ restore() {
 rebuild() {
     preflight_windows
     [[ $(mode) == current ]] || switch_to current
-    rm -rf "$state/profiles/windows"
-    log "rebuild: Windows layout discarded; rebuilding from current layout"
-    switch_to windows
+    log "rebuild: building Windows layout from current layout"
+    switch_to windows true
 }
 
 # Two simultaneous switches must not share an in-progress layout or accelerator receipt.
