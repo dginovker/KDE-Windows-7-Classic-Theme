@@ -303,12 +303,13 @@ def main():
     vmctl.start(VM)
     if not args.installed:
         install(reset=False)
-    switcher = '/usr/bin/win7-classic' if args.explorer == Path('/usr/bin/win7-explorer') else '~/.local/bin/win7-classic'
+    packaged = args.explorer == Path('/usr/bin/win7-explorer')
+    switcher = '/usr/bin/win7-classic' if packaged else '~/.local/bin/win7-classic'
     original_mode = user(f'{switcher} status')
     output = json.loads(user('kscreen-doctor -j'))['outputs'][0]
     root = user('mktemp -d /tmp/w7-command-menus.XXXXXXXX')
     try:
-        toggle('windows', executable=switcher)
+        toggle('windows', packaged=packaged)
         for scale in (1, 1.5):
             user(f'kscreen-doctor output.{output["name"]}.scale.{scale}')
             try:
@@ -317,7 +318,7 @@ def main():
                 user(f'systemctl --user stop {Path(root).name}-{round(scale * 100)}.service', check=False)
     finally:
         user(f'kscreen-doctor output.{output["name"]}.scale.{output["scale"]}; rm -r {root}')
-        toggle(original_mode, executable=switcher)
+        toggle(original_mode, packaged=packaged)
     print('PASS: production View and Organize, Tiles/Content layouts and preferences, Folder Options and KIO Redo')
 
 

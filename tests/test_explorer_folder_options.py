@@ -33,7 +33,7 @@ def launch(x,y,w,h,second=False):
 def fingerprint():
  return user(f'sha256sum {options} {cfg}/kdeglobals {cfg}/dolphinrc')
 try:
- toggle('windows', executable=switcher)
+ toggle('windows', packaged=True)
  user(scale + '1')
  user(f'mkdir -p {cfg} {listing}/Child {tmp}/Survivor/Retained; cp ~/.config/kdeglobals {cfg}/; printf "[General]\nRememberOpenedTabs=false\n" > {cfg}/dolphinrc; printf "[General]\nOpenFoldersInNewWindow=false\n[View]\nShowHidden=false\nThumbnails=false\n" > {options}')
  with tempfile.NamedTemporaryFile(suffix='.png') as f:
@@ -86,4 +86,4 @@ try:
   print(f'PASS 150% {fault}: no partial General/View edits; exact Explorer/KDE/Dolphin bytes and same-window opening through relaunch')
 finally:
  user(f'chmod u+w {cfg}; systemctl --user stop {unit}; rm -r {tmp}',check=False)
- user(scale + str(output['scale']));toggle(original_mode, executable=switcher)
+ user(scale + str(output['scale']));toggle(original_mode, packaged=True)
