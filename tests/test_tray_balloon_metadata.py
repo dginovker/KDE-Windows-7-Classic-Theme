@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """Read the source and supplied settings label from a real Classic balloon."""
 import argparse
+import os
 from pathlib import Path
 import shlex
 
 from PIL import Image
 
 from lab import VM, kwin_query, shot, user, vmctl, wait_for
-from test_tray import label, ocr
+from test_tray import ocr
 
 SENDER = '''from gi.repository import Gio, GLib
 bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
@@ -38,9 +39,9 @@ loop.run()
 def main(out, scale):
     out.mkdir(parents=True, exist_ok=True)
     assert user('/usr/bin/win7-classic status') == 'windows'
-    unit = 'w7-balloon-metadata-producer'
+    unit = f'w7-balloon-metadata-{os.getpid()}'
     vmctl.pointer(VM, 640, 380)
-    user(f"systemd-run --user -q --unit={unit} /usr/bin/python -c " + shlex.quote(SENDER))
+    user(f"systemd-run --user --collect -q --unit={unit} /usr/bin/python -c " + shlex.quote(SENDER))
 
     def window():
         return [tuple(map(float, row)) for row in kwin_query(
@@ -66,29 +67,23 @@ def main(out, scale):
         region = tuple(round(v * scale) for v in (x + 70, y + 3, x + 200, y + 45))
         wait_for(lambda: {'MailDesk', 'Remote', 'Workstation'} <= {word for word, _ in ocr(screenshot('source-hover'), region)},
                  'application and origin in the title tooltip')
-        move(x + 67, y + 15, 'right')
-        menu = out / 'settings-menu.png'
-        def settings_label():
-            shot(menu)
-            words = ocr(Image.open(menu))
-            if {'Tune', 'alerts'} <= {word for word, _ in words}:
-                return label(words, 'Tune')
-
-        point = None
-
-        def menu_visible():
-            nonlocal point
-            point = settings_label()
-            return point
-
-        wait_for(menu_visible, 'exact app-supplied Configure label')
-        vmctl.pointer(VM, *point, 'left')
-        wait_for(lambda: 'ActionInvoked ' in user(f'journalctl --user -u {unit} -b -o cat'), 'real settings action reached the sender')
+        gear = (x + 241, y + 14)
+        move(*gear)
+        region = tuple(round(v * scale) for v in (x + 160, y - 45, min(x + 360, 1280 / scale), y + 46))
+        wait_for(lambda: {'Tune', 'alerts'} <= {word for word, _ in ocr(screenshot('configure-hover'), region)},
+                 'exact app-supplied Configure label in the gear tooltip')
+        move(*gear, 'left')
+        wait_for(lambda: 'ActionInvoked ' in user(f'journalctl --user -u {unit} -b -o cat _COMM=python'), 'real settings action reached the sender')
         wait_for(lambda: not window(), 'sender closes its balloon after the settings action')
-        print(user(f'journalctl --user -u {unit} -b -o cat'))
+        print(user(f'journalctl --user -u {unit} -b -o cat _COMM=python'))
         print(f'{scale:g}x: MailDesk and Remote Workstation on hover; Tune alerts invokes settings; same opaque balloon.')
     finally:
-        user(f'systemctl --user stop {unit}; systemctl --user reset-failed {unit} 2>/dev/null || true')
+        receipt = user(f'journalctl --user -u {unit} -b -o cat _COMM=python')
+        ids = [line.split()[1] for line in receipt.splitlines() if line.startswith('Notify ')]
+        for nid in ids:
+            user('gdbus call --session -d org.freedesktop.Notifications -o /org/freedesktop/Notifications '
+                 f'-m org.freedesktop.Notifications.CloseNotification {int(nid)}', check=False)
+        user(f'systemctl --user stop {unit}', check=False)
 
 
 if __name__ == '__main__':
