@@ -870,7 +870,7 @@ private:
         QList<Crumb> list;
         if (!url.isLocalFile()) {
             if (!url.isEmpty())
-                list.append({url == computerUrl ? locationName(url) : url.toDisplayString(), url, {}, {}});
+                list.append({isOverviewUrl(url) ? locationName(url) : url.toDisplayString(), url, {}, {}});
             return list;
         }
         const QString path = QDir::cleanPath(url.toLocalFile());
@@ -1120,8 +1120,9 @@ public:
         QString text, icon;
         QUrl url;
         bool child = false;
+        bool library = false;
     };
-    std::function<void(const QUrl &)> go;
+    std::function<void(const Row &)> go;
 
     NavigationPane()
     {
@@ -1134,7 +1135,7 @@ public:
             {QStringLiteral("Libraries"), QStringLiteral("libraries"), librariesUrl},
         };
         for (const auto &library : libraries)
-            rows.append({QString::fromLatin1(library.name), QString::fromLatin1(library.icon), standardFolder(library.location), true});
+            rows.append({QString::fromLatin1(library.name), QString::fromLatin1(library.icon), standardFolder(library.location), true, true});
         rows.append({{}, {QStringLiteral("Computer"), QStringLiteral("computer"), computerUrl}, {},
                      {QStringLiteral("Network"), QStringLiteral("network"), QUrl(QStringLiteral("remote:/"))}});
         setFocusPolicy(Qt::ClickFocus);
@@ -1192,11 +1193,9 @@ private:
         parts.clear();
         for (int i = 0; i < rows.size(); ++i) {
             const Row row = rows[i];
-            parts.append({QRect(0, 9 + 19 * i, width(), 19), [this, row, i] {
-                              if (!row.url.isValid())
-                                  return;
-                              selected = i;
-                              go(row.url);
+            parts.append({QRect(0, 9 + 19 * i, width(), 19), [this, row] {
+                              if (row.url.isValid() || row.library)
+                                  go(row);
                           },
                           !row.text.isEmpty()});
         }
@@ -1332,7 +1331,12 @@ public:
         column->addWidget(fileMenuBar);
         column->addWidget(bar);
 
-        pane->go = nav->go;
+        pane->go = [this](const NavigationPane::Row &row) {
+            if (row.library)
+                openLibraryFolder(row.url);
+            else
+                navigate(row.url);
+        };
         auto *splitter = new QSplitter;
         splitter->setHandleWidth(3);
         splitter->setStyleSheet(QStringLiteral("QSplitter::handle { background: rgb(212, 208, 200); }"));
@@ -1342,14 +1346,18 @@ public:
         splitter->addWidget(pages);
         connect(overview->tiles, &QListWidget::itemActivated, this, [this](QListWidgetItem *item) {
             const auto target = item->data(OverviewTiles::Target).toUrl();
-            const auto mountId = browseableMountId(target.toLocalFile());
-            if (!mountId || mountId != item->data(OverviewTiles::MountId).toULongLong()) {
-                QMessageBox::warning(this, tr("Volume unavailable"),
-                                     tr("Cannot open %1. The volume was unmounted, replaced or is no longer accessible. Refresh Computer and try again.")
-                                         .arg(target.toLocalFile()));
-                return;
+            if (history.value(position) == computerUrl) {
+                const auto mountId = browseableMountId(target.toLocalFile());
+                if (!mountId || mountId != item->data(OverviewTiles::MountId).toULongLong()) {
+                    QMessageBox::warning(this, tr("Volume unavailable"),
+                                         tr("Cannot open %1. The volume was unmounted, replaced or is no longer accessible. Refresh Computer and try again.")
+                                             .arg(target.toLocalFile()));
+                    return;
+                }
+                navigate(target);
+            } else {
+                openLibraryFolder(target);
             }
-            navigate(target);
         });
         splitter->setStretchFactor(1, 1);
         splitter->setSizes({157, 600});
@@ -1522,6 +1530,22 @@ private:
     bool openingFolder = false;
 
     bool inOverview() const { return pages->currentWidget() == overview; }
+
+    void openLibraryFolder(const QUrl &url)
+    {
+        const QUrl target = url.adjusted(QUrl::NormalizePathSegments);
+        const QString path = target.toLocalFile();
+        // KDirOperator treats an unreadable target as a filename and can open its parent instead.
+        if (!QFileInfo(path).isDir() || ::access(QFile::encodeName(path).constData(), R_OK | X_OK) != 0) {
+            QMessageBox warning(QMessageBox::Warning, tr("Folder unavailable"),
+                                tr("Cannot open %1. The folder is missing or not accessible.").arg(path),
+                                QMessageBox::Ok, this);
+            warning.setTextFormat(Qt::PlainText);
+            warning.exec();
+            return;
+        }
+        navigate(target);
+    }
 
     void navigate(const QUrl &url)
     {
