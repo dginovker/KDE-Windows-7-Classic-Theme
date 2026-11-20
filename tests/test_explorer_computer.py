@@ -188,7 +188,10 @@ def regressions(out, scale, base, exe):
             result = capture(out, f'{change}-activated')
             titles = captions()
             assert sorted(titles) == ['Computer', 'Volume unavailable'], f'Stale {change} tile: {titles}'
-            assert 'no longer accessible' in words(result, pt(130, 130) + pt(630, 325)).replace('\n', ' ')
+            # The dialog wraps at 150%; keep the icon and button outside the text crop.
+            top, bottom = ((190, 177), (620, 209)) if scale == 1 else ((225, 177), (590, 212))
+            message = words(result, pt(*top) + pt(*bottom)).replace('\n', ' ')
+            assert 'no longer accessible' in message, message
             key('KEY_ESC')
             wait_for(lambda: captions() == ['Computer'], 'closed warning without leaving Computer')
             key('KEY_F5')
