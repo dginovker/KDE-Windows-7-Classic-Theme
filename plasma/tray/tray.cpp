@@ -160,7 +160,8 @@ protected:
             m_shortcutIds = receipt + QStringLiteral(".ids/");
         }
         const auto shortcut = group.group(QStringLiteral("Shortcuts")).readEntry("global", QString());
-        if (!shortcut.isEmpty() && recordShortcutOwner(id())) {
+        // The native settings page can assign the first shortcut after startup.
+        if (recordShortcutOwner(id()) && !shortcut.isEmpty()) {
             setGlobalShortcut(QKeySequence(shortcut));
         }
         m_groups = group.group(QStringLiteral("Applets"));
