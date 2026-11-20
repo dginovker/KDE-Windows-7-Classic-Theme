@@ -380,9 +380,10 @@ ContainmentItem {
                     tray.expandedChildren--;
                 }
             }
-            readonly property var compact: nativeItem?.compactRepresentationItem
+            readonly property var glyph: modelData.pluginName === "org.win7classic.volume" ? nativeItem?.trayGlyph
+                : nativeItem?.compactRepresentationItem
             readonly property string art: {
-                if (!compact || !slot) {
+                if (!glyph || !slot) {
                     return "";
                 }
                 switch (modelData.pluginName) {
@@ -395,10 +396,10 @@ ContainmentItem {
                 }
             }
             Binding {
-                target: hosted.compact
+                target: hosted.glyph
                 property: "opacity"
                 value: 0
-                when: !!hosted.compact && !!hosted.art
+                when: !!hosted.glyph && !!hosted.art
             }
             Image {
                 parent: hosted.holder

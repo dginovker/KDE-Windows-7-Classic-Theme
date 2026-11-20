@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(win7-explorer LANGUAGES CXX)
+project(win7-explorer LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 20)
 find_package(Qt6 REQUIRED COMPONENTS Widgets PrintSupport DBus)
 find_package(KF6Config REQUIRED)

@@ -18,7 +18,7 @@ ColumnLayout {
             return null;
         let best = null;
         let stack = -1;
-        for (let row = 0; row < tasks.count; ++row) {
+        for (let row = 0; row < tasks.rowCount(); ++row) {
             const idx = tasks.index(row, 0);
             if (tasks.data(idx, TaskManager.AbstractTasksModel.AppId) === entry.desktopEntry + ".desktop") {
                 const order = tasks.data(idx, TaskManager.AbstractTasksModel.StackingOrder);
@@ -37,8 +37,6 @@ ColumnLayout {
     readonly property bool job: entry.type === NM.Notifications.JobType
     readonly property bool hasActions: entry.hasDefaultAction || entry.hasReplyAction || entry.actionNames.length > 0 || entry.configureActionLabel.length > 0
     readonly property int actionBehavior: entry.resident ? NM.Notifications.None : NM.Notifications.Close
-
-    signal wantsFocus()
 
     function index() { return source.index(row, 0); }
 
@@ -131,7 +129,7 @@ ColumnLayout {
         Layout.fillWidth: true
         visible: root.job
         from: 0; to: 100
-        value: root.entry.percentage
+        value: root.job ? root.entry.percentage : 0
     }
 
     Flow {
@@ -165,7 +163,6 @@ ColumnLayout {
             text: root.entry.replyActionLabel || qsTr("Reply")
             onClicked: {
                 root.replying = true;
-                root.wantsFocus();
                 replyField.forceActiveFocus();
             }
         }

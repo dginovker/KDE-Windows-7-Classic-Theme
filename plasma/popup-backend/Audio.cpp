@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include <KGlobalAccel>
+#include <PlasmaQuick/PlasmaShellWaylandIntegration>
+#include <QWindow>
 #include <QAction>
 #include <PulseAudioQt/Context>
 #include <PulseAudioQt/Server>
@@ -139,6 +141,15 @@ public:
         // Reuse the stock identifiers so the user's bindings survive profile switches.
         addShortcut(u"toggle do not disturb"_s, tr("Toggle do not disturb"), &NotificationShortcuts::toggleDoNotDisturb);
         addShortcut(u"clear history"_s, tr("Clear Notification History"), &NotificationShortcuts::clearHistory);
+    }
+
+    Q_INVOKABLE void setPopupFocus(QWindow *window, bool focus)
+    {
+        // The notification Wayland role ignores keyboard focus unless the shell surface opts in.
+        PlasmaShellWaylandIntegration::get(window)->setTakesFocus(focus);
+        if (focus) {
+            window->requestActivate();
+        }
     }
 
     Q_INVOKABLE void showOsd(const QString &icon, const QString &text)

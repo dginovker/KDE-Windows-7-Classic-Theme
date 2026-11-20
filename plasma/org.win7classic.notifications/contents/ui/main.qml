@@ -15,7 +15,6 @@ import "../../../../../win7-classic/popup-backend" as PopupBackend
 
 PlasmoidItem {
     id: root
-    preferredRepresentation: compactRepresentation
     activationTogglesExpanded: false
     Plasmoid.onActivated: root.toggleHistory()
     Plasmoid.icon: !NM.Server.valid || inhibited ? "notifications-disabled-symbolic"
@@ -25,7 +24,7 @@ PlasmoidItem {
     toolTipSubText: !NM.Server.valid ? qsTr("Plasma notification service unavailable")
         : inhibited ? qsTr("Do not disturb") : qsTr("%n unread notification(s)", "", history.unreadNotificationsCount)
 
-    readonly property Item anchorItem: compactRepresentationItem
+    readonly property Item anchorItem: trigger
     property Item trayHost
     readonly property Item balloonAnchor: trayHost?.cellForPlugin(Plasmoid.pluginName) ?? trayHost?.hiddenIconsAnchor
     readonly property bool frontendReady: NM.Server.valid && !!trayHost
@@ -110,7 +109,9 @@ PlasmoidItem {
     }
     TaskManager.TasksModel { id: taskModel; groupMode: TaskManager.TasksModel.GroupDisabled }
 
-    compactRepresentation: MouseArea {
+    MouseArea {
+        id: trigger
+        anchors.fill: parent
         acceptedButtons: Qt.LeftButton | Qt.MiddleButton
         onClicked: mouse => {
             if (mouse.button === Qt.MiddleButton)
@@ -167,6 +168,7 @@ PlasmoidItem {
             row: index
             source: popups
             settings: policy
+            focusControl: shortcuts
             tasks: taskModel
             availableHeight: Math.max(54, Math.floor(root.workArea.height * 0.8))
             critical: model.urgency === NM.Notifications.CriticalUrgency

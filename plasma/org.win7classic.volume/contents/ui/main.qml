@@ -12,7 +12,7 @@ import "../../../../../win7-classic/popup-backend" as PopupBackend
 
 PlasmoidItem {
     id: root
-    preferredRepresentation: compactRepresentation
+    readonly property alias trayGlyph: glyph
     activationTogglesExpanded: false
     Plasmoid.onActivated: root.togglePopup()
     Plasmoid.icon: root.volumeIcon
@@ -27,8 +27,9 @@ PlasmoidItem {
     function togglePopup() {
         if (popup.visible) {
             popup.close();
-        } else if (compactRepresentationItem?.Window.window) {
+        } else if (trigger.Window.window) {
             popup.visible = true;
+            popup.requestActivate();
             level.forceActiveFocus(Qt.PopupFocusReason);
         }
     }
@@ -40,8 +41,10 @@ PlasmoidItem {
 
     PopupBackend.Audio { id: audio }
 
-    compactRepresentation: MouseArea {
+    // An applet without a full representation takes its input from the root contents.
+    MouseArea {
         id: trigger
+        anchors.fill: parent
         acceptedButtons: Qt.LeftButton | Qt.MiddleButton
         hoverEnabled: true
         property int wheelDelta: 0
@@ -71,12 +74,12 @@ PlasmoidItem {
                     popup.close();
             }
         }
-        Kirigami.Icon { anchors.fill: parent; source: root.volumeIcon }
+        Kirigami.Icon { id: glyph; anchors.fill: parent; source: root.volumeIcon }
     }
 
     PlasmaCore.Dialog {
         id: popup
-        visualParent: root.compactRepresentationItem
+        visualParent: trigger
         location: Plasmoid.location
         type: PlasmaCore.Dialog.AppletPopup
         backgroundHints: PlasmaCore.Dialog.NoBackground

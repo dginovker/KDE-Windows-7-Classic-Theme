@@ -14,20 +14,22 @@ PlasmaCore.Dialog {
     required property NM.Notifications source
     required property NM.Settings settings
     required property TaskManager.TasksModel tasks
+    required property var focusControl
     required property bool critical
     property bool tailAtBottom: true
     property int tailOffset: 235
     property int availableHeight: 400
     property bool tail: true
-    property bool requestingFocus: false
+
     readonly property int tailHeight: tail ? 10 : 0
     readonly property int timeout: entry.timeout === -1 ? settings.popupTimeout + (entry.urls.length > 0 ? 5000 : 0)
         : (entry.type === NM.Notifications.JobType && !settings.permanentJobPopups ? settings.popupTimeout : entry.timeout)
-    readonly property double updatedAt: entry.updated.getTime()
+    readonly property double updatedAt: Number(new Date(entry.updated))
 
     type: critical ? PlasmaCore.Dialog.CriticalNotification : PlasmaCore.Dialog.Notification
     backgroundHints: PlasmaCore.Dialog.NoBackground
-    flags: Qt.FramelessWindowHint | (requestingFocus ? 0 : Qt.WindowDoesNotAcceptFocus)
+    flags: Qt.FramelessWindowHint | (contents.replying ? 0 : Qt.WindowDoesNotAcceptFocus)
+    onVisibleChanged: if (visible) focusControl.setPopupFocus(this, contents.replying)
     visible: false
 
     function expire() {
@@ -87,10 +89,7 @@ PlasmaCore.Dialog {
                 row: popup.row
                 source: popup.source
                 tasks: popup.tasks
-                onWantsFocus: {
-                    popup.requestingFocus = true;
-                    popup.requestActivate();
-                }
+                onReplyingChanged: popup.focusControl.setPopupFocus(popup, replying)
             }
         }
 
