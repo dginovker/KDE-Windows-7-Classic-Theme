@@ -101,7 +101,7 @@ def main(out, scale, stack):
             if scale == 1:
                 native = Image.open(ROOT / 'reference/screenshots/w7-notification.png').convert('RGB')
                 # Stock sender has a configurable desktop entry, so both buttons must be present.
-                for name, x_ref, offset in [('configure', 1087, 229), ('close', 1100, 245)]:
+                for name, x_ref, offset in [('configure', 1087, 234), ('close', 1100, 251)]:
                     target = native.crop((x_ref, 726, x_ref + 12, 741)).tobytes()
                     hits = [(dx, dy) for dx in range(offset - 5, offset + 6) for dy in range(4, 12)
                             if pic.crop((x + dx, y + dy, x + dx + 12, y + dy + 15)).tobytes() == target]
