@@ -2,12 +2,14 @@
 """Compare real modal Classic captions and exercise Explorer's pending edits (#57)."""
 import argparse
 import json
+from math import floor
+from functools import partial
 from pathlib import Path
 import time
 
 from PIL import Image, ImageChops
 
-from lab import ROOT, VM, digest, install, kwin_query, kwin_script, shot, toggle, user, vmctl, wait_for
+from lab import ROOT, VM, digest, executable, explorer_identity, install, kwin_query, kwin_script, shot, toggle as switch, user, vmctl, wait_for
 from test_explorer import EXPLORER, captions, click, exists, key
 
 PROPERTIES = 'Properties for Documents'
@@ -54,7 +56,7 @@ def crop_screen(out, tag, x, y, w, h, scale):
     time.sleep(.35)
     shot(out / f'{tag}-desktop.png')
     # Anchor width/height to the sampled physical origin to avoid a half-pixel rounding difference.
-    x, y = round(x * scale), round(y * scale)
+    x, y = (floor(v * scale + .5) for v in (x, y))
     with Image.open(out / f'{tag}-desktop.png') as image:
         crop = image.convert('RGB').crop((x, y, x + round(w * scale), y + round(h * scale)))
     crop.save(out / f'{tag}.png')
@@ -70,11 +72,14 @@ def point(x, y, scale):
     return round(x * scale), round(y * scale)
 
 
-def exercise(out, scale, root, message_oracle):
+def exercise(out, scale, root, message_oracle, toggle, packaged, captions_only):
     out.mkdir(parents=True, exist_ok=True)
     path = f'{root}/{scale:g}/{MAIN}'
     unit = f'{Path(root).name}-{round(scale * 100)}'
-    user(f'mkdir -p {path}/Documents; systemd-run --user --collect -q --unit={unit} ~/.local/bin/win7-explorer {path}')
+    explorer = executable("win7-explorer", packaged)
+    user(f'mkdir -p {path}/Documents; systemd-run --user --collect -q --unit={unit} {explorer} {path}')
+    pid = user(f'systemctl --user show {unit} -p MainPID --value')
+    explorer_identity(pid, explorer, out)
     wait_for(lambda: MAIN in captions(), MAIN)
     kwin_script(f'for (const w of workspace.windowList()) if (w.resourceClass === "{EXPLORER}" && w.caption === "{MAIN}") '
                 '{ w.frameGeometry = {x: 42, y: 34, width: 730, height: 405}; workspace.activeWindow = w; }')
@@ -92,6 +97,23 @@ def exercise(out, scale, root, message_oracle):
         state = frame(title)
         assert state[0] == 'true', (title, state)
         return state
+
+    dialogs = [(PROPERTIES, 'folder-properties'), (OPTIONS, 'folder-options')]
+    if captions_only:
+        toggle('windows')
+        failures = []
+        for title, name in dialogs:
+            native = Image.open(REF / f'w7-{name}-caption.png').convert('RGB')
+            state = open_dialog(title)
+            try:
+                close_only(caption(out, name, state, scale), native, scale)
+                print(f'{scale:g}x {title}: PASS')
+            except AssertionError as e:
+                failures.append(f'{scale:g}x {title}: {e}')
+            finally:
+                key('KEY_ESC')
+                wait_for(lambda: title not in captions(), f'{title} dismissed')
+        return failures
 
     current = digest(), user('sha256sum ~/.config/kwinrc ~/.config/kdeglobals')
     # Use the *same open modal* before and after switching, not a newly opened surrogate dialog.
@@ -114,7 +136,7 @@ def exercise(out, scale, root, message_oracle):
     toggle('windows')
     classic_kwin = user('sha256sum ~/.config/kwinrc')
 
-    for title, name in [(PROPERTIES, 'folder-properties'), (OPTIONS, 'folder-options')]:
+    for title, name in dialogs:
         native = Image.open(REF / f'w7-{name}-caption.png').convert('RGB')
         for way in ('Close', 'Escape', 'OK'):
             _, x, y, w, h, *_ = state = open_dialog(title)
@@ -129,6 +151,7 @@ def exercise(out, scale, root, message_oracle):
             else:
                 assert not exists(OPTIONSRC), 'options written before this edit'
                 key('KEY_LEFTALT', 'KEY_H')
+                key('KEY_LEFTALT', 'KEY_T')
                 assert not exists(OPTIONSRC), 'options written before acceptance'
             if way == 'Close':
                 click(point(x + w - 14, y + 12, scale))
@@ -144,7 +167,16 @@ def exercise(out, scale, root, message_oracle):
             else:
                 assert exists(OPTIONSRC) == (way == 'OK'), way
                 if way == 'OK':
-                    assert user(f'kreadconfig6 --file win7-explorer-optionsrc --group View --key ShowHidden') == 'true'
+                    def options_saved():
+                        return [user(f'kreadconfig6 --file win7-explorer-optionsrc --group View --key {option}')
+                                for option in ('ShowHidden', 'Thumbnails')]
+
+                    assert options_saved() == ['true', 'false']
+                    open_dialog(OPTIONS)
+                    key('KEY_ENTER')
+                    wait_for(lambda: OPTIONS not in captions(), 'reopened options accepted without changing settings')
+                    assert options_saved() == ['true', 'false'], 'reopening did not load saved checkboxes'
+            print(f'{scale:g}x {title}: {way} {"saved" if way == "OK" else "discarded"} pending changes')
 
     def window_button(offset):
         _, x, y, w, *_, maximized = frame(MAIN)
@@ -197,32 +229,45 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('out', type=Path)
     parser.add_argument('--message-oracle', type=Path, required=True, help='genuine 50x14 Windows 7 modal caption crop')
-    parser.add_argument('--installed', action='store_true', help='test the installed candidate without reinstalling')
+    installed = parser.add_mutually_exclusive_group()
+    installed.add_argument('--installed', action='store_true', help='use the existing development install')
+    installed.add_argument('--packaged', action='store_true', help='test the system package without reinstalling')
+    parser.add_argument('--captions-only', action='store_true', help='isolate the Explorer caption assertions for A/B')
     args = parser.parse_args()
     message = Image.open(args.message_oracle).convert('RGB')
     close_only(message, Image.open(REF / 'w7-folder-options-caption.png').convert('RGB'), 1)
     vmctl.start(VM)
-    if not args.installed:
+    if not (args.installed or args.packaged):
         install(reset=False)
-    original = user('~/.local/bin/win7-classic status')
+    toggle = partial(switch, packaged=args.packaged)
+    original = user(f'{executable("win7-classic", args.packaged)} status')
     output, = json.loads(user('kscreen-doctor -j'))['outputs']
     root = user('mktemp -d /tmp/w7captions.XXXXXXXX')
     vmctl.transfer(VM, 'put', str(ROOT / 'tests/fixture_dialog_caption.py'), f'{root}/fixture_dialog_caption.py')
     vmctl.run(VM, f'chmod 644 {root}/fixture_dialog_caption.py', 10)
-    user(f'if test -e {OPTIONSRC}; then mv {OPTIONSRC} {root}/original-options; fi')
+    backup = f'{root}/original-options'
+    user(f'if test -e {OPTIONSRC} || test -L {OPTIONSRC}; then mv -T -- {OPTIONSRC} {backup}; fi')
+    failures = []
     try:
         for scale in (1, 1.5):
             user(f'kscreen-doctor output.{output["name"]}.scale.{scale}')
             toggle('current')
             try:
-                exercise(args.out / f'{scale:g}x', scale, root, message)
+                failures.extend(exercise(args.out / f'{scale:g}x', scale, root, message, toggle,
+                                         args.packaged, args.captions_only) or [])
             finally:
                 user(f'systemctl --user stop {Path(root).name}-{round(scale * 100)} 2>/dev/null || true; rm -f {OPTIONSRC}')
     finally:
-        user(f'kscreen-doctor output.{output["name"]}.scale.{output["scale"]}; '
-             f'if test -e {root}/original-options; then mv {root}/original-options {OPTIONSRC}; fi; rm -r {root}')
-        toggle(original)
-    print('PASS: modal captions, real Explorer Close/Escape/OK, normal/nonmodal and current-mode negatives')
+        try:
+            # Keep the backup (even a dangling symlink) if restoring it fails.
+            user(f'if test -e {backup} || test -L {backup}; then mv -T -- {backup} {OPTIONSRC}; fi')
+            user(f'rm -r -- {root}')
+        finally:
+            user(f'kscreen-doctor output.{output["name"]}.scale.{output["scale"]}')
+            toggle(original)
+    assert not failures, '\n' + '\n'.join(failures)
+    if not args.captions_only:
+        print('PASS: modal captions, real Explorer Close/Escape/OK, normal/nonmodal and current-mode negatives')
 
 
 if __name__ == '__main__':
