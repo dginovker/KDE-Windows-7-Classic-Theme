@@ -69,7 +69,7 @@ def main(out, scale):
                  'application and origin in the title tooltip')
         gear = (x + 241, y + 14)
         move(*gear)
-        region = tuple(round(v * scale) for v in (x + 160, y - 45, min(x + 360, 1280 / scale), y + 46))
+        region = tuple(round(v * scale) for v in (x + 65, y - 45, min(x + 360, 1280 / scale), y + 46))
         wait_for(lambda: {'Tune', 'alerts'} <= {word for word, _ in ocr(screenshot('configure-hover'), region)},
                  'exact app-supplied Configure label in the gear tooltip')
         move(*gear, 'left')
